@@ -2,9 +2,24 @@
 
 ## 역할
 
-Orchestrator는 Slack 요청을 어떤 흐름으로 보낼지 결정한다.
+입력 가드레일은 Slack 요청 중 서버가 처리하면 안 되는 요청을 먼저 차단한다.
+Orchestrator는 입력 가드레일을 통과한 요청을 어떤 흐름으로 보낼지 결정한다.
 
 팡이는 기본적으로 AI 대화 봇이다. 다만 PopPang repo를 명확히 분석해달라는 요청만 repo analysis job으로 승격한다.
+
+## 처리 순서
+
+```text
+SlackCommand
+-> 입력 가드레일
+-> Orchestrator
+-> 정책 보정
+-> 일반 대화 / 안내 응답 / repo analysis job
+```
+
+입력 가드레일은 코드로 실행되는 deterministic 단계다. 외부 웹/URL 분석, 코드 수정, PR 생성, 배포, commit/push 같은 MVP 범위 밖 요청은 Orchestrator로 보내기 전에 차단한다.
+
+Orchestrator는 통과한 요청만 받아 `codex_chat`, `needs_repo`, `repo_analysis` 중 어느 흐름으로 보낼지 결정한다. OpenAI orchestrator가 비정상 decision을 반환해도 정책 보정 단계에서 repo allowlist, 원문 repo 명시 여부, `should_create_job` 조건을 다시 강제한다.
 
 ## 모델 정책
 
@@ -17,7 +32,9 @@ service tier: default
 output: structured JSON
 ```
 
-`OPENAI_API_KEY`가 없으면 로컬 개발과 테스트를 위해 deterministic classifier로 fallback한다.
+`OPENAI_API_KEY`가 없으면 로컬 개발과 테스트를 위해 deterministic orchestrator로 fallback한다.
+
+OpenAI orchestrator의 런타임 지시는 코드에 직접 쓰지 않고 `pangi/src/pangi/prompts/orchestrator.md`에서 읽는다. 이 파일은 요청 분류 규칙만 담고, 일반 대화나 repo 분석 답변 규칙은 각 실행 모드의 prompt에서 관리한다.
 
 ## 입력
 
@@ -106,13 +123,14 @@ MVP에서는 read-only 분석만 가능하다고 안내한다.
 
 ## hard guardrail
 
-AI orchestrator 판단 이후에도 아래 정책은 코드로 강제한다.
+아래 정책은 AI 판단에 맡기지 않고 코드로 강제한다.
 
 - Slack user/channel allowlist
 - repo allowlist
-- 외부 URL 분석 차단
-- 수정/PR/배포 요청 차단
+- 외부 URL 분석은 Orchestrator 호출 전에 차단
+- 수정/PR/배포 요청은 Orchestrator 호출 전에 차단
 - `repo_analysis`인데 repo key가 allowlist 밖이면 `needs_repo`로 downgrade
+- `repo_analysis`인데 repo key가 원문에 명시되지 않았으면 `needs_repo`로 downgrade
 - `should_create_job`은 `repo_analysis`에서만 true 허용
 
 ## 테스트 기준

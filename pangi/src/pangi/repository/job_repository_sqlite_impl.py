@@ -53,6 +53,7 @@ class SQLiteJobRepository:
         slack_thread: SlackThread,
         requester_user_id: str,
         prompt: str,
+        slack_message_ts: str | None = None,
         job_type: JobType = JobType.ANALYZE,
         repo_key: str = DEFAULT_REPO_KEY,
     ) -> AgentJob:
@@ -64,9 +65,9 @@ class SQLiteJobRepository:
                     """
                     INSERT INTO agent_jobs (
                         id, event_id, slack_thread_id, slack_team_id, slack_channel_id,
-                        slack_thread_ts, requester_user_id, job_type, status, repo_key,
+                        slack_thread_ts, slack_message_ts, requester_user_id, job_type, status, repo_key,
                         prompt, worktree_path, stdout, stderr, error_message, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)
                     """,
                     (
                         job_id,
@@ -75,6 +76,7 @@ class SQLiteJobRepository:
                         slack_thread.team_id,
                         slack_thread.channel_id,
                         slack_thread.thread_ts,
+                        slack_message_ts,
                         requester_user_id,
                         job_type.value,
                         JobStatus.QUEUED.value,
@@ -251,6 +253,7 @@ class SQLiteJobRepository:
                     slack_team_id TEXT NOT NULL,
                     slack_channel_id TEXT NOT NULL,
                     slack_thread_ts TEXT NOT NULL,
+                    slack_message_ts TEXT,
                     requester_user_id TEXT NOT NULL,
                     job_type TEXT NOT NULL,
                     status TEXT NOT NULL,
@@ -281,6 +284,7 @@ class SQLiteJobRepository:
                 );
                 """
             )
+            self._ensure_agent_jobs_message_ts(conn)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -299,6 +303,14 @@ class SQLiteJobRepository:
         if row is None:
             raise KeyError(job_id)
         return _row_to_agent_job(row)
+
+    def _ensure_agent_jobs_message_ts(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(agent_jobs)").fetchall()
+        }
+        if "slack_message_ts" not in columns:
+            conn.execute("ALTER TABLE agent_jobs ADD COLUMN slack_message_ts TEXT")
 
 
 def _new_id(prefix: str) -> str:
@@ -341,6 +353,7 @@ def _row_to_agent_job(row: sqlite3.Row) -> AgentJob:
         slack_team_id=row["slack_team_id"],
         slack_channel_id=row["slack_channel_id"],
         slack_thread_ts=row["slack_thread_ts"],
+        slack_message_ts=row["slack_message_ts"],
         requester_user_id=row["requester_user_id"],
         job_type=JobType(row["job_type"]),
         status=JobStatus(row["status"]),

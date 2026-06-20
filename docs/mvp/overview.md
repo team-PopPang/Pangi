@@ -29,6 +29,7 @@ docs/        설계와 구현 체크리스트
 ```text
 Slack
 -> FastAPI Webhook
+-> 입력 가드레일
 -> Orchestrator
 -> 일반 대화는 Codex Chat
 -> repo 분석은 Job Worker
@@ -42,6 +43,7 @@ Slack
 - Slack app mention 수신
 - Slack request signature 검증
 - user/channel/repo allowlist
+- 입력 가드레일 기반 외부 웹/쓰기 요청 차단
 - gpt-5.5 orchestrator를 통한 요청 분류
 - repo worktree 없는 Codex chat 응답
 - Slack thread 단위 job 생성

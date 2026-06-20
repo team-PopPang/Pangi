@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from pangi.domain.models import AgentJob
 from pangi.domain.policies import redact_secrets, truncate_text
@@ -11,6 +12,10 @@ from pangi.usecase.ports import CodexExecutionResult, CodexRunner, SlackNotifier
 
 SLACK_RESULT_MAX_CHARS = 3500
 SLACK_ERROR_MAX_CHARS = 1200
+IN_PROGRESS_REACTION_NAME = "eyes"
+SUCCESS_REACTION_NAME = "white_check_mark"
+FAILURE_REACTION_NAME = "x"
+logger = logging.getLogger(__name__)
 
 
 class AnalysisJobFailed(RuntimeError):
@@ -99,6 +104,7 @@ class RunAnalysisJobUseCase:
             thread_ts=job.slack_thread_ts,
             text=f"팡이가 read-only 분석을 완료했습니다. job_id: {job.id}\n\n{body}",
         )
+        await self._replace_in_progress_reaction(job, name=SUCCESS_REACTION_NAME)
 
     async def _post_failure(self, job: AgentJob, message: str) -> None:
         await self._slack_notifier.post_message(
@@ -106,6 +112,7 @@ class RunAnalysisJobUseCase:
             thread_ts=job.slack_thread_ts,
             text=f"팡이 read-only 분석이 실패했습니다. job_id: {job.id}\n\n{message}",
         )
+        await self._replace_in_progress_reaction(job, name=FAILURE_REACTION_NAME)
 
     async def _post_timeout(self, job: AgentJob, message: str) -> None:
         await self._slack_notifier.post_message(
@@ -113,6 +120,28 @@ class RunAnalysisJobUseCase:
             thread_ts=job.slack_thread_ts,
             text=f"팡이 read-only 분석 시간이 초과되었습니다. job_id: {job.id}\n\n{message}",
         )
+        await self._replace_in_progress_reaction(job, name=FAILURE_REACTION_NAME)
+
+    async def _replace_in_progress_reaction(self, job: AgentJob, *, name: str) -> None:
+        if not job.slack_message_ts:
+            return
+        try:
+            await self._slack_notifier.remove_reaction(
+                channel_id=job.slack_channel_id,
+                message_ts=job.slack_message_ts,
+                name=IN_PROGRESS_REACTION_NAME,
+            )
+        except Exception as error:
+            logger.warning("Failed to remove Slack reaction for job %s: %s", job.id, error)
+
+        try:
+            await self._slack_notifier.add_reaction(
+                channel_id=job.slack_channel_id,
+                message_ts=job.slack_message_ts,
+                name=name,
+            )
+        except Exception as error:
+            logger.warning("Failed to add Slack reaction for job %s: %s", job.id, error)
 
     def _failure_summary(self, exit_code: int | None, stdout: str, stderr: str) -> str:
         detail = stderr.strip() or stdout.strip() or "Codex output is empty"

@@ -43,6 +43,8 @@ prompt
 
 ## prompt 필수 규칙
 
+Codex chat과 read-only 분석 prompt는 `pangi/src/pangi/prompts/` 아래 Markdown 파일을 조합해 만든다.
+
 - 파일을 수정하지 말 것
 - 근거 파일 경로를 표시할 것
 - 확인한 사실과 추정을 분리할 것

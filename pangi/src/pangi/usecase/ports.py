@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from pangi.usecase.classify_request import ClassifiedRequest
+from pangi.usecase.request_decision import ClassifiedRequest
 
 
 class SlackNotifier(Protocol):
@@ -22,6 +22,10 @@ class SlackNotifier(Protocol):
 
     async def add_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
         """지정한 Slack 메시지에 reaction emoji를 추가한다."""
+        ...
+
+    async def remove_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
+        """지정한 Slack 메시지에서 reaction emoji를 제거한다."""
         ...
 
 

@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import Iterable
+
+from pangi.usecase.request_decision import (
+    NEEDS_REPO_MESSAGE,
+    UNSUPPORTED_MESSAGE,
+    WEB_ANALYSIS_BLOCKED_MESSAGE,
+    ClassifiedRequest,
+    RequestClassification,
+)
 
 
 URL_PATTERN = re.compile(r"(?i)(https?://|www\.)\S+")
@@ -65,35 +71,10 @@ UNSUPPORTED_KEYWORDS = (
     "push",
 )
 
-WEB_ANALYSIS_BLOCKED_MESSAGE = (
-    "팡이는 PopPang 내부 repo 중심으로 동작합니다. "
-    "외부 웹/인터넷 URL 분석은 서버 부하와 보안 이유로 지원하지 않습니다. "
-    "PopPang repo 분석이 필요하면 허용된 repo 이름과 함께 요청해주세요."
-)
-NEEDS_REPO_MESSAGE = "어느 repo를 볼까요? 허용된 repo 이름과 함께 다시 요청해주세요."
-UNSUPPORTED_MESSAGE = "현재 MVP에서는 코드 수정, PR 생성, 배포는 지원하지 않고 read-only 분석만 지원합니다."
 
-
-class RequestClassification(StrEnum):
-    CODEX_CHAT = "codex_chat"
-    BLOCKED_WEB_ANALYSIS = "blocked_web_analysis"
-    NEEDS_REPO = "needs_repo"
-    REPO_ANALYSIS = "repo_analysis"
-    UNSUPPORTED = "unsupported"
-
-
-@dataclass(frozen=True)
-class ClassifiedRequest:
-    kind: RequestClassification
-    should_create_job: bool
-    repo_key: str | None = None
-    reply_text: str | None = None
-    reason: str | None = None
-
-
-def classify_request(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> ClassifiedRequest:
+def guard_request_input(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> ClassifiedRequest | None:
     normalized = _normalize_text(text)
-    repo_key = _find_repo_key(normalized, allowed_repo_keys)
+    repo_key = find_repo_key(normalized, allowed_repo_keys)
 
     if _looks_like_web_analysis(normalized):
         return ClassifiedRequest(
@@ -111,6 +92,13 @@ def classify_request(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> Cla
             reply_text=UNSUPPORTED_MESSAGE,
             reason="MVP 범위 밖의 수정/PR/배포 요청입니다.",
         )
+
+    return None
+
+
+def decide_guarded_request(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> ClassifiedRequest:
+    normalized = _normalize_text(text)
+    repo_key = find_repo_key(normalized, allowed_repo_keys)
 
     if repo_key is not None and _looks_like_analysis(normalized):
         return ClassifiedRequest(
@@ -135,22 +123,42 @@ def classify_request(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> Cla
     )
 
 
-def normalize_orchestrator_decision(
+def enforce_orchestrator_decision(
     decision: ClassifiedRequest,
     *,
+    text: str,
     allowed_repo_keys: Iterable[str],
 ) -> ClassifiedRequest:
     allowed_keys = tuple(allowed_repo_keys)
+    explicit_repo_key = find_repo_key(_normalize_text(text), allowed_keys)
+
+    if decision.kind == RequestClassification.BLOCKED_WEB_ANALYSIS:
+        return ClassifiedRequest(
+            kind=RequestClassification.BLOCKED_WEB_ANALYSIS,
+            should_create_job=False,
+            reply_text=decision.reply_text or WEB_ANALYSIS_BLOCKED_MESSAGE,
+            reason=decision.reason,
+        )
+
+    if decision.kind == RequestClassification.UNSUPPORTED:
+        return ClassifiedRequest(
+            kind=RequestClassification.UNSUPPORTED,
+            should_create_job=False,
+            repo_key=explicit_repo_key,
+            reply_text=decision.reply_text or UNSUPPORTED_MESSAGE,
+            reason=decision.reason,
+        )
+
     if decision.kind != RequestClassification.REPO_ANALYSIS:
         return ClassifiedRequest(
             kind=decision.kind,
             should_create_job=False,
-            repo_key=decision.repo_key if decision.repo_key in allowed_keys else None,
-            reply_text=decision.reply_text,
+            repo_key=explicit_repo_key if decision.repo_key == explicit_repo_key else None,
+            reply_text=_reply_text_for_non_job_decision(decision),
             reason=decision.reason,
         )
 
-    if decision.repo_key in allowed_keys:
+    if decision.repo_key in allowed_keys and decision.repo_key == explicit_repo_key:
         return ClassifiedRequest(
             kind=RequestClassification.REPO_ANALYSIS,
             should_create_job=True,
@@ -163,8 +171,24 @@ def normalize_orchestrator_decision(
         kind=RequestClassification.NEEDS_REPO,
         should_create_job=False,
         reply_text=NEEDS_REPO_MESSAGE,
-        reason="오케스트레이터가 허용되지 않았거나 알 수 없는 repo를 선택했습니다.",
+        reason="오케스트레이터가 원문에 명시되지 않았거나 허용되지 않은 repo를 선택했습니다.",
     )
+
+
+def find_repo_key(text: str, allowed_repo_keys: Iterable[str]) -> str | None:
+    lowered = text.lower()
+    for repo_key in sorted((key for key in allowed_repo_keys if key), key=len, reverse=True):
+        if repo_key.lower() in lowered:
+            return repo_key
+    return None
+
+
+def _reply_text_for_non_job_decision(decision: ClassifiedRequest) -> str | None:
+    if decision.reply_text:
+        return decision.reply_text
+    if decision.kind == RequestClassification.NEEDS_REPO:
+        return NEEDS_REPO_MESSAGE
+    return None
 
 
 def _normalize_text(text: str) -> str:
@@ -196,11 +220,3 @@ def _looks_like_repo_request(text: str) -> bool:
     has_repo_target = any(keyword in lowered for keyword in REPO_TARGET_KEYWORDS)
     has_analysis = any(keyword in lowered for keyword in ANALYSIS_KEYWORDS)
     return has_repo_target and has_analysis
-
-
-def _find_repo_key(text: str, allowed_repo_keys: Iterable[str]) -> str | None:
-    lowered = text.lower()
-    for repo_key in sorted((key for key in allowed_repo_keys if key), key=len, reverse=True):
-        if repo_key.lower() in lowered:
-            return repo_key
-    return None

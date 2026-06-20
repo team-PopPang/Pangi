@@ -25,6 +25,7 @@ class FakeSlackClient:
     def __init__(self):
         self.messages = []
         self.reactions = []
+        self.removed_reactions = []
 
     async def post_message(self, *, channel_id: str, text: str, thread_ts: str | None = None) -> None:
         self.messages.append(
@@ -37,6 +38,15 @@ class FakeSlackClient:
 
     async def add_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
         self.reactions.append(
+            {
+                "channel_id": channel_id,
+                "message_ts": message_ts,
+                "name": name,
+            }
+        )
+
+    async def remove_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
+        self.removed_reactions.append(
             {
                 "channel_id": channel_id,
                 "message_ts": message_ts,
@@ -233,6 +243,9 @@ def test_slack_events_normalizes_app_mention(monkeypatch, tmp_path):
             "name": "eyes",
         }
     ]
+    job = get_job_repository().get_job(body["job_id"])
+    assert job is not None
+    assert job.slack_message_ts == "1710000000.000002"
 
 
 def test_slack_events_uses_event_ts_when_thread_ts_is_missing(monkeypatch, tmp_path):
@@ -404,6 +417,9 @@ def test_slack_commands_normalizes_payload(monkeypatch, tmp_path):
     }
     assert response_body["response_type"] == "ephemeral"
     assert response_body["text"].startswith("팡이가 요청을 접수했습니다. job_id: job_")
+    job = get_job_repository().get_job(response_body["job_id"])
+    assert job is not None
+    assert job.slack_message_ts is None
 
 
 def test_slack_commands_blocks_web_analysis_without_job(monkeypatch, tmp_path):

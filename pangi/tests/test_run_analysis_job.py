@@ -34,21 +34,27 @@ class FakeCodexRunner:
 class FakeSlackNotifier:
     def __init__(self) -> None:
         self.messages = []
+        self.reactions = []
+        self.removed_reactions = []
 
     async def post_message(self, *, channel_id: str, text: str, thread_ts: str | None = None) -> None:
         self.messages.append((channel_id, thread_ts, text))
 
     async def add_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
-        raise AssertionError("run analysis should not add reactions")
+        self.reactions.append((channel_id, message_ts, name))
+
+    async def remove_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
+        self.removed_reactions.append((channel_id, message_ts, name))
 
 
-def make_job(repository: SQLiteJobRepository):
+def make_job(repository: SQLiteJobRepository, *, slack_message_ts: str | None = None):
     thread = repository.get_or_create_thread(team_id="T123", channel_id="C123", thread_ts="171.1")
     return repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
         requester_user_id="U123",
         prompt="구조 분석해줘",
+        slack_message_ts=slack_message_ts,
         job_type=JobType.ANALYZE,
         repo_key="PopPang-iOS",
     )
@@ -57,7 +63,7 @@ def make_job(repository: SQLiteJobRepository):
 def test_run_analysis_job_records_result_and_posts_success(tmp_path):
     async def scenario():
         repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
-        job = make_job(repository)
+        job = make_job(repository, slack_message_ts="171.2")
         worktree_path = tmp_path / "worktree"
         worktree_path.mkdir()
         runner = FakeCodexRunner(
@@ -83,6 +89,10 @@ def test_run_analysis_job_records_result_and_posts_success(tmp_path):
         assert updated.worktree_path == str(worktree_path)
         assert updated.stdout == "분석 완료 [REDACTED]"
         assert "[REDACTED]" in slack.messages[-1][2]
+        assert slack.removed_reactions == [("C123", "171.2", "eyes")]
+        assert slack.reactions == [("C123", "171.2", "white_check_mark")]
+        assert "팡이 공통 스타일" in runner.prompts[0]
+        assert "Read-only 코드 분석 모드" in runner.prompts[0]
         assert "구조 분석해줘" in runner.prompts[0]
         run = repository.list_codex_runs()[0]
         assert run.mode == "read-only"
@@ -94,7 +104,7 @@ def test_run_analysis_job_records_result_and_posts_success(tmp_path):
 def test_run_analysis_job_posts_failure_and_raises_on_nonzero_exit(tmp_path):
     async def scenario():
         repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
-        job = make_job(repository)
+        job = make_job(repository, slack_message_ts="171.2")
         worktree_path = tmp_path / "worktree"
         worktree_path.mkdir()
         slack = FakeSlackNotifier()
@@ -117,6 +127,8 @@ def test_run_analysis_job_posts_failure_and_raises_on_nonzero_exit(tmp_path):
             await use_case.execute(job)
 
         assert "실패했습니다" in slack.messages[-1][2]
+        assert slack.removed_reactions == [("C123", "171.2", "eyes")]
+        assert slack.reactions == [("C123", "171.2", "x")]
         assert repository.get_job(job.id).error_message.startswith("Codex exited with code 2")
 
     asyncio.run(scenario())
@@ -125,7 +137,7 @@ def test_run_analysis_job_posts_failure_and_raises_on_nonzero_exit(tmp_path):
 def test_run_analysis_job_posts_timeout_and_raises(tmp_path):
     async def scenario():
         repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
-        job = make_job(repository)
+        job = make_job(repository, slack_message_ts="171.2")
         worktree_path = tmp_path / "worktree"
         worktree_path.mkdir()
         slack = FakeSlackNotifier()
@@ -149,6 +161,39 @@ def test_run_analysis_job_posts_timeout_and_raises(tmp_path):
             await use_case.execute(job)
 
         assert "시간이 초과" in slack.messages[-1][2]
+        assert slack.removed_reactions == [("C123", "171.2", "eyes")]
+        assert slack.reactions == [("C123", "171.2", "x")]
         assert repository.list_codex_runs()[0].timed_out is True
+
+    asyncio.run(scenario())
+
+
+def test_run_analysis_job_skips_reaction_without_original_message_ts(tmp_path):
+    async def scenario():
+        repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
+        job = make_job(repository)
+        worktree_path = tmp_path / "worktree"
+        worktree_path.mkdir()
+        slack = FakeSlackNotifier()
+        use_case = RunAnalysisJobUseCase(
+            repository=repository,
+            worktree_manager=FakeWorktreeManager(worktree_path),
+            codex_runner=FakeCodexRunner(
+                CodexExecutionResult(
+                    command=("codex", "exec", "prompt"),
+                    stdout="분석 완료",
+                    stderr="",
+                    exit_code=0,
+                )
+            ),
+            slack_notifier=slack,
+            timeout_seconds=1,
+        )
+
+        await use_case.execute(job)
+
+        assert slack.messages
+        assert slack.removed_reactions == []
+        assert slack.reactions == []
 
     asyncio.run(scenario())

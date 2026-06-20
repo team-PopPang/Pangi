@@ -19,6 +19,9 @@ dev = [
   "pytest",
 ]
 
+[tool.setuptools.package-data]
+"pangi.prompts" = ["*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

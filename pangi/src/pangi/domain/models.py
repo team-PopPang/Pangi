@@ -47,6 +47,7 @@ class AgentJob:
     slack_team_id: str
     slack_channel_id: str
     slack_thread_ts: str
+    slack_message_ts: str | None
     requester_user_id: str
     job_type: JobType
     status: JobStatus

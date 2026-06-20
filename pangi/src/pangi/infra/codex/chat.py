@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pangi.config import get_settings
+from pangi.prompts.loader import load_prompt
 from pangi.usecase.ports import ChatResponder
 
 
@@ -70,13 +71,16 @@ class CodexChatResponder:
 
 
 def _build_chat_prompt(text: str) -> str:
-    return (
-        "당신은 PopPang 팀 Slack AI 동료 팡이입니다. "
-        "repo를 직접 읽지 않는 일반 대화 모드입니다. "
-        "외부 웹 검색을 하지 말고, 사용자가 준 내용과 일반 지식만으로 답하세요. "
-        "답변은 한국어로 짧고 자연스럽게 작성하세요.\n\n"
-        f"사용자 메시지:\n{text}"
-    )
+    agent_prompt = load_prompt("pangi_agent.md")
+    chat_prompt = load_prompt("chat.md")
+    return f"""\
+{agent_prompt}
+
+{chat_prompt}
+
+사용자 메시지:
+{text}
+"""
 
 
 _chat_responder: ChatResponder | None = None

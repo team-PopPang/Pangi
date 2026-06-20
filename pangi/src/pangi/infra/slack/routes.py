@@ -14,7 +14,7 @@ from pangi.infra.slack.client import get_slack_client
 from pangi.infra.slack.command import command_from_app_mention, command_from_slash_payload
 from pangi.infra.slack.signature import verify_slack_signature
 from pangi.repository import DuplicateEventError, get_job_repository
-from pangi.usecase.classify_request import NEEDS_REPO_MESSAGE, RequestClassification
+from pangi.usecase.request_decision import NEEDS_REPO_MESSAGE, RequestClassification
 from pangi.usecase.submit_slack_request import SubmitSlackRequestInput, SubmitSlackRequestUseCase
 
 

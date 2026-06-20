@@ -1,3 +1,5 @@
+import sqlite3
+
 from pangi.domain import JobStatus, JobType
 from pangi.repository import SQLiteJobRepository
 
@@ -25,10 +27,12 @@ def test_repository_creates_job_and_finds_by_event_id(tmp_path):
         slack_thread=thread,
         requester_user_id="U123",
         prompt="분석해줘",
+        slack_message_ts="171.2",
     )
     found = repository.find_job_by_event_id("Ev123")
 
     assert found == job
+    assert job.slack_message_ts == "171.2"
     assert job.job_type == JobType.ANALYZE
     assert job.status == JobStatus.QUEUED
     assert job.prompt == "분석해줘"
@@ -151,3 +155,59 @@ def test_repository_persists_jobs_across_instances(tmp_path):
     found = second_repository.get_job(job.id)
 
     assert found == job
+
+
+def test_repository_adds_slack_message_ts_column_to_existing_db(tmp_path):
+    db_path = tmp_path / "pangi.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE slack_threads (
+                id TEXT PRIMARY KEY,
+                team_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                thread_ts TEXT NOT NULL,
+                last_job_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(team_id, channel_id, thread_ts)
+            );
+
+            CREATE TABLE agent_jobs (
+                id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL UNIQUE,
+                slack_thread_id TEXT NOT NULL,
+                slack_team_id TEXT NOT NULL,
+                slack_channel_id TEXT NOT NULL,
+                slack_thread_ts TEXT NOT NULL,
+                requester_user_id TEXT NOT NULL,
+                job_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                repo_key TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                worktree_path TEXT,
+                stdout TEXT,
+                stderr TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(slack_thread_id) REFERENCES slack_threads(id)
+            );
+            """
+        )
+
+    repository = SQLiteJobRepository(db_path)
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_jobs)").fetchall()}
+
+    thread = repository.get_or_create_thread(team_id="T123", channel_id="C123", thread_ts="171.1")
+    job = repository.create_job(
+        event_id="Ev123",
+        slack_thread=thread,
+        requester_user_id="U123",
+        prompt="분석해줘",
+        slack_message_ts="171.2",
+    )
+
+    assert "slack_message_ts" in columns
+    assert job.slack_message_ts == "171.2"

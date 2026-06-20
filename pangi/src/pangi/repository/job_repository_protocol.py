@@ -28,6 +28,7 @@ class JobRepository(Protocol):
         slack_thread: SlackThread,
         requester_user_id: str,
         prompt: str,
+        slack_message_ts: str | None = None,
         job_type: JobType = JobType.ANALYZE,
         repo_key: str = DEFAULT_REPO_KEY,
     ) -> AgentJob:

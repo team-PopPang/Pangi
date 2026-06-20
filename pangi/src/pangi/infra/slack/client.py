@@ -23,6 +23,10 @@ class SlackClient(Protocol):
         """Slack `reactions.add`에 해당하는 reaction 추가 작업을 수행한다."""
         ...
 
+    async def remove_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
+        """Slack `reactions.remove`에 해당하는 reaction 제거 작업을 수행한다."""
+        ...
+
 
 class SlackApiError(RuntimeError):
     pass
@@ -53,6 +57,19 @@ class SlackWebClient:
             "/reactions.add",
             payload,
             {"already_reacted"},
+        )
+
+    async def remove_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
+        payload: dict[str, object] = {
+            "channel": channel_id,
+            "timestamp": message_ts,
+            "name": name,
+        }
+        await asyncio.to_thread(
+            self._post_json,
+            "/reactions.remove",
+            payload,
+            {"no_reaction", "not_reacted"},
         )
 
     def _post_json(

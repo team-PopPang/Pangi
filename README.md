@@ -17,16 +17,18 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 flowchart TD
     A["Slack에서 @팡이 호출"] --> B["FastAPI Slack webhook 수신"]
     B --> C["Slack signature와 allowlist 검증"]
-    C --> D["gpt-5.5 Orchestrator"]
-    D -->|일반 대화| Y["Codex chat 응답"]
-    D -->|허용 repo 분석| E["SQLite에 AgentJob 저장"]
-    D -->|외부 웹/인터넷 분석| X["안내 응답 후 종료"]
-    E --> F["Background worker 실행"]
-    F --> G["허용된 source repo 확인"]
-    G --> H["Read-only git worktree 생성"]
-    H --> I["Codex exec --sandbox read-only 실행"]
-    I --> J["stdout, stderr, exit code, timeout 저장"]
-    J --> K["Slack thread에 결과 응답"]
+    C --> D["입력 가드레일"]
+    D -->|외부 웹/URL, 수정/PR/배포| X["안내 응답 후 종료"]
+    D -->|통과| E["gpt-5.5 Orchestrator"]
+    E -->|일반 대화| Y["Codex chat 응답"]
+    E -->|repo 불명확| Z["repo 확인 질문 후 종료"]
+    E -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
+    F --> G["Background worker 실행"]
+    G --> H["허용된 source repo 확인"]
+    H --> I["Read-only git worktree 생성"]
+    I --> J["Codex exec --sandbox read-only 실행"]
+    J --> K["stdout, stderr, exit code, timeout 저장"]
+    K --> L["Slack thread에 결과 응답"]
 ```
 
 현재 단계에서 팡이는 코드를 수정하지 않습니다. 일반 대화는 repo job 없이 답하고, repo 분석 요청은 코드를 읽고 확인한 사실과 근거를 정리하는 역할에 집중합니다.
@@ -40,6 +42,7 @@ flowchart TD
 - Slack user/channel allowlist
 - repo allowlist와 worktree root 설정
 - Slack app mention 정규화와 retry 중복 방지
+- 입력 가드레일 기반 외부 웹/쓰기 요청 조기 차단
 - gpt-5.5 orchestrator adapter
 - Codex chat 응답 경로
 - 외부 웹/인터넷 분석 요청 차단
@@ -52,7 +55,7 @@ flowchart TD
 - `codex exec --sandbox read-only` 실행
 - Codex stdout/stderr/exit code/timeout 저장
 - Slack thread에 성공/실패/timeout 결과 응답
-- Slack 원본 메시지에 `eyes` reaction 추가
+- Slack 원본 메시지에 `eyes` reaction 추가, 일반 대화와 read-only 분석 응답 성공 시 `white_check_mark`로 전환
 - Slack/외부 출력 전 secret redaction과 길이 제한
 - 관리자 DB 확인 페이지 `/pangi-admin/db`
 
@@ -126,7 +129,7 @@ PANGI_ENABLE_ADMIN_PAGES=0
 PANGI_ADMIN_PASSWORD=
 ```
 
-`OPENAI_API_KEY`가 있으면 gpt-5.5 orchestrator를 사용합니다. 없으면 로컬 개발과 테스트를 위해 deterministic classifier로 fallback합니다.
+`OPENAI_API_KEY`가 있으면 입력 가드레일을 통과한 요청을 gpt-5.5 orchestrator로 분류합니다. 없으면 로컬 개발과 테스트를 위해 deterministic orchestrator로 fallback합니다.
 
 임시 개발 환경에서 모든 Slack user/channel을 허용하려면 `*`를 사용할 수 있습니다.
 

@@ -26,6 +26,10 @@ updated_at
 id
 event_id
 slack_thread_id
+slack_team_id
+slack_channel_id
+slack_thread_ts
+slack_message_ts
 requester_user_id
 job_type
 status
@@ -58,6 +62,8 @@ finished_at
 ## 중복 방지
 
 Slack `event_id`는 unique하게 저장한다. Slack retry가 와도 같은 event로 job이 여러 개 만들어지지 않아야 한다.
+
+`slack_message_ts`는 app mention 원본 메시지의 reaction을 완료 상태로 바꾸기 위한 값이다. slash command처럼 원본 메시지 reaction을 관리하지 않는 요청에서는 비어 있을 수 있다.
 
 ## 로그 저장 원칙
 

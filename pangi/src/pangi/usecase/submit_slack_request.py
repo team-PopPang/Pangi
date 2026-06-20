@@ -8,11 +8,13 @@ from dataclasses import dataclass
 from pangi.domain.models import JobStatus
 from pangi.domain.policies import redact_secrets, truncate_text
 from pangi.repository import DuplicateEventError, JobRepository
-from pangi.usecase.classify_request import NEEDS_REPO_MESSAGE, RequestClassification
+from pangi.usecase.request_decision import NEEDS_REPO_MESSAGE, RequestClassification
 from pangi.usecase.ports import ChatResponder, JobQueue, RequestOrchestrator, SlackNotifier
 
 
 IN_PROGRESS_REACTION_NAME = "eyes"
+SUCCESS_REACTION_NAME = "white_check_mark"
+FAILURE_REACTION_NAME = "x"
 CHAT_REPLY_MAX_CHARS = 3500
 logger = logging.getLogger(__name__)
 BackgroundRunner = Callable[[Awaitable[None]], None]
@@ -103,6 +105,7 @@ class SubmitSlackRequestUseCase:
                 slack_thread=thread,
                 requester_user_id=request.user_id,
                 prompt=request.text,
+                slack_message_ts=request.message_ts or None,
                 repo_key=decision.repo_key,
             )
         except DuplicateEventError:
@@ -136,6 +139,27 @@ class SubmitSlackRequestUseCase:
         except Exception as error:
             logger.warning("Failed to add Slack reaction: %s", error)
 
+    async def _replace_in_progress_reaction(self, request: SubmitSlackRequestInput, *, name: str) -> None:
+        if not request.message_ts:
+            return
+        try:
+            await self._slack_notifier.remove_reaction(
+                channel_id=request.channel_id,
+                message_ts=request.message_ts,
+                name=IN_PROGRESS_REACTION_NAME,
+            )
+        except Exception as error:
+            logger.warning("Failed to remove Slack reaction: %s", error)
+
+        try:
+            await self._slack_notifier.add_reaction(
+                channel_id=request.channel_id,
+                message_ts=request.message_ts,
+                name=name,
+            )
+        except Exception as error:
+            logger.warning("Failed to add Slack reaction: %s", error)
+
     async def _post_acceptance_message(self, request: SubmitSlackRequestInput, job_id: str) -> None:
         try:
             await self._slack_notifier.post_message(
@@ -163,6 +187,7 @@ class SubmitSlackRequestUseCase:
             logger.warning("Failed to post Slack policy message: %s", error)
 
     async def _post_chat_response(self, request: SubmitSlackRequestInput) -> None:
+        succeeded = True
         try:
             response_text = await self._chat_responder.respond(
                 text=request.text,
@@ -172,6 +197,7 @@ class SubmitSlackRequestUseCase:
             )
         except Exception as error:
             logger.warning("Failed to generate chat response: %s", error)
+            succeeded = False
             response_text = "팡이 대화 응답 생성에 실패했습니다."
 
         safe_text = truncate_text(
@@ -184,5 +210,10 @@ class SubmitSlackRequestUseCase:
                 thread_ts=request.thread_ts,
                 text=safe_text,
             )
+            await self._replace_in_progress_reaction(
+                request,
+                name=SUCCESS_REACTION_NAME if succeeded else FAILURE_REACTION_NAME,
+            )
         except Exception as error:
             logger.warning("Failed to post Slack chat response: %s", error)
+            await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)

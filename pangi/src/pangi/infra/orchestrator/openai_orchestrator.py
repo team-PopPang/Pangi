@@ -8,16 +8,21 @@ from urllib import request
 from urllib.error import HTTPError, URLError
 
 from pangi.config import get_settings
-from pangi.usecase.classify_request import (
+from pangi.usecase.input_guardrail import (
+    decide_guarded_request,
+    enforce_orchestrator_decision,
+    guard_request_input,
+)
+from pangi.usecase.request_decision import (
     ClassifiedRequest,
     RequestClassification,
-    classify_request,
-    normalize_orchestrator_decision,
 )
+from pangi.prompts.loader import load_prompt
 from pangi.usecase.ports import RequestOrchestrator
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+ORCHESTRATOR_PROMPT_NAME = "orchestrator.md"
 ORCHESTRATOR_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -37,7 +42,24 @@ ORCHESTRATOR_SCHEMA: dict[str, Any] = {
 
 class DeterministicRequestOrchestrator:
     async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
-        return classify_request(text, allowed_repo_keys=allowed_repo_keys)
+        return decide_guarded_request(text, allowed_repo_keys=allowed_repo_keys)
+
+
+@dataclass(frozen=True)
+class GuardedRequestOrchestrator:
+    orchestrator: RequestOrchestrator
+
+    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
+        guardrail_decision = guard_request_input(text, allowed_repo_keys=allowed_repo_keys)
+        if guardrail_decision is not None:
+            return guardrail_decision
+
+        decision = await self.orchestrator.decide(text=text, allowed_repo_keys=allowed_repo_keys)
+        return enforce_orchestrator_decision(
+            decision,
+            text=text,
+            allowed_repo_keys=allowed_repo_keys,
+        )
 
 
 @dataclass(frozen=True)
@@ -49,19 +71,12 @@ class OpenAIRequestOrchestrator:
     api_url: str = OPENAI_RESPONSES_URL
 
     async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
-        fallback = classify_request(text, allowed_repo_keys=allowed_repo_keys)
-        if fallback.kind in {
-            RequestClassification.BLOCKED_WEB_ANALYSIS,
-            RequestClassification.UNSUPPORTED,
-        }:
-            return fallback
-
         raw_decision = await asyncio.to_thread(
             self._request_decision,
             text,
             allowed_repo_keys,
         )
-        return normalize_orchestrator_decision(raw_decision, allowed_repo_keys=allowed_repo_keys)
+        return raw_decision
 
     def _request_decision(self, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
         body = json.dumps(self._payload(text, allowed_repo_keys)).encode("utf-8")
@@ -112,22 +127,17 @@ class OpenAIRequestOrchestrator:
                     "schema": ORCHESTRATOR_SCHEMA,
                 },
             },
-            "instructions": (
-                "You are Pangi's request orchestrator for the PopPang Slack bot. "
-                "Return only the structured JSON decision. "
-                "Classify ordinary conversation, greetings, text cleanup, and general analysis as codex_chat. "
-                "Classify external web, internet search, URL, news, article, blog, or arbitrary link analysis as blocked_web_analysis. "
-                "Classify repo/code analysis with an explicit allowed repo key as repo_analysis. "
-                "Classify repo/code analysis without a repo key as needs_repo. "
-                "Classify code edits, PR creation, deploy, commit, push, and write operations as unsupported. "
-                "Never create a repo job unless the repo_key is one of the allowed repo keys."
-            ),
+            "instructions": _load_orchestrator_instructions(),
             "input": (
                 f"Allowed repo keys: {repo_list}\n"
                 f"Slack message:\n{text}"
             ),
             "max_output_tokens": 500,
         }
+
+
+def _load_orchestrator_instructions() -> str:
+    return load_prompt(ORCHESTRATOR_PROMPT_NAME)
 
 
 def _extract_response_text(payload: dict[str, Any]) -> str:
@@ -154,14 +164,16 @@ def get_request_orchestrator() -> RequestOrchestrator:
 
     settings = get_settings()
     if settings.openai_api_key:
-        _request_orchestrator = OpenAIRequestOrchestrator(
-            api_key=settings.openai_api_key,
-            model=settings.orchestrator_model,
-            reasoning_effort=settings.orchestrator_reasoning_effort,
-            service_tier=settings.orchestrator_service_tier,
+        _request_orchestrator = GuardedRequestOrchestrator(
+            OpenAIRequestOrchestrator(
+                api_key=settings.openai_api_key,
+                model=settings.orchestrator_model,
+                reasoning_effort=settings.orchestrator_reasoning_effort,
+                service_tier=settings.orchestrator_service_tier,
+            )
         )
     else:
-        _request_orchestrator = DeterministicRequestOrchestrator()
+        _request_orchestrator = GuardedRequestOrchestrator(DeterministicRequestOrchestrator())
     return _request_orchestrator
 
 

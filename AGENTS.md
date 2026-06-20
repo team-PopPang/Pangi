@@ -59,6 +59,7 @@ slack_thread_id TEXT NOT NULL
 slack_team_id TEXT NOT NULL
 slack_channel_id TEXT NOT NULL
 slack_thread_ts TEXT NOT NULL
+slack_message_ts TEXT
 requester_user_id TEXT NOT NULL
 job_type TEXT NOT NULL
 status TEXT NOT NULL
@@ -72,6 +73,8 @@ created_at TEXT NOT NULL
 updated_at TEXT NOT NULL
 FOREIGN KEY(slack_thread_id) REFERENCES slack_threads(id)
 ```
+
+`slack_message_ts`는 Slack app mention 원본 메시지의 `ts`다. 원본 메시지에 단 `eyes` reaction을 완료 reaction으로 교체할 때 사용하며, slash command나 legacy job에서는 비어 있을 수 있다.
 
 `status`는 현재 `queued`, `running`, `succeeded`, `failed`, `timed_out`, `cancelled`, `waiting_approval`, `rejected`를 사용한다.
 `job_type`은 현재 `analyze`, `edit_requested`, `pr_summary`, `troubleshooting`, `xcodebuild_failure`를 사용한다.

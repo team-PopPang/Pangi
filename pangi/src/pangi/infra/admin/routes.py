@@ -298,6 +298,7 @@ def _jobs_table(jobs: list[AgentJob]) -> str:
         f"<td>{_cell(job.requester_user_id)}</td>"
         f"<td>{_cell(job.slack_channel_id)}</td>"
         f"<td>{_cell(job.slack_thread_ts)}</td>"
+        f"<td>{_cell(job.slack_message_ts)}</td>"
         f"<td class=\"text\">{_cell(job.prompt)}</td>"
         f"<td class=\"text\">{_cell(job.error_message)}</td>"
         f"<td>{_cell(job.worktree_path)}</td>"
@@ -308,7 +309,7 @@ def _jobs_table(jobs: list[AgentJob]) -> str:
     return f"""<div class="table-wrap"><table>
 <thead><tr>
 <th>id</th><th>status</th><th>type</th><th>repo</th><th>user</th><th>channel</th>
-<th>thread_ts</th><th>prompt</th><th>error</th><th>worktree</th><th>updated</th>
+<th>thread_ts</th><th>message_ts</th><th>prompt</th><th>error</th><th>worktree</th><th>updated</th>
 </tr></thead>
 <tbody>{rows}</tbody>
 </table></div>"""

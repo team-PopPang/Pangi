@@ -152,6 +152,8 @@ def test_codex_chat_responder_uses_scratch_workspace_and_skip_git_check(tmp_path
             "--sandbox",
             "read-only",
         ]
+        assert "팡이 공통 스타일" in args[-1]
+        assert "일반 대화 모드" in args[-1]
         assert "사용자 메시지:\n안녕" in args[-1]
 
     asyncio.run(scenario())
