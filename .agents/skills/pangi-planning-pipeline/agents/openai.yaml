@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pangi Planning Pipeline"
+  short_description: "팡이 저장소 전용 구현 전 리서치·계획·리뷰 파이프라인"
+  default_prompt: "Use $pangi-planning-pipeline to research the current Pangi task, propose the safest next steps, and review risks before editing files."

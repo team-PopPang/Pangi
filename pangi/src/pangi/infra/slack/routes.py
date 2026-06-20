@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import json
+from urllib.parse import parse_qs
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from pangi.config import AccessDeniedError, get_settings
+from pangi.infra.queue import get_job_queue
+from pangi.infra.slack.client import get_slack_client
+from pangi.infra.slack.command import command_from_app_mention, command_from_slash_payload
+from pangi.infra.slack.signature import verify_slack_signature
+from pangi.repository import DuplicateEventError, get_job_repository
+from pangi.usecase.submit_slack_request import SubmitSlackRequestInput, SubmitSlackRequestUseCase
+
+
+router = APIRouter(prefix="/slack", tags=["slack"])
+_processed_event_ids: set[str] = set()
+
+
+def reset_processed_event_ids() -> None:
+    _processed_event_ids.clear()
+
+
+async def _verified_body(request: Request) -> bytes:
+    body = await request.body()
+    settings = get_settings()
+    is_valid = verify_slack_signature(
+        signing_secret=settings.slack_signing_secret,
+        timestamp=request.headers.get("X-Slack-Request-Timestamp"),
+        signature=request.headers.get("X-Slack-Signature"),
+        body=body,
+    )
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+    return body
+
+
+def _parse_urlencoded_body(body: bytes) -> dict[str, str]:
+    parsed = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+    return {key: values[0] if values else "" for key, values in parsed.items()}
+
+
+def _validate_access(*, user_id: str, channel_id: str) -> None:
+    try:
+        get_settings().validate_slack_access(user_id=user_id, channel_id=channel_id)
+    except AccessDeniedError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+
+
+@router.post("/events")
+async def slack_events(request: Request) -> JSONResponse:
+    body = await _verified_body(request)
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from None
+
+    if payload.get("type") == "url_verification":
+        return JSONResponse({"challenge": payload.get("challenge", "")})
+
+    if payload.get("type") != "event_callback":
+        return JSONResponse({"ok": True})
+
+    event_id = payload.get("event_id") or ""
+    repository = get_job_repository()
+    existing_job = repository.find_job_by_event_id(event_id) if event_id else None
+    if request.headers.get("X-Slack-Retry-Num") and existing_job is not None:
+        return JSONResponse({"ok": True, "duplicate": True, "job_id": existing_job.id})
+
+    command = command_from_app_mention(payload)
+    if command is None:
+        return JSONResponse({"ok": True})
+
+    _validate_access(user_id=command.user_id, channel_id=command.channel_id)
+    event = payload.get("event") or {}
+    use_case = SubmitSlackRequestUseCase(
+        repository=repository,
+        job_queue=get_job_queue(),
+        slack_notifier=get_slack_client(),
+    )
+    result = await use_case.execute(
+        SubmitSlackRequestInput(
+            team_id=command.team_id,
+            channel_id=command.channel_id,
+            user_id=command.user_id,
+            text=command.text,
+            thread_ts=command.thread_ts,
+            event_id=command.event_id,
+            message_ts=event.get("ts") or command.thread_ts,
+        )
+    )
+    if result.duplicate:
+        return JSONResponse({"ok": True, "duplicate": True, "job_id": result.job_id})
+
+    _processed_event_ids.add(command.event_id)
+    return JSONResponse(
+        {
+            "ok": True,
+            "command": command.to_dict(),
+            "job_id": result.job_id,
+            "job_status": result.job_status.value,
+        }
+    )
+
+
+@router.post("/commands")
+async def slack_commands(request: Request) -> JSONResponse:
+    body = await _verified_body(request)
+    form = _parse_urlencoded_body(body)
+
+    if form.get("ssl_check") == "1":
+        return JSONResponse({"ok": True})
+
+    command = command_from_slash_payload(form)
+    if command is None:
+        raise HTTPException(status_code=400, detail="Invalid Slack command payload")
+
+    _validate_access(user_id=command.user_id, channel_id=command.channel_id)
+    repository = get_job_repository()
+    thread_ts = command.thread_ts or command.event_id or "slash_command"
+    thread = repository.get_or_create_thread(
+        team_id=command.team_id,
+        channel_id=command.channel_id,
+        thread_ts=thread_ts,
+    )
+    try:
+        job = repository.create_job(
+            event_id=command.event_id or f"slash:{command.channel_id}:{command.user_id}:{thread_ts}",
+            slack_thread=thread,
+            requester_user_id=command.user_id,
+            prompt=command.text,
+        )
+    except DuplicateEventError:
+        job = repository.find_job_by_event_id(command.event_id)
+        return JSONResponse({"ok": True, "duplicate": True, "job_id": job.id if job else ""})
+
+    await get_job_queue().enqueue(job.id)
+    return JSONResponse(
+        {
+            "ok": True,
+            "response_type": "ephemeral",
+            "text": f"팡이가 요청을 접수했습니다. job_id: {job.id}",
+            "command": command.to_dict(),
+            "job_id": job.id,
+            "job_status": job.status.value,
+        }
+    )
+
+
+@router.post("/interactions")
+async def slack_interactions(request: Request) -> JSONResponse:
+    await _verified_body(request)
+    return JSONResponse({"ok": False, "detail": "Slack interactions are not implemented yet"}, status_code=501)
