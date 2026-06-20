@@ -9,6 +9,27 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 팡이가 먼저 읽고, 팀이 더 빠르게 판단합니다.
 ```
 
+## 지금 팡이가 할 수 있는 것
+
+- Slack에서 `@팡이` mention과 slash command 요청을 받을 수 있습니다.
+- 허용된 user/channel/repo allowlist를 통과한 요청만 처리합니다.
+- 일반 대화, 문장 정리, repo를 직접 읽지 않는 간단한 판단은 Codex chat으로 답합니다.
+- 허용된 PopPang repo 이름이 명시된 분석 요청은 SQLite job으로 저장하고, 격리된 read-only worktree에서 `codex exec --sandbox read-only`로 코드를 읽은 뒤 Slack thread에 결과를 남깁니다.
+- 외부 웹/URL 분석, 코드 수정, PR 생성, 배포, commit/push 요청은 입력 가드레일에서 차단하고 안내 응답만 보냅니다.
+- 요청을 받으면 원본 Slack 메시지에 `eyes` reaction을 달고, 일반 대화나 read-only 분석 응답에 성공하면 `white_check_mark`로 전환합니다. 실패나 timeout은 `x`로 전환합니다.
+- 관리자 DB 확인 페이지에서 Slack thread, job, Codex run 기록을 확인할 수 있습니다.
+
+## 팡이의 생명력을 바꾸는 곳
+
+팡이의 말투, 판단 감각, PopPang다운 개발/디자인 스타일은 prompt 파일에서 조정합니다.
+
+- `pangi/src/pangi/prompts/pangi_agent.md`: 팡이의 공통 성격, 답변 톤, 코드/개발/커밋/디자인 감각
+- `pangi/src/pangi/prompts/chat.md`: repo를 읽지 않는 일반 대화 모드
+- `pangi/src/pangi/prompts/read_only_analysis.md`: repo를 read-only로 읽고 분석하는 모드
+- `pangi/src/pangi/prompts/orchestrator.md`: 입력 가드레일을 통과한 요청을 일반 대화, repo 확인 질문, repo 분석 job으로 나누는 요청 분류 규칙
+
+팡이의 "생명력"을 더 넣고 싶다면 먼저 `pangi_agent.md`를 수정합니다. 요청 분류 기준을 바꾸고 싶을 때만 `orchestrator.md`를 수정합니다.
+
 ## 목표
 
 1차 MVP의 목표는 아래 흐름을 안정적으로 완성하는 것입니다.
@@ -17,9 +38,9 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 flowchart TD
     A["Slack에서 @팡이 호출"] --> B["FastAPI Slack webhook 수신"]
     B --> C["Slack signature와 allowlist 검증"]
-    C --> D["입력 가드레일"]
-    D -->|외부 웹/URL, 수정/PR/배포| X["안내 응답 후 종료"]
-    D -->|통과| E["gpt-5.5 Orchestrator"]
+    C --> D["입력 가드레일<br/>외부 웹/쓰기 요청 조기 차단"]
+    D -->|차단| X["안내 응답 후 종료"]
+    D -->|통과한 요청만 전달| E["gpt-5.5 Orchestrator<br/>요청 분류와 라우팅"]
     E -->|일반 대화| Y["Codex chat 응답"]
     E -->|repo 불명확| Z["repo 확인 질문 후 종료"]
     E -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
