@@ -287,3 +287,149 @@ usecase/      Slack 요청 접수, 분석 job 실행, prompt 생성
 repository/   저장소 Protocol과 SQLite 구현
 infra/        Slack API, queue, git, Codex, admin route 같은 외부 adapter
 ```
+
+## AgentJob과 thread 관리
+
+팡이는 Slack thread를 독립된 대화 단위로 보고, repo 분석 요청 하나를 `AgentJob` 하나로 저장합니다.
+
+```mermaid
+flowchart TD
+    A["Slack app mention 또는 slash command"] --> B["SlackCommand 정규화"]
+    B --> C["thread key 계산<br/>team_id + channel_id + thread_ts"]
+    C --> D["slack_threads 조회 또는 생성"]
+    D --> E["agent_jobs 생성"]
+    E --> F["slack_threads.last_job_id 갱신"]
+    E --> G["background worker에 job_id enqueue"]
+    G --> H["CodexRun 기록 저장"]
+    H --> I["같은 Slack thread에 결과 응답"]
+```
+
+### thread를 나누는 기준
+
+`slack_threads`는 `team_id`, `channel_id`, `thread_ts` 조합을 unique key로 사용합니다.
+
+| 기준 | 의미 |
+| --- | --- |
+| `team_id` | Slack workspace 단위 |
+| `channel_id` | Slack channel 단위 |
+| `thread_ts` | Slack thread 단위 |
+
+같은 channel 안에서도 `thread_ts`가 다르면 서로 다른 대화로 저장됩니다. 그래서 A thread에서 진행한 분석 job과 B thread에서 진행한 분석 job은 같은 repo를 보더라도 별도의 `slack_threads` row와 `agent_jobs` row로 관리됩니다.
+
+### app mention의 thread 계산
+
+app mention 이벤트는 아래 규칙으로 `thread_ts`를 정합니다.
+
+| 상황 | 사용하는 값 |
+| --- | --- |
+| 기존 Slack thread 안에서 팡이를 부른 경우 | event의 `thread_ts` |
+| 새 메시지에서 팡이를 부른 경우 | 원본 event의 `ts` |
+
+이렇게 하면 새 메시지에서 시작된 요청도 그 메시지 자체를 thread root로 삼아 이후 답변이 같은 Slack thread에 달립니다.
+
+### AgentJob이 저장하는 것
+
+`AgentJob`은 Slack 요청을 실행 가능한 background job으로 바꾼 기록입니다.
+
+| 정보 | 설명 |
+| --- | --- |
+| Slack 위치 | `slack_thread_id`, `slack_team_id`, `slack_channel_id`, `slack_thread_ts` |
+| 원본 메시지 | `slack_message_ts`, `requester_user_id`, `prompt` |
+| 실행 대상 | `repo_key`, `job_type` |
+| 실행 상태 | `status`, `worktree_path`, `stdout`, `stderr`, `error_message` |
+
+`slack_thread_id`로 `slack_threads`에 연결되기 때문에 job 결과는 항상 요청이 들어온 thread로 돌아갑니다. `event_id`는 unique하게 저장해서 Slack retry가 와도 같은 요청으로 job이 중복 생성되지 않게 막습니다.
+
+`slack_message_ts`는 thread 구분용이 아니라 원본 메시지 reaction 교체용입니다. app mention 요청에서는 원본 메시지의 `eyes` reaction을 완료 후 `white_check_mark` 또는 `x`로 바꿀 때 사용하고, slash command처럼 원본 메시지 reaction을 관리하지 않는 요청에서는 비어 있을 수 있습니다.
+
+## SQLite 테이블 구조
+
+현재 SQLite 구현 기준은 `pangi/src/pangi/repository/job_repository_sqlite_impl.py`입니다.
+
+### `slack_threads`
+
+Slack thread 단위 대화 컨텍스트를 저장합니다.
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 Slack thread id |
+| `team_id` | `TEXT` | `NOT NULL` | Slack team id |
+| `channel_id` | `TEXT` | `NOT NULL` | Slack channel id |
+| `thread_ts` | `TEXT` | `NOT NULL` | Slack thread timestamp |
+| `last_job_id` | `TEXT` |  | 마지막으로 연결된 job id |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
+| `updated_at` | `TEXT` | `NOT NULL` | 수정 시각 |
+
+추가 제약:
+
+| 제약 | 컬럼 |
+| --- | --- |
+| `UNIQUE` | `team_id`, `channel_id`, `thread_ts` |
+
+### `agent_jobs`
+
+Slack 요청 하나를 팡이 job 하나로 저장합니다.
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 job id |
+| `event_id` | `TEXT` | `NOT NULL`, `UNIQUE` | Slack event id 또는 slash command trigger id |
+| `slack_thread_id` | `TEXT` | `NOT NULL`, `FOREIGN KEY` | `slack_threads.id` 참조 |
+| `slack_team_id` | `TEXT` | `NOT NULL` | Slack team id |
+| `slack_channel_id` | `TEXT` | `NOT NULL` | Slack channel id |
+| `slack_thread_ts` | `TEXT` | `NOT NULL` | Slack thread timestamp |
+| `slack_message_ts` | `TEXT` |  | 원본 app mention message timestamp |
+| `requester_user_id` | `TEXT` | `NOT NULL` | 요청한 Slack user id |
+| `job_type` | `TEXT` | `NOT NULL` | job 종류 |
+| `status` | `TEXT` | `NOT NULL` | job 상태 |
+| `repo_key` | `TEXT` | `NOT NULL` | allowlist에 등록된 repo key |
+| `prompt` | `TEXT` | `NOT NULL` | 사용자 요청 원문 |
+| `worktree_path` | `TEXT` |  | job별 read-only worktree 경로 |
+| `stdout` | `TEXT` |  | Codex 실행 stdout |
+| `stderr` | `TEXT` |  | Codex 실행 stderr |
+| `error_message` | `TEXT` |  | 실패 요약 메시지 |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
+| `updated_at` | `TEXT` | `NOT NULL` | 수정 시각 |
+
+`slack_message_ts`는 원본 메시지의 `eyes` reaction을 `white_check_mark` 또는 `x`로 바꿀 때 사용합니다. slash command나 legacy job에서는 비어 있을 수 있습니다.
+
+현재 `status` 값:
+
+| 값 |
+| --- |
+| `queued` |
+| `running` |
+| `succeeded` |
+| `failed` |
+| `timed_out` |
+| `cancelled` |
+| `waiting_approval` |
+| `rejected` |
+
+현재 `job_type` 값:
+
+| 값 |
+| --- |
+| `analyze` |
+| `edit_requested` |
+| `pr_summary` |
+| `troubleshooting` |
+| `xcodebuild_failure` |
+
+### `codex_runs`
+
+job 안에서 실행된 Codex 실행 기록을 저장합니다.
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 Codex run id |
+| `job_id` | `TEXT` | `NOT NULL`, `FOREIGN KEY` | `agent_jobs.id` 참조 |
+| `mode` | `TEXT` | `NOT NULL` | Codex 실행 모드 |
+| `command` | `TEXT` | `NOT NULL` | 실행한 argv list의 JSON 문자열 |
+| `prompt` | `TEXT` | `NOT NULL` | Codex에 전달한 prompt |
+| `stdout` | `TEXT` |  | Codex stdout |
+| `stderr` | `TEXT` |  | Codex stderr |
+| `exit_code` | `INTEGER` |  | 프로세스 종료 코드 |
+| `timed_out` | `INTEGER` | `NOT NULL` | timeout 여부, `0` 또는 `1` |
+| `started_at` | `TEXT` | `NOT NULL` | 시작 시각 |
+| `finished_at` | `TEXT` |  | 종료 시각 |
