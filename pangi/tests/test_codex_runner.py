@@ -4,7 +4,8 @@ import sys
 
 import pytest
 
-from pangi.infra.codex import CodexExecRunner, CodexRunnerError
+from pangi.config import clear_settings_cache
+from pangi.infra.codex import CodexChatResponder, CodexExecRunner, CodexRunnerError
 
 
 def write_script(tmp_path, source: str):
@@ -112,3 +113,46 @@ def test_codex_runner_reports_missing_command(tmp_path):
             )
 
     asyncio.run(scenario())
+
+
+def test_codex_chat_responder_uses_scratch_workspace_and_skip_git_check(tmp_path, monkeypatch):
+    async def scenario():
+        source_root = tmp_path / "sources"
+        worktree_root = tmp_path / "worktrees"
+        chat_root = worktree_root / "chat"
+        monkeypatch.setenv("SLACK_SIGNING_SECRET", "placeholder-signing-secret")
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "placeholder-bot-token")
+        monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "U123")
+        monkeypatch.setenv("SLACK_ALLOWED_CHANNEL_IDS", "C123")
+        monkeypatch.setenv("PANGI_ALLOWED_REPOS", f"PopPang-iOS={source_root / 'PopPang-iOS'}")
+        monkeypatch.setenv("PANGI_WORKTREE_ROOT", str(worktree_root))
+        monkeypatch.setenv("PANGI_SOURCE_REPO_ROOT", str(source_root))
+        monkeypatch.setenv("PANGI_CHAT_WORKSPACE_ROOT", str(chat_root))
+        clear_settings_cache()
+
+        script = write_script(
+            tmp_path,
+            "import json, sys\nprint(json.dumps(sys.argv[1:], ensure_ascii=False))\n",
+        )
+        responder = CodexChatResponder(command_prefix=(sys.executable, str(script)))
+
+        response = await responder.respond(
+            text="안녕",
+            user_id="U123",
+            channel_id="C123",
+            thread_ts="1710000000.000001",
+        )
+
+        args = json.loads(response)
+        assert args[:6] == [
+            "exec",
+            "-C",
+            str(chat_root.resolve(strict=False)),
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+        ]
+        assert "사용자 메시지:\n안녕" in args[-1]
+
+    asyncio.run(scenario())
+    clear_settings_cache()

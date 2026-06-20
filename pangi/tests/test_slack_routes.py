@@ -11,9 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pangi.app import app  # noqa: E402
 from pangi.config import clear_settings_cache  # noqa: E402
+from pangi.infra.codex import set_chat_responder  # noqa: E402
+from pangi.infra.orchestrator import set_request_orchestrator  # noqa: E402
 from pangi.infra.queue import set_job_queue  # noqa: E402
 from pangi.infra.slack import reset_processed_event_ids, set_slack_client  # noqa: E402
-from pangi.repository import SQLiteJobRepository, set_job_repository  # noqa: E402
+from pangi.repository import SQLiteJobRepository, get_job_repository, set_job_repository  # noqa: E402
 
 
 TEST_SECRET = "test-signing-secret"
@@ -43,10 +45,17 @@ class FakeSlackClient:
         )
 
 
+class FakeChatResponder:
+    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+        return f"chat: {text}"
+
+
 def setup_function():
     set_job_repository(None)
     set_job_queue(None)
     set_slack_client(None)
+    set_chat_responder(None)
+    set_request_orchestrator(None)
     reset_processed_event_ids()
 
 
@@ -117,6 +126,7 @@ def request(
 
 
 def configure_settings(monkeypatch, tmp_path):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("SLACK_SIGNING_SECRET", TEST_SECRET)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "placeholder-bot-token")
     monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "U123")
@@ -130,6 +140,7 @@ def configure_settings(monkeypatch, tmp_path):
     set_job_queue(None)
     fake_slack = FakeSlackClient()
     set_slack_client(fake_slack)
+    set_chat_responder(FakeChatResponder())
     return fake_slack
 
 
@@ -191,7 +202,7 @@ def test_slack_events_normalizes_app_mention(monkeypatch, tmp_path):
                 "type": "app_mention",
                 "channel": "C123",
                 "user": "U123",
-                "text": "<@U999> 분석해줘",
+                "text": "<@U999> PopPang-iOS 분석해줘",
                 "thread_ts": "1710000000.000001",
                 "ts": "1710000000.000002",
             },
@@ -204,7 +215,7 @@ def test_slack_events_normalizes_app_mention(monkeypatch, tmp_path):
         "team_id": "T123",
         "channel_id": "C123",
         "user_id": "U123",
-        "text": "분석해줘",
+        "text": "PopPang-iOS 분석해줘",
         "thread_ts": "1710000000.000001",
         "event_id": "Ev123",
     }
@@ -236,7 +247,7 @@ def test_slack_events_uses_event_ts_when_thread_ts_is_missing(monkeypatch, tmp_p
                 "type": "app_mention",
                 "channel": "C123",
                 "user": "U123",
-                "text": "<@U999> ping",
+                "text": "<@U999> PopPang-iOS 분석해줘",
                 "ts": "1710000000.000002",
             },
         }
@@ -251,6 +262,44 @@ def test_slack_events_uses_event_ts_when_thread_ts_is_missing(monkeypatch, tmp_p
             "name": "eyes",
         }
     ]
+
+
+def test_slack_events_blocks_web_analysis_without_job(monkeypatch, tmp_path):
+    fake_slack = configure_settings(monkeypatch, tmp_path)
+
+    status, body = post_slack_event(
+        {
+            "type": "event_callback",
+            "team_id": "T123",
+            "event_id": "EvWeb123",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "user": "U123",
+                "text": "<@U999> https://example.com 이 글 분석해줘",
+                "thread_ts": "1710000000.000001",
+                "ts": "1710000000.000002",
+            },
+        }
+    )
+
+    assert status == 200
+    assert body["ok"] is True
+    assert body["classification"] == "blocked_web_analysis"
+    assert "job_id" not in body
+    assert fake_slack.reactions == []
+    assert fake_slack.messages == [
+        {
+            "channel_id": "C123",
+            "thread_ts": "1710000000.000001",
+            "text": (
+                "팡이는 PopPang 내부 repo 중심으로 동작합니다. "
+                "외부 웹/인터넷 URL 분석은 서버 부하와 보안 이유로 지원하지 않습니다. "
+                "PopPang repo 분석이 필요하면 허용된 repo 이름과 함께 요청해주세요."
+            ),
+        }
+    ]
+    assert get_job_repository().list_jobs() == []
 
 
 def test_slack_events_ignores_bot_message(monkeypatch, tmp_path):
@@ -307,7 +356,7 @@ def test_slack_events_marks_retry_duplicate(monkeypatch, tmp_path):
             "type": "app_mention",
             "channel": "C123",
             "user": "U123",
-            "text": "<@U999> ping",
+            "text": "<@U999> PopPang-iOS 분석해줘",
             "ts": "1710000000.000002",
         },
     }
@@ -331,7 +380,7 @@ def test_slack_commands_normalizes_payload(monkeypatch, tmp_path):
         "team_id": "T123",
         "channel_id": "C123",
         "user_id": "U123",
-        "text": "분석해줘",
+        "text": "PopPang-iOS 분석해줘",
         "trigger_id": "trigger-123",
     }
     body = urlencode(form).encode("utf-8")
@@ -349,12 +398,39 @@ def test_slack_commands_normalizes_payload(monkeypatch, tmp_path):
         "team_id": "T123",
         "channel_id": "C123",
         "user_id": "U123",
-        "text": "분석해줘",
+        "text": "PopPang-iOS 분석해줘",
         "thread_ts": "",
         "event_id": "trigger-123",
     }
     assert response_body["response_type"] == "ephemeral"
     assert response_body["text"].startswith("팡이가 요청을 접수했습니다. job_id: job_")
+
+
+def test_slack_commands_blocks_web_analysis_without_job(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path)
+    form = {
+        "team_id": "T123",
+        "channel_id": "C123",
+        "user_id": "U123",
+        "text": "https://example.com 기사 요약해줘",
+        "trigger_id": "trigger-web-123",
+    }
+    body = urlencode(form).encode("utf-8")
+    timestamp = int(time.time())
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Slack-Request-Timestamp": str(timestamp),
+        "X-Slack-Signature": build_signature(TEST_SECRET, timestamp, body),
+    }
+
+    status, response_body = request("POST", "/slack/commands", body=body, headers=headers)
+
+    assert status == 200
+    assert response_body["response_type"] == "ephemeral"
+    assert response_body["classification"] == "blocked_web_analysis"
+    assert "job_id" not in response_body
+    assert "외부 웹/인터넷 URL 분석은 서버 부하와 보안 이유로 지원하지 않습니다." in response_body["text"]
+    assert get_job_repository().list_jobs() == []
 
 
 def test_slack_interactions_placeholder_verifies_signature(monkeypatch, tmp_path):

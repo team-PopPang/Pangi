@@ -2,7 +2,7 @@
 
 ## 역할
 
-Slack 계층은 팀원이 팡이를 부르는 입구다. Slack 요청을 검증하고 내부 command 객체로 바꾼 뒤, 긴 작업은 background job으로 넘긴다.
+Slack 계층은 팀원이 팡이를 부르는 입구다. Slack 요청을 검증하고 내부 command 객체로 바꾼 뒤, orchestrator 결정에 따라 일반 대화, 안내 응답, repo 분석 job으로 나눈다.
 
 ## 담당 범위
 
@@ -24,11 +24,13 @@ Slack app_mention
 -> FastAPI /slack/events
 -> signature 검증
 -> allowlist 확인
--> 원본 메시지에 eyes reaction 추가
 -> SlackCommand 생성
 -> Orchestrator에 전달
+-> 일반 대화면 Codex chat 응답
+-> 지원하지 않는 요청이면 Slack thread에 안내 후 종료
+-> repo 분석 요청이면 원본 메시지에 eyes reaction 추가
 -> 즉시 200 OK
--> background job에서 thread 응답
+-> repo 분석은 background job에서 thread 응답
 ```
 
 ## 내부 command 필드
@@ -54,6 +56,8 @@ event_id
 - `bot_id` 또는 bot subtype 이벤트는 무시한다.
 - Slack retry header가 있으면 중복 job 생성을 막는다.
 - 허용되지 않은 user/channel 요청은 job으로 만들지 않는다.
+- 외부 웹/인터넷 URL 분석 요청은 job으로 만들지 않는다.
+- repo 분석 요청만 AgentJob으로 만든다.
 
 ## 테스트 기준
 

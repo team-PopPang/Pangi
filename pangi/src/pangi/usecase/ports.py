@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from pangi.usecase.classify_request import ClassifiedRequest
+
 
 class SlackNotifier(Protocol):
     """usecase가 Slack thread에 상태와 결과를 알리기 위해 사용하는 포트.
@@ -28,6 +30,22 @@ class JobQueue(Protocol):
 
     async def enqueue(self, job_id: str) -> None:
         """job id를 background 실행 대상으로 예약한다."""
+        ...
+
+
+class RequestOrchestrator(Protocol):
+    """Slack 요청을 어떤 Pangi 흐름으로 처리할지 결정하는 포트."""
+
+    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
+        """요청 텍스트와 허용 repo 목록을 보고 실행 분기 결정을 반환한다."""
+        ...
+
+
+class ChatResponder(Protocol):
+    """repo worktree 없이 일반 AI 대화 응답을 생성하는 포트."""
+
+    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+        """Slack 일반 대화 요청에 대한 답변 텍스트를 생성한다."""
         ...
 
 

@@ -2,9 +2,9 @@
 
 ## 목표
 
-팡이 1차 MVP는 Slack에서 분석 요청을 받으면, 서버가 격리된 git worktree에서 `codex exec --sandbox read-only`를 실행하고 결과를 Slack thread에 반환하는 것이다.
+팡이 1차 MVP는 Slack에서 팡이와 기본 AI 대화를 할 수 있고, 허용된 PopPang repo 분석 요청은 서버가 격리된 git worktree에서 `codex exec --sandbox read-only`를 실행한 뒤 결과를 Slack thread에 반환하는 것이다.
 
-처음부터 코드 수정, PR 생성, Notion 기록, session resume까지 만들지 않는다. 먼저 "팡이가 안전하게 읽고 답한다"는 경험을 완성한다.
+처음부터 코드 수정, PR 생성, Notion 기록, session resume까지 만들지 않는다. 먼저 "팡이가 대화하고, 필요한 repo만 안전하게 읽고 답한다"는 경험을 완성한다.
 
 ## 제품 컨셉
 
@@ -12,7 +12,7 @@
 팡이가 먼저 보고, 팀이 더 빠르게 결정합니다.
 ```
 
-팡이는 PopPang 팀 옆에서 같이 고민하는 AI 동료다. Slack에서 편하게 부를 수 있고, 코드를 먼저 확인한 뒤 판단에 필요한 근거를 짧게 정리해준다.
+팡이는 PopPang 팀 옆에서 같이 고민하는 AI 동료다. Slack에서 편하게 부를 수 있고, 일반 대화는 바로 답하며, PopPang repo 분석은 코드를 먼저 확인한 뒤 판단에 필요한 근거를 짧게 정리해준다.
 
 ## 현재 저장소 역할
 
@@ -30,7 +30,8 @@ docs/        설계와 구현 체크리스트
 Slack
 -> FastAPI Webhook
 -> Orchestrator
--> Job Worker
+-> 일반 대화는 Codex Chat
+-> repo 분석은 Job Worker
 -> Worktree Manager
 -> Codex Runner
 -> Slack Thread Reply
@@ -41,6 +42,8 @@ Slack
 - Slack app mention 수신
 - Slack request signature 검증
 - user/channel/repo allowlist
+- gpt-5.5 orchestrator를 통한 요청 분류
+- repo worktree 없는 Codex chat 응답
 - Slack thread 단위 job 생성
 - background job 실행
 - job별 git worktree 생성
@@ -51,6 +54,7 @@ Slack
 
 ## 1차 MVP 제외 범위
 
+- 외부 웹/인터넷 URL 분석
 - 코드 수정
 - PR 생성
 - Notion report

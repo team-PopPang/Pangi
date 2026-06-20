@@ -40,6 +40,12 @@ def test_settings_parses_allowlists_repo_paths_and_default_timeout():
     ).resolve(strict=False)
     assert settings.default_base_branch == "develop"
     assert settings.job_timeout_seconds == 600
+    assert settings.chat_timeout_seconds == 120
+    assert settings.chat_workspace_root == Path("/tmp/pangi/worktrees/_chat").resolve(strict=False)
+    assert settings.openai_api_key is None
+    assert settings.orchestrator_model == "gpt-5.5"
+    assert settings.orchestrator_reasoning_effort == "medium"
+    assert settings.orchestrator_service_tier == "default"
     assert settings.enable_admin_pages is False
     assert settings.admin_password is None
 
@@ -48,6 +54,38 @@ def test_settings_uses_configured_timeout():
     settings = Settings.from_env(valid_env(PANGI_JOB_TIMEOUT_SECONDS="900"))
 
     assert settings.job_timeout_seconds == 900
+
+
+def test_settings_uses_configured_chat_and_orchestrator_options():
+    settings = Settings.from_env(
+        valid_env(
+            PANGI_CHAT_TIMEOUT_SECONDS="60",
+            PANGI_CHAT_WORKSPACE_ROOT="/tmp/pangi/worktrees/chat",
+            OPENAI_API_KEY="placeholder-openai-key",
+            PANGI_ORCHESTRATOR_MODEL="gpt-5.5",
+            PANGI_ORCHESTRATOR_REASONING_EFFORT="low",
+            PANGI_ORCHESTRATOR_SERVICE_TIER="auto",
+        )
+    )
+
+    assert settings.chat_timeout_seconds == 60
+    assert settings.chat_workspace_root == Path("/tmp/pangi/worktrees/chat").resolve(strict=False)
+    assert settings.openai_api_key == "placeholder-openai-key"
+    assert settings.orchestrator_reasoning_effort == "low"
+    assert settings.orchestrator_service_tier == "auto"
+
+
+def test_settings_rejects_chat_workspace_outside_worktree_root():
+    with pytest.raises(SettingsError, match="chat workspace"):
+        Settings.from_env(valid_env(PANGI_CHAT_WORKSPACE_ROOT="/tmp/outside/chat"))
+
+
+def test_settings_rejects_invalid_orchestrator_options():
+    with pytest.raises(SettingsError, match="PANGI_ORCHESTRATOR_REASONING_EFFORT"):
+        Settings.from_env(valid_env(PANGI_ORCHESTRATOR_REASONING_EFFORT="fast"))
+
+    with pytest.raises(SettingsError, match="PANGI_ORCHESTRATOR_SERVICE_TIER"):
+        Settings.from_env(valid_env(PANGI_ORCHESTRATOR_SERVICE_TIER="priority"))
 
 
 def test_settings_uses_configured_default_base_branch():
@@ -145,6 +183,12 @@ def test_settings_loads_env_file_from_pangi_folder(tmp_path, monkeypatch):
         "PANGI_SOURCE_REPO_ROOT",
         "PANGI_DEFAULT_BASE_BRANCH",
         "PANGI_JOB_TIMEOUT_SECONDS",
+        "PANGI_CHAT_TIMEOUT_SECONDS",
+        "PANGI_CHAT_WORKSPACE_ROOT",
+        "OPENAI_API_KEY",
+        "PANGI_ORCHESTRATOR_MODEL",
+        "PANGI_ORCHESTRATOR_REASONING_EFFORT",
+        "PANGI_ORCHESTRATOR_SERVICE_TIER",
         "PANGI_ENABLE_ADMIN_PAGES",
         "PANGI_ADMIN_PASSWORD",
     ):
@@ -190,6 +234,12 @@ def test_settings_uses_env_example_for_empty_local_values(tmp_path, monkeypatch)
         "PANGI_SOURCE_REPO_ROOT",
         "PANGI_DEFAULT_BASE_BRANCH",
         "PANGI_JOB_TIMEOUT_SECONDS",
+        "PANGI_CHAT_TIMEOUT_SECONDS",
+        "PANGI_CHAT_WORKSPACE_ROOT",
+        "OPENAI_API_KEY",
+        "PANGI_ORCHESTRATOR_MODEL",
+        "PANGI_ORCHESTRATOR_REASONING_EFFORT",
+        "PANGI_ORCHESTRATOR_SERVICE_TIER",
         "PANGI_ENABLE_ADMIN_PAGES",
         "PANGI_ADMIN_PASSWORD",
     ):

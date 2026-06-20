@@ -7,11 +7,14 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from pangi.config import AccessDeniedError, get_settings
+from pangi.infra.codex import get_chat_responder
+from pangi.infra.orchestrator import get_request_orchestrator
 from pangi.infra.queue import get_job_queue
 from pangi.infra.slack.client import get_slack_client
 from pangi.infra.slack.command import command_from_app_mention, command_from_slash_payload
 from pangi.infra.slack.signature import verify_slack_signature
 from pangi.repository import DuplicateEventError, get_job_repository
+from pangi.usecase.classify_request import NEEDS_REPO_MESSAGE, RequestClassification
 from pangi.usecase.submit_slack_request import SubmitSlackRequestInput, SubmitSlackRequestUseCase
 
 
@@ -49,6 +52,10 @@ def _validate_access(*, user_id: str, channel_id: str) -> None:
         raise HTTPException(status_code=403, detail=str(error)) from error
 
 
+def _allowed_repo_keys() -> tuple[str, ...]:
+    return tuple(get_settings().allowed_repos.keys())
+
+
 @router.post("/events")
 async def slack_events(request: Request) -> JSONResponse:
     body = await _verified_body(request)
@@ -67,6 +74,8 @@ async def slack_events(request: Request) -> JSONResponse:
     event_id = payload.get("event_id") or ""
     repository = get_job_repository()
     existing_job = repository.find_job_by_event_id(event_id) if event_id else None
+    if request.headers.get("X-Slack-Retry-Num") and event_id in _processed_event_ids:
+        return JSONResponse({"ok": True, "duplicate": True, "job_id": existing_job.id if existing_job else ""})
     if request.headers.get("X-Slack-Retry-Num") and existing_job is not None:
         return JSONResponse({"ok": True, "duplicate": True, "job_id": existing_job.id})
 
@@ -80,6 +89,9 @@ async def slack_events(request: Request) -> JSONResponse:
         repository=repository,
         job_queue=get_job_queue(),
         slack_notifier=get_slack_client(),
+        request_orchestrator=get_request_orchestrator(),
+        chat_responder=get_chat_responder(),
+        allowed_repo_keys=_allowed_repo_keys(),
     )
     result = await use_case.execute(
         SubmitSlackRequestInput(
@@ -96,6 +108,15 @@ async def slack_events(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "duplicate": True, "job_id": result.job_id})
 
     _processed_event_ids.add(command.event_id)
+    if result.job_id is None or result.job_status is None:
+        return JSONResponse(
+            {
+                "ok": True,
+                "command": command.to_dict(),
+                "classification": result.classification.value,
+            }
+        )
+
     return JSONResponse(
         {
             "ok": True,
@@ -119,6 +140,29 @@ async def slack_commands(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Invalid Slack command payload")
 
     _validate_access(user_id=command.user_id, channel_id=command.channel_id)
+    orchestrator = get_request_orchestrator()
+    decision = await orchestrator.decide(text=command.text, allowed_repo_keys=_allowed_repo_keys())
+    if not decision.should_create_job:
+        return JSONResponse(
+            {
+                "ok": True,
+                "response_type": "ephemeral",
+                "text": decision.reply_text or "팡이는 이 요청을 repo 분석 job으로 실행하지 않았습니다.",
+                "command": command.to_dict(),
+                "classification": decision.kind.value,
+            }
+        )
+    if decision.kind != RequestClassification.REPO_ANALYSIS or decision.repo_key is None:
+        return JSONResponse(
+            {
+                "ok": True,
+                "response_type": "ephemeral",
+                "text": NEEDS_REPO_MESSAGE,
+                "command": command.to_dict(),
+                "classification": RequestClassification.NEEDS_REPO.value,
+            }
+        )
+
     repository = get_job_repository()
     thread_ts = command.thread_ts or command.event_id or "slash_command"
     thread = repository.get_or_create_thread(
@@ -132,6 +176,7 @@ async def slack_commands(request: Request) -> JSONResponse:
             slack_thread=thread,
             requester_user_id=command.user_id,
             prompt=command.text,
+            repo_key=decision.repo_key,
         )
     except DuplicateEventError:
         job = repository.find_job_by_event_id(command.event_id)
