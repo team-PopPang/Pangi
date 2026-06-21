@@ -13,6 +13,7 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 
 - Slack에서 `@팡이` mention과 slash command 요청을 받을 수 있습니다.
 - 허용된 user/channel/repo allowlist를 통과한 요청만 처리합니다.
+- 인사나 자기소개 요청에는 팡이가 누구이고 무엇을 할 수 있는지 짧게 소개합니다.
 - 일반 대화, 문장 정리, repo를 직접 읽지 않는 간단한 판단은 Codex chat으로 답합니다.
 - 허용된 PopPang repo 이름이 명시된 분석 요청은 SQLite job으로 저장하고, 격리된 read-only worktree에서 `codex exec --sandbox read-only`로 코드를 읽은 뒤 Slack thread에 결과를 남깁니다.
 - 외부 웹/URL 분석, 코드 수정, PR 생성, 배포, commit/push 요청은 입력 가드레일에서 차단하고 안내 응답만 보냅니다.
@@ -42,10 +43,10 @@ flowchart TD
     C --> BG["Background task 시작<br/>eyes reaction 추가"]
     BG --> D["입력 가드레일<br/>코드 기반 1차 판정"]
     D -->|외부 웹/쓰기 요청| X["안내 응답"]
-    D -->|일반 대화| Y["Codex chat 응답<br/>(gpt-5.4-mini)"]
+    D -->|일반 대화| Y["Codex chat 응답<br/>(gpt-5.4-mini / low)"]
     D -->|repo 불명확| Z["repo 확인 질문"]
     D -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
-    D -->|애매한 요청만| E["Codex CLI Orchestrator<br/>보조 판정<br/>(gpt-5.4-mini)"]
+    D -->|애매한 요청만| E["Codex CLI Orchestrator<br/>보조 판정<br/>(gpt-5.4-mini / low)"]
     E -->|일반 대화| Y
     E -->|repo 불명확| Z
     E -->|허용 repo 분석| F
@@ -53,13 +54,15 @@ flowchart TD
     F --> G["Background worker 실행"]
     G --> H["허용된 source repo 확인"]
     H --> I["Read-only git worktree 생성"]
-    I --> J["Codex exec --sandbox read-only 실행<br/>(gpt-5.5)"]
+    I --> J["Codex exec --sandbox read-only 실행<br/>(gpt-5.5 / high)"]
     J --> K["stdout, stderr, exit code, timeout 저장"]
-    K --> L["Slack thread에 분석 결과 응답"]
-    X --> R["Slack thread 응답"]
-    Y --> R
-    Z --> R
-    L --> R
+    K --> L["분석 결과 Markdown"]
+    X --> O["출력 가드레일"]
+    Y --> O
+    Z --> O
+    L --> O
+    O --> M["Markdown to Slack<br/>Slack bot 전용"]
+    M --> R["Slack thread 응답"]
     R --> DONE["완료 reaction<br/>white_check_mark 또는 x"]
 ```
 
@@ -90,6 +93,7 @@ flowchart TD
 - Slack thread에 성공/실패/timeout 결과 응답
 - Slack 원본 메시지에 `eyes` reaction 추가, 일반 대화와 read-only 분석 응답 성공 시 `white_check_mark`로 전환
 - Slack/외부 출력 전 secret redaction과 길이 제한
+- Slack bot 응답 전용 Markdown to Slack 변환
 - 관리자 DB 확인 페이지 `/pangi-admin/db`
 
 ## 아직 남은 것
@@ -301,9 +305,12 @@ PANGI_JOB_TIMEOUT_SECONDS=600
 PANGI_CHAT_TIMEOUT_SECONDS=120
 PANGI_CHAT_WORKSPACE_ROOT=
 PANGI_CHAT_MODEL=gpt-5.4-mini
+PANGI_CHAT_REASONING_EFFORT=low
 PANGI_ORCHESTRATOR_MODEL=gpt-5.4-mini
+PANGI_ORCHESTRATOR_REASONING_EFFORT=low
 PANGI_ORCHESTRATOR_TIMEOUT_SECONDS=20
 PANGI_ANALYSIS_MODEL=gpt-5.5
+PANGI_ANALYSIS_REASONING_EFFORT=high
 PANGI_ENABLE_ADMIN_PAGES=0
 PANGI_ADMIN_PASSWORD=
 ```
@@ -313,10 +320,13 @@ PANGI_ADMIN_PASSWORD=
 | 설정 | 기본값 | 역할 |
 | --- | --- | --- |
 | `PANGI_ORCHESTRATOR_MODEL` | `gpt-5.4-mini` | 입력 가드레일을 통과한 요청을 일반 대화, repo 확인 질문, repo 분석 job으로 라우팅 |
+| `PANGI_ORCHESTRATOR_REASONING_EFFORT` | `low` | orchestrator용 Codex 호출의 추론 난이도 |
 | `PANGI_CHAT_MODEL` | `gpt-5.4-mini` | repo를 읽지 않는 일반 대화 응답 |
+| `PANGI_CHAT_REASONING_EFFORT` | `low` | 일반 대화용 Codex 호출의 추론 난이도 |
 | `PANGI_ANALYSIS_MODEL` | `gpt-5.5` | read-only worktree에서 실제 repo 코드를 읽는 분석 |
+| `PANGI_ANALYSIS_REASONING_EFFORT` | `high` | repo 분석용 Codex 호출의 추론 난이도 |
 
-입력 가드레일은 AI가 아니라 코드로 유지합니다. Orchestrator는 심층 repo 분석이 아니라 흐름을 정하는 단계이므로 기본 mini 모델을 사용합니다.
+입력 가드레일은 AI가 아니라 코드로 유지합니다. Orchestrator는 심층 repo 분석이 아니라 흐름을 정하는 단계이므로 기본 mini 모델과 `low` reasoning을 사용합니다. 팡이가 실행하는 `codex exec`는 `-c model_reasoning_effort="..."`를 명시해, 팡이를 개발하는 사람의 `.codex/config.toml` 설정이 런타임 호출에 섞이지 않게 합니다.
 
 임시 개발 환경에서 모든 Slack user/channel을 허용하려면 `*`를 사용할 수 있습니다.
 

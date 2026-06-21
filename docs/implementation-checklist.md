@@ -332,6 +332,9 @@ Slack에서 들어온 요청을 안전하게 받고 내부 command 객체로 바
 - [x] Codex 모델을 호출 목적별로 분리한다.
   - 완료 기준: 일반 대화와 orchestrator는 기본 `gpt-5.4-mini`, repo read-only 분석은 기본 `gpt-5.5`로 실행된다.
 
+- [x] Codex reasoning effort를 호출 목적별로 명시한다.
+  - 완료 기준: 일반 대화와 orchestrator는 `low`, repo read-only 분석은 `high`를 `codex exec -c model_reasoning_effort=...`로 전달한다.
+
 - [x] orchestrator 런타임 프롬프트를 마크다운 파일로 분리한다.
   - 완료 기준: Codex orchestrator가 `pangi/src/pangi/prompts/orchestrator.md`를 읽어 structured decision instructions로 사용한다.
 
@@ -654,6 +657,9 @@ Codex가 원본 repo를 직접 건드리지 않도록 job마다 격리된 작업
 - [x] PopPang 공통 스타일 prompt를 만든다.
   - 완료 기준: `pangi/src/pangi/prompts/pangi_agent.md`에 코드, 개발, 커밋, 디자인 스타일 기준을 분리하고 chat/read-only 분석 prompt가 함께 사용한다.
 
+- [x] 일반 대화 prompt에 인사/자기소개 응답 규칙을 넣는다.
+  - 완료 기준: 인사나 자기소개 요청에는 팡이의 역할, 가능한 일, MVP에서 직접 실행하지 않는 일을 짧게 안내한다.
+
 - [x] 분석 prompt의 출력 규칙을 고정한다.
   - 필수:
     - 결론 먼저
@@ -746,6 +752,12 @@ Codex가 원본 repo를 직접 건드리지 않도록 job마다 격리된 작업
 
 - [x] Slack 메시지 길이 제한을 고려한다.
   - 완료 기준: 긴 stdout은 요약하거나 잘라서 보낸다.
+
+- [x] 출력 가드레일을 공통화한다.
+  - 완료 기준: 일반 대화, 정책 안내, repo 분석 결과가 Slack 전송 전 공통 출력 가드레일을 통과한다.
+
+- [x] Markdown to Slack 변환을 Slack adapter 경계에 둔다.
+  - 완료 기준: Slack bot 응답만 Slack mrkdwn으로 변환하고, usecase와 관리자 화면은 canonical Markdown을 다룬다.
 
 - [x] Slack 응답 테스트를 작성한다.
   - 방법: Slack client mock 사용
@@ -850,7 +862,7 @@ Slack에서 요청을 보내면 팡이가 실제로 read-only 분석 결과를 t
 - [x] `.env` 파일 읽기/출력 금지 규칙을 prompt에 넣는다.
   - 완료 기준: prompt template에 명시되어 있다.
 
-- [ ] secret redaction 패턴을 만든다.
+- [x] secret redaction 패턴을 만든다.
   - 최소:
     - `xoxb-`
     - `ghp_`
