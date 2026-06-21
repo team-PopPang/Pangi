@@ -41,20 +41,26 @@ flowchart TD
     C --> ACK["Slack에 200 OK 즉시 반환"]
     C --> BG["Background task 시작<br/>eyes reaction 추가"]
     BG --> D["입력 가드레일<br/>코드 기반 1차 판정"]
-    D -->|외부 웹/쓰기 요청| X["안내 응답 후 종료"]
+    D -->|외부 웹/쓰기 요청| X["안내 응답"]
     D -->|일반 대화| Y["Codex chat 응답<br/>(gpt-5.4-mini)"]
-    D -->|repo 불명확| Z["repo 확인 질문 후 종료"]
+    D -->|repo 불명확| Z["repo 확인 질문"]
     D -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
     D -->|애매한 요청만| E["Codex CLI Orchestrator<br/>보조 판정<br/>(gpt-5.4-mini)"]
     E -->|일반 대화| Y
     E -->|repo 불명확| Z
     E -->|허용 repo 분석| F
+    E -->|지원 안 함| X
     F --> G["Background worker 실행"]
     G --> H["허용된 source repo 확인"]
     H --> I["Read-only git worktree 생성"]
     I --> J["Codex exec --sandbox read-only 실행<br/>(gpt-5.5)"]
     J --> K["stdout, stderr, exit code, timeout 저장"]
-    K --> L["Slack thread에 결과 응답"]
+    K --> L["Slack thread에 분석 결과 응답"]
+    X --> R["Slack thread 응답"]
+    Y --> R
+    Z --> R
+    L --> R
+    R --> DONE["완료 reaction<br/>white_check_mark 또는 x"]
 ```
 
 현재 단계에서 팡이는 코드를 수정하지 않습니다. 일반 대화는 repo job 없이 답하고, repo 분석 요청은 코드를 읽고 확인한 사실과 근거를 정리하는 역할에 집중합니다.
@@ -446,4 +452,67 @@ domain/       핵심 모델과 정책
 usecase/      Slack 요청 접수, 분석 job 실행, prompt 생성
 repository/   저장소 Protocol과 SQLite 구현
 infra/        Slack API, queue, git, Codex, admin route 같은 외부 adapter
+```
+
+## 파일 구조 아키텍처
+
+팡이 코드는 클린 아키텍처에 가깝게 바깥 adapter가 안쪽 usecase/domain에 의존하도록 둡니다.
+
+```mermaid
+flowchart TB
+    subgraph Framework["Framework / Entry"]
+        App["app.py<br/>FastAPI app"]
+        SlackRoutes["infra/slack/routes.py<br/>Slack webhook"]
+        AdminRoutes["infra/admin/routes.py<br/>Admin pages"]
+    end
+
+    subgraph Usecase["Usecase"]
+        Submit["usecase/submit_slack_request.py<br/>Slack 요청 처리"]
+        Guardrail["usecase/input_guardrail.py<br/>입력 가드레일"]
+        RunJob["usecase/run_analysis_job.py<br/>분석 job 실행"]
+        Prompt["usecase/build_prompt.py<br/>prompt 조립"]
+        Ports["usecase/ports.py<br/>외부 adapter 계약"]
+    end
+
+    subgraph Domain["Domain"]
+        Models["domain/models.py<br/>SlackThread / AgentJob / CodexRun"]
+        Policies["domain/policies.py<br/>redaction / truncate"]
+    end
+
+    subgraph Repository["Repository"]
+        RepoPort["repository/job_repository_protocol.py<br/>저장소 계약"]
+        SQLiteRepo["repository/job_repository_sqlite_impl.py<br/>SQLite 구현"]
+    end
+
+    subgraph Infra["Infra Adapters"]
+        SlackClient["infra/slack/client.py<br/>Slack Web API"]
+        Queue["infra/queue/in_process_queue.py<br/>background queue"]
+        GitWorktree["infra/git/worktree_manager.py<br/>git worktree"]
+        CodexRunner["infra/codex/runner.py<br/>Codex read-only"]
+        CodexChat["infra/codex/chat.py<br/>Codex chat"]
+        Orchestrator["infra/orchestrator/codex_orchestrator.py<br/>AI 보조 판정"]
+    end
+
+    App --> SlackRoutes
+    App --> AdminRoutes
+    SlackRoutes --> Submit
+    Submit --> Guardrail
+    Submit --> Ports
+    Submit --> RepoPort
+    RunJob --> Prompt
+    RunJob --> Ports
+    RunJob --> RepoPort
+    Submit --> Models
+    Submit --> Policies
+    RunJob --> Models
+    RunJob --> Policies
+
+    SQLiteRepo --> RepoPort
+    SQLiteRepo --> Models
+    SlackClient --> Ports
+    Queue --> Ports
+    GitWorktree --> Ports
+    CodexRunner --> Ports
+    CodexChat --> Ports
+    Orchestrator --> Ports
 ```
