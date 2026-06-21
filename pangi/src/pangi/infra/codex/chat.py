@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ class CodexChatError(RuntimeError):
 @dataclass(frozen=True)
 class CodexChatResponder:
     command_prefix: tuple[str, ...] = DEFAULT_CODEX_COMMAND
+    model: str | None = None
 
     async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
         settings = get_settings()
@@ -28,7 +30,8 @@ class CodexChatResponder:
         workspace.mkdir(parents=True, exist_ok=True)
 
         prompt = _build_chat_prompt(text)
-        command = (
+        model = self.model or settings.chat_model
+        command = [
             *self.command_prefix,
             "exec",
             "-C",
@@ -36,8 +39,10 @@ class CodexChatResponder:
             "--skip-git-repo-check",
             "--sandbox",
             "read-only",
-            prompt,
-        )
+        ]
+        if model:
+            command.extend(("--model", model))
+        command.append(prompt)
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -54,11 +59,13 @@ class CodexChatResponder:
                 timeout=settings.chat_timeout_seconds,
             )
         except TimeoutError as error:
-            process.terminate()
+            with suppress(ProcessLookupError):
+                process.terminate()
             try:
                 await asyncio.wait_for(process.wait(), timeout=2)
             except TimeoutError:
-                process.kill()
+                with suppress(ProcessLookupError):
+                    process.kill()
                 await process.wait()
             raise CodexChatError("Codex chat timed out") from error
 

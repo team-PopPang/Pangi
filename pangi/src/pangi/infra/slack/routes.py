@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.background import BackgroundTask
 
 from pangi.config import AccessDeniedError, get_settings
 from pangi.infra.codex import get_chat_responder
@@ -20,6 +22,7 @@ from pangi.usecase.submit_slack_request import SubmitSlackRequestInput, SubmitSl
 
 router = APIRouter(prefix="/slack", tags=["slack"])
 _processed_event_ids: set[str] = set()
+logger = logging.getLogger(__name__)
 
 
 def reset_processed_event_ids() -> None:
@@ -85,45 +88,23 @@ async def slack_events(request: Request) -> JSONResponse:
 
     _validate_access(user_id=command.user_id, channel_id=command.channel_id)
     event = payload.get("event") or {}
-    use_case = SubmitSlackRequestUseCase(
-        repository=repository,
-        job_queue=get_job_queue(),
-        slack_notifier=get_slack_client(),
-        request_orchestrator=get_request_orchestrator(),
-        chat_responder=get_chat_responder(),
-        allowed_repo_keys=_allowed_repo_keys(),
+    request_input = SubmitSlackRequestInput(
+        team_id=command.team_id,
+        channel_id=command.channel_id,
+        user_id=command.user_id,
+        text=command.text,
+        thread_ts=command.thread_ts,
+        event_id=command.event_id,
+        message_ts=event.get("ts") or command.thread_ts,
     )
-    result = await use_case.execute(
-        SubmitSlackRequestInput(
-            team_id=command.team_id,
-            channel_id=command.channel_id,
-            user_id=command.user_id,
-            text=command.text,
-            thread_ts=command.thread_ts,
-            event_id=command.event_id,
-            message_ts=event.get("ts") or command.thread_ts,
-        )
-    )
-    if result.duplicate:
-        return JSONResponse({"ok": True, "duplicate": True, "job_id": result.job_id})
-
     _processed_event_ids.add(command.event_id)
-    if result.job_id is None or result.job_status is None:
-        return JSONResponse(
-            {
-                "ok": True,
-                "command": command.to_dict(),
-                "classification": result.classification.value,
-            }
-        )
-
     return JSONResponse(
         {
             "ok": True,
             "command": command.to_dict(),
-            "job_id": result.job_id,
-            "job_status": result.job_status.value,
-        }
+            "accepted": True,
+        },
+        background=BackgroundTask(_process_app_mention, request_input),
     )
 
 
@@ -199,3 +180,18 @@ async def slack_commands(request: Request) -> JSONResponse:
 async def slack_interactions(request: Request) -> JSONResponse:
     await _verified_body(request)
     return JSONResponse({"ok": False, "detail": "Slack interactions are not implemented yet"}, status_code=501)
+
+
+async def _process_app_mention(request_input: SubmitSlackRequestInput) -> None:
+    use_case = SubmitSlackRequestUseCase(
+        repository=get_job_repository(),
+        job_queue=get_job_queue(),
+        slack_notifier=get_slack_client(),
+        request_orchestrator=get_request_orchestrator(),
+        chat_responder=get_chat_responder(),
+        allowed_repo_keys=_allowed_repo_keys(),
+    )
+    try:
+        await use_case.execute(request_input)
+    except Exception as error:
+        logger.exception("Failed to process Slack app mention %s: %s", request_input.event_id, error)

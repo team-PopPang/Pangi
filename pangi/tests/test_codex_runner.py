@@ -20,7 +20,7 @@ def test_codex_runner_collects_stdout(tmp_path):
             tmp_path,
             "import sys\nprint(sys.argv[-1])\n",
         )
-        runner = CodexExecRunner(command_prefix=(sys.executable, str(script)))
+        runner = CodexExecRunner(command_prefix=(sys.executable, str(script)), model="gpt-5.5")
 
         result = await runner.run_read_only(
             worktree_path=tmp_path,
@@ -33,6 +33,7 @@ def test_codex_runner_collects_stdout(tmp_path):
         assert result.exit_code == 0
         assert result.timed_out is False
         assert result.command[-1] == "분석해줘"
+        assert result.command[-3:-1] == ("--model", "gpt-5.5")
         assert "--ask-for-approval" not in result.command
 
     asyncio.run(scenario())
@@ -152,6 +153,7 @@ def test_codex_chat_responder_uses_scratch_workspace_and_skip_git_check(tmp_path
             "--sandbox",
             "read-only",
         ]
+        assert args[6:8] == ["--model", "gpt-5.4-mini"]
         assert "팡이 공통 스타일" in args[-1]
         assert "일반 대화 모드" in args[-1]
         assert "사용자 메시지:\n안녕" in args[-1]

@@ -2,7 +2,7 @@
 
 ## 역할
 
-Slack 계층은 팀원이 팡이를 부르는 입구다. Slack 요청을 검증하고 내부 command 객체로 바꾼 뒤, 입력 가드레일과 orchestrator 결정에 따라 일반 대화, 안내 응답, repo 분석 job으로 나눈다.
+Slack 계층은 팀원이 팡이를 부르는 입구다. Slack 요청을 검증하고 내부 command 객체로 바꾼 뒤, 입력 가드레일 1차 판정과 필요 시 orchestrator 보조 판정에 따라 일반 대화, 안내 응답, repo 분석 job으로 나눈다.
 
 ## 담당 범위
 
@@ -25,16 +25,18 @@ Slack app_mention
 -> signature 검증
 -> allowlist 확인
 -> SlackCommand 생성
--> 입력 가드레일 통과
--> Orchestrator에 전달
--> 일반 대화면 원본 메시지에 eyes reaction 추가
--> 일반 대화면 Codex chat 응답 후 성공 시 white_check_mark, 실패 시 x reaction으로 전환
--> 지원하지 않는 요청이면 Slack thread에 안내 후 종료
--> repo 분석 요청이면 원본 메시지에 eyes reaction 추가
+-> background task 예약
 -> 즉시 200 OK
+-> background task에서 원본 메시지에 eyes reaction 추가
+-> 입력 가드레일 1차 판정
+-> 애매한 요청만 Orchestrator에 전달
+-> 일반 대화면 Codex chat 응답 후 성공 시 white_check_mark, 실패 시 x reaction으로 전환
+-> 지원하지 않는 요청이면 Slack thread에 안내 후 white_check_mark reaction으로 전환
 -> repo 분석은 background job에서 thread 응답
 -> repo 분석 응답 성공 시 white_check_mark, 실패/timeout 응답 성공 시 x reaction으로 전환
 ```
+
+Slack route는 Codex CLI orchestrator나 Codex chat 완료를 기다리지 않는다. 무거운 AI 호출은 모두 200 OK 이후 background에서 실행한다.
 
 ## 내부 command 필드
 

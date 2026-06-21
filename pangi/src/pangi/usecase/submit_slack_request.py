@@ -16,6 +16,7 @@ IN_PROGRESS_REACTION_NAME = "eyes"
 SUCCESS_REACTION_NAME = "white_check_mark"
 FAILURE_REACTION_NAME = "x"
 CHAT_REPLY_MAX_CHARS = 3500
+CLASSIFICATION_FAILURE_MESSAGE = "팡이 요청 분류가 지연되어 실패했습니다. 잠시 후 다시 요청해주세요."
 logger = logging.getLogger(__name__)
 BackgroundRunner = Callable[[Awaitable[None]], None]
 
@@ -64,12 +65,23 @@ class SubmitSlackRequestUseCase:
         self._background_runner = background_runner
 
     async def execute(self, request: SubmitSlackRequestInput) -> SubmitSlackRequestResult:
-        decision = await self._request_orchestrator.decide(
-            text=request.text,
-            allowed_repo_keys=self._allowed_repo_keys,
-        )
+        await self._add_in_progress_reaction(request)
+        try:
+            decision = await self._request_orchestrator.decide(
+                text=request.text,
+                allowed_repo_keys=self._allowed_repo_keys,
+            )
+        except Exception:
+            logger.exception("Failed to classify Slack request")
+            await self._post_policy_message(request, CLASSIFICATION_FAILURE_MESSAGE)
+            await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
+            return SubmitSlackRequestResult(
+                job_id=None,
+                job_status=None,
+                classification=RequestClassification.UNSUPPORTED,
+            )
+
         if decision.kind == RequestClassification.CODEX_CHAT:
-            await self._add_in_progress_reaction(request)
             self._background_runner(self._post_chat_response(request))
             return SubmitSlackRequestResult(
                 job_id=None,
@@ -79,6 +91,7 @@ class SubmitSlackRequestUseCase:
 
         if not decision.should_create_job:
             await self._post_policy_message(request, decision.reply_text or NEEDS_REPO_MESSAGE)
+            await self._replace_in_progress_reaction(request, name=SUCCESS_REACTION_NAME)
             return SubmitSlackRequestResult(
                 job_id=None,
                 job_status=None,
@@ -87,13 +100,13 @@ class SubmitSlackRequestUseCase:
 
         if decision.kind != RequestClassification.REPO_ANALYSIS or decision.repo_key is None:
             await self._post_policy_message(request, NEEDS_REPO_MESSAGE)
+            await self._replace_in_progress_reaction(request, name=SUCCESS_REACTION_NAME)
             return SubmitSlackRequestResult(
                 job_id=None,
                 job_status=None,
                 classification=RequestClassification.NEEDS_REPO,
             )
 
-        await self._add_in_progress_reaction(request)
         thread = self._repository.get_or_create_thread(
             team_id=request.team_id,
             channel_id=request.channel_id,

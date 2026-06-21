@@ -12,7 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pangi.app import app  # noqa: E402
 from pangi.config import clear_settings_cache  # noqa: E402
 from pangi.infra.codex import set_chat_responder  # noqa: E402
-from pangi.infra.orchestrator import set_request_orchestrator  # noqa: E402
+from pangi.infra.orchestrator import (  # noqa: E402
+    DeterministicRequestOrchestrator,
+    GuardedRequestOrchestrator,
+    set_request_orchestrator,
+)
 from pangi.infra.queue import set_job_queue  # noqa: E402
 from pangi.infra.slack import reset_processed_event_ids, set_slack_client  # noqa: E402
 from pangi.repository import SQLiteJobRepository, get_job_repository, set_job_repository  # noqa: E402
@@ -136,7 +140,6 @@ def request(
 
 
 def configure_settings(monkeypatch, tmp_path):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("SLACK_SIGNING_SECRET", TEST_SECRET)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "placeholder-bot-token")
     monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "U123")
@@ -151,6 +154,7 @@ def configure_settings(monkeypatch, tmp_path):
     fake_slack = FakeSlackClient()
     set_slack_client(fake_slack)
     set_chat_responder(FakeChatResponder())
+    set_request_orchestrator(GuardedRequestOrchestrator(DeterministicRequestOrchestrator()))
     return fake_slack
 
 
@@ -229,11 +233,13 @@ def test_slack_events_normalizes_app_mention(monkeypatch, tmp_path):
         "thread_ts": "1710000000.000001",
         "event_id": "Ev123",
     }
+    assert body["accepted"] is True
+    job = get_job_repository().list_jobs()[0]
     assert fake_slack.messages == [
         {
             "channel_id": "C123",
             "thread_ts": "1710000000.000001",
-            "text": f"팡이가 요청을 접수했습니다. job_id: {body['job_id']}",
+            "text": f"팡이가 요청을 접수했습니다. job_id: {job.id}",
         }
     ]
     assert fake_slack.reactions == [
@@ -243,8 +249,6 @@ def test_slack_events_normalizes_app_mention(monkeypatch, tmp_path):
             "name": "eyes",
         }
     ]
-    job = get_job_repository().get_job(body["job_id"])
-    assert job is not None
     assert job.slack_message_ts == "1710000000.000002"
 
 
@@ -298,9 +302,27 @@ def test_slack_events_blocks_web_analysis_without_job(monkeypatch, tmp_path):
 
     assert status == 200
     assert body["ok"] is True
-    assert body["classification"] == "blocked_web_analysis"
+    assert body["accepted"] is True
     assert "job_id" not in body
-    assert fake_slack.reactions == []
+    assert fake_slack.reactions == [
+        {
+            "channel_id": "C123",
+            "message_ts": "1710000000.000002",
+            "name": "eyes",
+        },
+        {
+            "channel_id": "C123",
+            "message_ts": "1710000000.000002",
+            "name": "white_check_mark",
+        },
+    ]
+    assert fake_slack.removed_reactions == [
+        {
+            "channel_id": "C123",
+            "message_ts": "1710000000.000002",
+            "name": "eyes",
+        }
+    ]
     assert fake_slack.messages == [
         {
             "channel_id": "C123",

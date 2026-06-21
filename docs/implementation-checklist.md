@@ -311,20 +311,29 @@ Slack에서 들어온 요청을 안전하게 받고 내부 command 객체로 바
 - [x] Slack retry header를 처리한다.
   - 완료 기준: 같은 `event_id`로 중복 job이 만들어지지 않는다.
 
+- [x] app mention route를 빠른 ACK 구조로 만든다.
+  - 완료 기준: Slack Events API route는 유효한 app mention을 background task로 넘기고 즉시 200 OK를 반환한다.
+
 - [x] 외부 웹/인터넷 URL 분석 요청을 차단한다.
   - 완료 기준: URL 또는 웹 검색 분석 요청은 job을 만들지 않고 Slack에 안내 응답만 보낸다.
 
 - [x] 입력 가드레일을 orchestrator 앞단에 둔다.
-  - 완료 기준: 외부 웹/URL 분석과 수정/PR/배포 요청은 OpenAI orchestrator 호출 전에 차단하고, 통과한 요청만 orchestrator가 분류한다.
+  - 완료 기준: 외부 웹/URL 분석과 수정/PR/배포 요청은 Codex orchestrator 호출 전에 차단하고, 통과한 요청만 orchestrator가 분류한다.
+
+- [x] 입력 가드레일을 코드 기반 1차 라우터로 고도화한다.
+  - 완료 기준: 일반 대화, repo 불명확, 허용 repo 분석, 외부 웹/쓰기 차단은 Codex orchestrator 호출 없이 분류하고, 애매한 요청만 Codex orchestrator에 위임한다.
 
 - [x] 기본 대화와 repo 분석 job을 분리한다.
   - 완료 기준: 일반 대화는 `codex_chat`으로 응답하고, 허용 repo key가 있는 repo 분석 요청만 AgentJob을 만든다.
 
-- [x] gpt-5.5 orchestrator adapter를 추가한다.
-  - 완료 기준: `PANGI_ORCHESTRATOR_MODEL=gpt-5.5`, reasoning `medium`, service tier `default` 설정으로 structured decision을 받을 수 있다.
+- [x] Codex CLI orchestrator adapter를 추가한다.
+  - 완료 기준: `PANGI_ORCHESTRATOR_MODEL=gpt-5.4-mini`, `PANGI_ORCHESTRATOR_TIMEOUT_SECONDS=20` 설정으로 Codex CLI를 통해 structured decision을 받을 수 있다.
+
+- [x] Codex 모델을 호출 목적별로 분리한다.
+  - 완료 기준: 일반 대화와 orchestrator는 기본 `gpt-5.4-mini`, repo read-only 분석은 기본 `gpt-5.5`로 실행된다.
 
 - [x] orchestrator 런타임 프롬프트를 마크다운 파일로 분리한다.
-  - 완료 기준: OpenAI orchestrator가 `pangi/src/pangi/prompts/orchestrator.md`를 읽어 structured decision instructions로 사용한다.
+  - 완료 기준: Codex orchestrator가 `pangi/src/pangi/prompts/orchestrator.md`를 읽어 structured decision instructions로 사용한다.
 
 - [x] 요청을 내부 `SlackCommand` 타입으로 정규화한다.
   - 포함 필드:

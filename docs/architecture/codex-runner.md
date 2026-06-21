@@ -9,8 +9,11 @@ Codex Runner는 서버에서 `codex exec`를 안전하게 실행하고 결과를
 분석 모드:
 
 ```bash
-codex exec -C {worktree_path} --sandbox read-only "{prompt}"
+codex exec -C {worktree_path} --sandbox read-only --model {PANGI_ANALYSIS_MODEL} "{prompt}"
 ```
+
+repo read-only 분석은 실제 코드를 읽고 근거를 정리하는 단계이므로 기본 모델은 `PANGI_ANALYSIS_MODEL=gpt-5.5`를 사용한다.
+일반 대화와 orchestrator 라우팅은 각각 `PANGI_CHAT_MODEL`, `PANGI_ORCHESTRATOR_MODEL` 기본값 `gpt-5.4-mini`를 사용한다.
 
 수정 모드는 1차 MVP에서 실행하지 않는다. 나중에 Slack 승인 이후에만 사용한다.
 

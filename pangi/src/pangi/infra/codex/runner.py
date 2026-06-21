@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ class CodexRunnerError(RuntimeError):
 @dataclass(frozen=True)
 class CodexExecRunner:
     command_prefix: tuple[str, ...] = ("codex", "exec")
+    model: str | None = None
 
     async def run_read_only(
         self,
@@ -32,14 +34,16 @@ class CodexExecRunner:
         if timeout_seconds <= 0:
             raise CodexRunnerError("timeout_seconds must be positive")
 
-        command = (
+        command = [
             *self.command_prefix,
             "-C",
             str(worktree_path),
             "--sandbox",
             CODEX_READ_ONLY_SANDBOX,
-            prompt,
-        )
+        ]
+        if self.model:
+            command.extend(("--model", self.model))
+        command.append(prompt)
         started_at = _utc_now()
         try:
             process = await asyncio.create_subprocess_exec(
@@ -59,19 +63,21 @@ class CodexExecRunner:
             )
         except TimeoutError:
             timed_out = True
-            process.terminate()
+            with suppress(ProcessLookupError):
+                process.terminate()
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     process.communicate(),
                     timeout=TERMINATE_GRACE_SECONDS,
                 )
             except TimeoutError:
-                process.kill()
+                with suppress(ProcessLookupError):
+                    process.kill()
                 stdout_bytes, stderr_bytes = await process.communicate()
         finished_at = _utc_now()
 
         return CodexExecutionResult(
-            command=command,
+            command=tuple(command),
             stdout=_decode(stdout_bytes),
             stderr=_decode(stderr_bytes),
             exit_code=process.returncode,

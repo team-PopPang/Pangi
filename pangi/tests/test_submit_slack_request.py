@@ -41,6 +41,11 @@ class FakeOrchestrator:
         return self.decision
 
 
+class FailingOrchestrator:
+    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]):
+        raise RuntimeError("classification boom")
+
+
 class FakeChatResponder:
     async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
         return f"답장: {text}"
@@ -210,8 +215,76 @@ def test_needs_repo_posts_question_without_job(tmp_path):
         assert result.job_id is None
         assert repository.list_jobs() == []
         assert queue.job_ids == []
-        assert slack.reactions == []
+        assert slack.reactions == [
+            {
+                "channel_id": "C123",
+                "message_ts": "1710000000.000002",
+                "name": "eyes",
+            },
+            {
+                "channel_id": "C123",
+                "message_ts": "1710000000.000002",
+                "name": "white_check_mark",
+            },
+        ]
+        assert slack.removed_reactions == [
+            {
+                "channel_id": "C123",
+                "message_ts": "1710000000.000002",
+                "name": "eyes",
+            }
+        ]
         assert slack.messages[0]["text"] == "어느 repo를 볼까요?"
+
+    asyncio.run(scenario())
+
+
+def test_orchestrator_failure_posts_failure_message_and_reaction(tmp_path):
+    async def scenario():
+        repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
+        queue = FakeQueue()
+        slack = FakeSlack()
+        use_case = SubmitSlackRequestUseCase(
+            repository=repository,
+            job_queue=queue,
+            slack_notifier=slack,
+            request_orchestrator=FailingOrchestrator(),
+            chat_responder=FakeChatResponder(),
+            allowed_repo_keys=("PopPang-iOS",),
+        )
+
+        result = await use_case.execute(make_request("안녕"))
+
+        assert result.classification == RequestClassification.UNSUPPORTED
+        assert result.job_id is None
+        assert repository.list_jobs() == []
+        assert queue.job_ids == []
+        assert slack.messages == [
+            {
+                "channel_id": "C123",
+                "thread_ts": "1710000000.000001",
+                "text": "팡이 요청 분류가 지연되어 실패했습니다. 잠시 후 다시 요청해주세요.",
+            }
+        ]
+        assert slack.reactions == [
+            {
+                "channel_id": "C123",
+                "message_ts": "1710000000.000002",
+                "name": "eyes",
+            },
+            {
+                "channel_id": "C123",
+                "message_ts": "1710000000.000002",
+                "name": "x",
+            },
+        ]
+        assert slack.removed_reactions == [
+            {
+                "channel_id": "C123",
+                "message_ts": "1710000000.000002",
+                "name": "eyes",
+            }
+        ]
 
     asyncio.run(scenario())
 

@@ -26,9 +26,9 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 - `pangi/src/pangi/prompts/pangi_agent.md`: 팡이의 공통 성격, 답변 톤, 코드/개발/커밋/디자인 감각
 - `pangi/src/pangi/prompts/chat.md`: repo를 읽지 않는 일반 대화 모드
 - `pangi/src/pangi/prompts/read_only_analysis.md`: repo를 read-only로 읽고 분석하는 모드
-- `pangi/src/pangi/prompts/orchestrator.md`: 입력 가드레일을 통과한 요청을 일반 대화, repo 확인 질문, repo 분석 job으로 나누는 요청 분류 규칙
+- `pangi/src/pangi/prompts/orchestrator.md`: 입력 가드레일이 애매하다고 남긴 요청을 보조 판정하는 AI Orchestrator 규칙
 
-팡이의 "생명력"을 더 넣고 싶다면 먼저 `pangi_agent.md`를 수정합니다. 요청 분류 기준을 바꾸고 싶을 때만 `orchestrator.md`를 수정합니다.
+팡이의 "생명력"을 더 넣고 싶다면 먼저 `pangi_agent.md`를 수정합니다. 코드 기반 1차 판정 기준은 `pangi/src/pangi/usecase/input_guardrail.py`와 `docs/architecture/input-guardrail.md`에서 관리하고, AI 보조 판정 기준을 바꾸고 싶을 때만 `orchestrator.md`를 수정합니다.
 
 ## 목표
 
@@ -38,16 +38,21 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 flowchart TD
     A["Slack에서 @팡이 호출"] --> B["FastAPI Slack webhook 수신"]
     B --> C["Slack signature와 allowlist 검증"]
-    C --> D["입력 가드레일<br/>외부 웹/쓰기 요청 조기 차단"]
-    D -->|차단| X["안내 응답 후 종료"]
-    D -->|통과한 요청만 전달| E["gpt-5.5 Orchestrator<br/>요청 분류와 라우팅"]
-    E -->|일반 대화| Y["Codex chat 응답"]
-    E -->|repo 불명확| Z["repo 확인 질문 후 종료"]
-    E -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
+    C --> ACK["Slack에 200 OK 즉시 반환"]
+    C --> BG["Background task 시작<br/>eyes reaction 추가"]
+    BG --> D["입력 가드레일<br/>코드 기반 1차 판정"]
+    D -->|외부 웹/쓰기 요청| X["안내 응답 후 종료"]
+    D -->|일반 대화| Y["Codex chat 응답<br/>(gpt-5.4-mini)"]
+    D -->|repo 불명확| Z["repo 확인 질문 후 종료"]
+    D -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
+    D -->|애매한 요청만| E["Codex CLI Orchestrator<br/>보조 판정<br/>(gpt-5.4-mini)"]
+    E -->|일반 대화| Y
+    E -->|repo 불명확| Z
+    E -->|허용 repo 분석| F
     F --> G["Background worker 실행"]
     G --> H["허용된 source repo 확인"]
     H --> I["Read-only git worktree 생성"]
-    I --> J["Codex exec --sandbox read-only 실행"]
+    I --> J["Codex exec --sandbox read-only 실행<br/>(gpt-5.5)"]
     J --> K["stdout, stderr, exit code, timeout 저장"]
     K --> L["Slack thread에 결과 응답"]
 ```
@@ -63,8 +68,9 @@ flowchart TD
 - Slack user/channel allowlist
 - repo allowlist와 worktree root 설정
 - Slack app mention 정규화와 retry 중복 방지
-- 입력 가드레일 기반 외부 웹/쓰기 요청 조기 차단
-- gpt-5.5 orchestrator adapter
+- Slack app mention 빠른 ACK와 background 처리
+- 입력 가드레일 기반 외부 웹/쓰기 요청 조기 차단과 1차 라우팅
+- 애매한 요청만 처리하는 Codex CLI 기반 orchestrator adapter
 - Codex chat 응답 경로
 - 외부 웹/인터넷 분석 요청 차단
 - SQLite 기반 `SlackThread`, `AgentJob`, `CodexRun` 저장소
@@ -288,15 +294,23 @@ PANGI_DEFAULT_BASE_BRANCH=develop
 PANGI_JOB_TIMEOUT_SECONDS=600
 PANGI_CHAT_TIMEOUT_SECONDS=120
 PANGI_CHAT_WORKSPACE_ROOT=
-OPENAI_API_KEY=
-PANGI_ORCHESTRATOR_MODEL=gpt-5.5
-PANGI_ORCHESTRATOR_REASONING_EFFORT=medium
-PANGI_ORCHESTRATOR_SERVICE_TIER=default
+PANGI_CHAT_MODEL=gpt-5.4-mini
+PANGI_ORCHESTRATOR_MODEL=gpt-5.4-mini
+PANGI_ORCHESTRATOR_TIMEOUT_SECONDS=20
+PANGI_ANALYSIS_MODEL=gpt-5.5
 PANGI_ENABLE_ADMIN_PAGES=0
 PANGI_ADMIN_PASSWORD=
 ```
 
-`OPENAI_API_KEY`가 있으면 입력 가드레일을 통과한 요청을 gpt-5.5 orchestrator로 분류합니다. 없으면 로컬 개발과 테스트를 위해 deterministic orchestrator로 fallback합니다.
+모델은 호출 목적별로 분리합니다.
+
+| 설정 | 기본값 | 역할 |
+| --- | --- | --- |
+| `PANGI_ORCHESTRATOR_MODEL` | `gpt-5.4-mini` | 입력 가드레일을 통과한 요청을 일반 대화, repo 확인 질문, repo 분석 job으로 라우팅 |
+| `PANGI_CHAT_MODEL` | `gpt-5.4-mini` | repo를 읽지 않는 일반 대화 응답 |
+| `PANGI_ANALYSIS_MODEL` | `gpt-5.5` | read-only worktree에서 실제 repo 코드를 읽는 분석 |
+
+입력 가드레일은 AI가 아니라 코드로 유지합니다. Orchestrator는 심층 repo 분석이 아니라 흐름을 정하는 단계이므로 기본 mini 모델을 사용합니다.
 
 임시 개발 환경에서 모든 Slack user/channel을 허용하려면 `*`를 사용할 수 있습니다.
 

@@ -20,6 +20,7 @@
 - Slack request signature 검증
 - app mention 정규화와 retry 중복 방지
 - 입력 가드레일 기반 외부 웹/쓰기 요청 조기 차단
+- 입력 가드레일 1차 라우팅과 Codex CLI 기반 orchestrator 보조 분류
 - `SlackThread`, `AgentJob`, `CodexRun` 모델
 - SQLite 기반 job 저장소
 - Slack 요청을 `queued` 상태 job으로 저장
@@ -64,6 +65,7 @@ infra/                 FastAPI route, Slack API, queue, git, codex 같은 외부
 ```text
 infra/slack/routes.py                  Slack Events API route
 infra/slack/client.py                  Slack Web API client
+infra/orchestrator/codex_orchestrator.py  Codex CLI 기반 보조 요청 분류 adapter
 infra/queue/in_process_queue.py        in-process background worker
 infra/git/worktree_manager.py          read-only 분석용 git worktree 생성
 infra/codex/runner.py                  Codex read-only 실행 adapter
@@ -170,6 +172,10 @@ cd pangi
 
 - `PANGI_DEFAULT_BASE_BRANCH`: read-only 분석에서 먼저 시도할 기준 branch입니다. 기본값은 `develop`입니다. 이 branch가 없으면 `main`을 한 번 더 시도합니다.
 - `PANGI_JOB_TIMEOUT_SECONDS`: 기본값은 600초입니다.
+- `PANGI_CHAT_MODEL`: repo를 읽지 않는 일반 대화 모델입니다. 기본값은 `gpt-5.4-mini`입니다.
+- `PANGI_ORCHESTRATOR_MODEL`: 입력 가드레일을 통과한 요청을 라우팅하는 모델입니다. 기본값은 `gpt-5.4-mini`입니다.
+- `PANGI_ORCHESTRATOR_TIMEOUT_SECONDS`: orchestrator Codex 호출 timeout입니다. 기본값은 20초입니다.
+- `PANGI_ANALYSIS_MODEL`: read-only worktree에서 repo 코드를 읽는 분석 모델입니다. 기본값은 `gpt-5.5`입니다.
 - `PANGI_ENABLE_ADMIN_PAGES`: 관리자 페이지를 열려면 `1`로 설정합니다. 기본값은 `0`입니다.
 - `PANGI_ADMIN_PASSWORD`: 관리자 페이지 비밀번호입니다. 관리자 페이지를 켤 때만 필요합니다.
 

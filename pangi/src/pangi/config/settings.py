@@ -11,17 +11,18 @@ from typing import Mapping
 
 DEFAULT_JOB_TIMEOUT_SECONDS = 600
 DEFAULT_CHAT_TIMEOUT_SECONDS = 120
+DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 20
 DEFAULT_BASE_BRANCH = "develop"
 FALLBACK_BASE_BRANCH = "main"
-DEFAULT_ORCHESTRATOR_MODEL = "gpt-5.5"
-DEFAULT_ORCHESTRATOR_REASONING_EFFORT = "medium"
-DEFAULT_ORCHESTRATOR_SERVICE_TIER = "default"
+DEFAULT_LIGHT_MODEL = "gpt-5.4-mini"
+DEFAULT_ANALYSIS_MODEL = "gpt-5.5"
+DEFAULT_CHAT_MODEL = DEFAULT_LIGHT_MODEL
+DEFAULT_ORCHESTRATOR_MODEL = DEFAULT_LIGHT_MODEL
 ALLOW_ALL_MARKER = "*"
 JOB_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 GIT_REF_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]*$")
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-REASONING_EFFORT_VALUES = frozenset({"none", "minimal", "low", "medium", "high", "xhigh"})
-SERVICE_TIER_VALUES = frozenset({"auto", "default"})
 
 
 class SettingsError(ValueError):
@@ -48,11 +49,11 @@ class Settings:
     default_base_branch: str = DEFAULT_BASE_BRANCH
     job_timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS
     chat_timeout_seconds: int = DEFAULT_CHAT_TIMEOUT_SECONDS
-    chat_workspace_root: Path | None = None
-    openai_api_key: str | None = field(default=None, repr=False)
+    chat_model: str = DEFAULT_CHAT_MODEL
+    orchestrator_timeout_seconds: int = DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS
     orchestrator_model: str = DEFAULT_ORCHESTRATOR_MODEL
-    orchestrator_reasoning_effort: str = DEFAULT_ORCHESTRATOR_REASONING_EFFORT
-    orchestrator_service_tier: str = DEFAULT_ORCHESTRATOR_SERVICE_TIER
+    analysis_model: str = DEFAULT_ANALYSIS_MODEL
+    chat_workspace_root: Path | None = None
     enable_admin_pages: bool = False
     admin_password: str | None = field(default=None, repr=False)
 
@@ -126,19 +127,26 @@ class Settings:
                 values.get("PANGI_CHAT_TIMEOUT_SECONDS", str(DEFAULT_CHAT_TIMEOUT_SECONDS)),
                 "PANGI_CHAT_TIMEOUT_SECONDS",
             ),
+            chat_model=_parse_model_name(
+                values.get("PANGI_CHAT_MODEL"),
+                DEFAULT_CHAT_MODEL,
+                "PANGI_CHAT_MODEL",
+            ),
+            orchestrator_timeout_seconds=_parse_positive_int(
+                values.get("PANGI_ORCHESTRATOR_TIMEOUT_SECONDS", str(DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS)),
+                "PANGI_ORCHESTRATOR_TIMEOUT_SECONDS",
+            ),
+            orchestrator_model=_parse_model_name(
+                values.get("PANGI_ORCHESTRATOR_MODEL"),
+                DEFAULT_ORCHESTRATOR_MODEL,
+                "PANGI_ORCHESTRATOR_MODEL",
+            ),
+            analysis_model=_parse_model_name(
+                values.get("PANGI_ANALYSIS_MODEL"),
+                DEFAULT_ANALYSIS_MODEL,
+                "PANGI_ANALYSIS_MODEL",
+            ),
             chat_workspace_root=chat_workspace_root,
-            openai_api_key=values.get("OPENAI_API_KEY", "").strip() or None,
-            orchestrator_model=(values.get("PANGI_ORCHESTRATOR_MODEL") or DEFAULT_ORCHESTRATOR_MODEL).strip(),
-            orchestrator_reasoning_effort=_parse_choice(
-                values.get("PANGI_ORCHESTRATOR_REASONING_EFFORT") or DEFAULT_ORCHESTRATOR_REASONING_EFFORT,
-                "PANGI_ORCHESTRATOR_REASONING_EFFORT",
-                REASONING_EFFORT_VALUES,
-            ),
-            orchestrator_service_tier=_parse_choice(
-                values.get("PANGI_ORCHESTRATOR_SERVICE_TIER") or DEFAULT_ORCHESTRATOR_SERVICE_TIER,
-                "PANGI_ORCHESTRATOR_SERVICE_TIER",
-                SERVICE_TIER_VALUES,
-            ),
             enable_admin_pages=enable_admin_pages,
             admin_password=admin_password,
         )
@@ -277,11 +285,10 @@ def _parse_positive_int(raw_value: str, name: str) -> int:
     return value
 
 
-def _parse_choice(raw_value: str, name: str, allowed_values: frozenset[str]) -> str:
-    value = raw_value.strip().lower()
-    if value not in allowed_values:
-        allowed = ", ".join(sorted(allowed_values))
-        raise SettingsError(f"{name} must be one of: {allowed}")
+def _parse_model_name(raw_value: str | None, default_value: str, name: str) -> str:
+    value = (raw_value or "").strip() or default_value
+    if not MODEL_NAME_PATTERN.fullmatch(value) or value.startswith("-"):
+        raise SettingsError(f"{name} must be a safe model name")
     return value
 
 

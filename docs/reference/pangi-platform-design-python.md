@@ -1580,9 +1580,11 @@ async def slack_interactions(request: Request):
         return {"text": "작업을 취소했습니다."}
 ```
 
-## 11. OpenAI API key 기반 전환이 필요한 시점
+## 11. Codex CLI 인증 기반 유지
 
-초기 MVP는 Pro 로그인 기반 `codex exec`가 현실적이다. 다만 아래 상황이 오면 API 기반 전환을 검토한다.
+현재 팡이 MVP는 API key 기반 직접 호출이 아니라 서버 계정의 Codex CLI 인증으로 `codex exec`를 실행한다.
+
+아래 상황이 와도 먼저 Codex CLI 운영 안정화와 서버 계층 분리를 우선 검토한다.
 
 - 여러 worker에서 안정적인 병렬 실행이 필요할 때
 - Codex CLI session/auth 관리가 운영 부담이 될 때
@@ -1590,4 +1592,4 @@ async def slack_interactions(request: Request):
 - 비용/사용량/권한을 팀 단위로 통제해야 할 때
 - 서버 환경에서 interactive login 유지가 어려울 때
 
-전환 전까지는 서버가 작업 상태, 승인, git, Slack/Notion/GitHub 기록을 통제하고, Codex CLI는 격리된 실행 도구로만 사용하는 구조를 유지한다.
+서버가 작업 상태, 승인, git, Slack/Notion/GitHub 기록을 통제하고, Codex CLI는 격리된 실행 도구로만 사용하는 구조를 유지한다.

@@ -43,9 +43,10 @@ Slack
 - Slack app mention 수신
 - Slack request signature 검증
 - user/channel/repo allowlist
-- 입력 가드레일 기반 외부 웹/쓰기 요청 차단
-- gpt-5.5 orchestrator를 통한 요청 분류
+- 입력 가드레일 기반 외부 웹/쓰기 요청 차단과 코드 기반 1차 라우팅
+- 애매한 요청만 Codex CLI orchestrator를 통한 보조 분류
 - repo worktree 없는 Codex chat 응답
+- 일반 대화와 orchestrator는 mini 모델, 실제 repo read-only 분석은 강한 분석 모델로 분리
 - Slack thread 단위 job 생성
 - background job 실행
 - job별 git worktree 생성

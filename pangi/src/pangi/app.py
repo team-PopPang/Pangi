@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     analysis_use_case = RunAnalysisJobUseCase(
         repository=repository,
         worktree_manager=get_worktree_manager(),
-        codex_runner=CodexExecRunner(),
+        codex_runner=CodexExecRunner(model=settings.analysis_model),
         slack_notifier=slack_client,
         timeout_seconds=settings.job_timeout_seconds,
     )
