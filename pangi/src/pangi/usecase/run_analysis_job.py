@@ -4,9 +4,10 @@ import json
 import logging
 
 from pangi.domain.models import AgentJob
-from pangi.domain.policies import redact_secrets, truncate_text
+from pangi.domain.policies import redact_secrets
 from pangi.repository import JobRepository
 from pangi.usecase.build_prompt import build_read_only_analysis_prompt
+from pangi.usecase.output_guardrail import prepare_output_markdown
 from pangi.usecase.ports import CodexExecutionResult, CodexRunner, SlackNotifier, WorktreeManager
 
 
@@ -98,11 +99,18 @@ class RunAnalysisJobUseCase:
         self._repository.update_job_result(job.id, stdout=stdout, stderr=stderr)
 
     async def _post_success(self, job: AgentJob, stdout: str) -> None:
-        body = truncate_text(stdout.strip() or "분석 결과 출력이 비어 있습니다.", max_chars=SLACK_RESULT_MAX_CHARS)
+        body = prepare_output_markdown(
+            stdout,
+            max_chars=SLACK_RESULT_MAX_CHARS,
+            empty_fallback="분석 결과 출력이 비어 있습니다.",
+        )
         await self._slack_notifier.post_message(
             channel_id=job.slack_channel_id,
             thread_ts=job.slack_thread_ts,
-            text=f"팡이가 read-only 분석을 완료했습니다. job_id: {job.id}\n\n{body}",
+            text=prepare_output_markdown(
+                f"팡이가 read-only 분석을 완료했습니다. job_id: {job.id}\n\n{body}",
+                max_chars=SLACK_RESULT_MAX_CHARS,
+            ),
         )
         await self._replace_in_progress_reaction(job, name=SUCCESS_REACTION_NAME)
 
@@ -110,7 +118,10 @@ class RunAnalysisJobUseCase:
         await self._slack_notifier.post_message(
             channel_id=job.slack_channel_id,
             thread_ts=job.slack_thread_ts,
-            text=f"팡이 read-only 분석이 실패했습니다. job_id: {job.id}\n\n{message}",
+            text=prepare_output_markdown(
+                f"팡이 read-only 분석이 실패했습니다. job_id: {job.id}\n\n{message}",
+                max_chars=SLACK_RESULT_MAX_CHARS,
+            ),
         )
         await self._replace_in_progress_reaction(job, name=FAILURE_REACTION_NAME)
 
@@ -118,7 +129,10 @@ class RunAnalysisJobUseCase:
         await self._slack_notifier.post_message(
             channel_id=job.slack_channel_id,
             thread_ts=job.slack_thread_ts,
-            text=f"팡이 read-only 분석 시간이 초과되었습니다. job_id: {job.id}\n\n{message}",
+            text=prepare_output_markdown(
+                f"팡이 read-only 분석 시간이 초과되었습니다. job_id: {job.id}\n\n{message}",
+                max_chars=SLACK_RESULT_MAX_CHARS,
+            ),
         )
         await self._replace_in_progress_reaction(job, name=FAILURE_REACTION_NAME)
 
@@ -145,7 +159,11 @@ class RunAnalysisJobUseCase:
 
     def _failure_summary(self, exit_code: int | None, stdout: str, stderr: str) -> str:
         detail = stderr.strip() or stdout.strip() or "Codex output is empty"
-        detail = truncate_text(detail, max_chars=SLACK_ERROR_MAX_CHARS)
+        detail = prepare_output_markdown(
+            detail,
+            max_chars=SLACK_ERROR_MAX_CHARS,
+            empty_fallback="Codex output is empty",
+        )
         return f"Codex exited with code {exit_code}. {detail}"
 
 

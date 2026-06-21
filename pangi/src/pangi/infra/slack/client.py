@@ -7,6 +7,7 @@ from typing import Protocol
 from urllib import request
 
 from pangi.config import get_settings
+from pangi.infra.slack.markdown_to_slack import markdown_to_slack
 
 
 SLACK_API_BASE_URL = "https://slack.com/api"
@@ -40,7 +41,7 @@ class SlackWebClient:
     async def post_message(self, *, channel_id: str, text: str, thread_ts: str | None = None) -> None:
         payload: dict[str, object] = {
             "channel": channel_id,
-            "text": text,
+            "text": markdown_to_slack(text),
         }
         if thread_ts:
             payload["thread_ts"] = thread_ts

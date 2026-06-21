@@ -51,6 +51,11 @@ class FakeChatResponder:
         return f"답장: {text}"
 
 
+class MarkdownChatResponder:
+    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+        return "# 결론\n**강조** [문서](https://example.com)"
+
+
 class FailingChatResponder:
     async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
         raise RuntimeError("boom")
@@ -124,6 +129,45 @@ def test_codex_chat_posts_reply_without_repo_job(tmp_path):
                 "channel_id": "C123",
                 "thread_ts": "1710000000.000001",
                 "text": "답장: 안녕",
+            }
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_codex_chat_keeps_canonical_markdown_before_slack_adapter(tmp_path):
+    async def scenario():
+        repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
+        queue = FakeQueue()
+        slack = FakeSlack()
+        tasks = []
+
+        def collect_task(task):
+            tasks.append(task)
+
+        use_case = SubmitSlackRequestUseCase(
+            repository=repository,
+            job_queue=queue,
+            slack_notifier=slack,
+            request_orchestrator=FakeOrchestrator(
+                ClassifiedRequest(
+                    kind=RequestClassification.CODEX_CHAT,
+                    should_create_job=False,
+                )
+            ),
+            chat_responder=MarkdownChatResponder(),
+            allowed_repo_keys=("PopPang-iOS",),
+            background_runner=collect_task,
+        )
+
+        await use_case.execute(make_request())
+        await asyncio.gather(*tasks)
+
+        assert slack.messages == [
+            {
+                "channel_id": "C123",
+                "thread_ts": "1710000000.000001",
+                "text": "# 결론\n**강조** [문서](https://example.com)",
             }
         ]
 

@@ -6,8 +6,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from pangi.domain.models import JobStatus
-from pangi.domain.policies import redact_secrets, truncate_text
 from pangi.repository import DuplicateEventError, JobRepository
+from pangi.usecase.output_guardrail import prepare_output_markdown
 from pangi.usecase.request_decision import NEEDS_REPO_MESSAGE, RequestClassification
 from pangi.usecase.ports import ChatResponder, JobQueue, RequestOrchestrator, SlackNotifier
 
@@ -178,7 +178,7 @@ class SubmitSlackRequestUseCase:
             await self._slack_notifier.post_message(
                 channel_id=request.channel_id,
                 thread_ts=request.thread_ts,
-                text=f"팡이가 요청을 접수했습니다. job_id: {job_id}",
+                text=prepare_output_markdown(f"팡이가 요청을 접수했습니다. job_id: {job_id}"),
             )
         except Exception as error:
             logger.warning("Failed to post Slack message: %s", error)
@@ -186,10 +186,7 @@ class SubmitSlackRequestUseCase:
     async def _post_policy_message(self, request: SubmitSlackRequestInput, text: str) -> None:
         if not text:
             return
-        safe_text = truncate_text(
-            redact_secrets(text),
-            max_chars=CHAT_REPLY_MAX_CHARS,
-        )
+        safe_text = prepare_output_markdown(text, max_chars=CHAT_REPLY_MAX_CHARS)
         try:
             await self._slack_notifier.post_message(
                 channel_id=request.channel_id,
@@ -213,10 +210,7 @@ class SubmitSlackRequestUseCase:
             succeeded = False
             response_text = "팡이 대화 응답 생성에 실패했습니다."
 
-        safe_text = truncate_text(
-            redact_secrets(response_text),
-            max_chars=CHAT_REPLY_MAX_CHARS,
-        )
+        safe_text = prepare_output_markdown(response_text, max_chars=CHAT_REPLY_MAX_CHARS)
         try:
             await self._slack_notifier.post_message(
                 channel_id=request.channel_id,

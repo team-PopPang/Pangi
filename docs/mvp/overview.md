@@ -35,6 +35,8 @@ Slack
 -> repo 분석은 Job Worker
 -> Worktree Manager
 -> Codex Runner
+-> 출력 가드레일
+-> Markdown to Slack
 -> Slack Thread Reply
 ```
 
@@ -52,6 +54,8 @@ Slack
 - job별 git worktree 생성
 - `codex exec --sandbox read-only` 실행
 - stdout/stderr/exit code/timeout 수집
+- 출력 가드레일 기반 secret redaction과 길이 제한
+- Slack bot 응답 전용 Markdown to Slack 변환
 - Slack thread에 결과 반환
 - 실패/timeout 메시지 반환
 
