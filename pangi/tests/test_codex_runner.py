@@ -20,7 +20,11 @@ def test_codex_runner_collects_stdout(tmp_path):
             tmp_path,
             "import sys\nprint(sys.argv[-1])\n",
         )
-        runner = CodexExecRunner(command_prefix=(sys.executable, str(script)), model="gpt-5.5")
+        runner = CodexExecRunner(
+            command_prefix=(sys.executable, str(script)),
+            model="gpt-5.5",
+            reasoning_effort="high",
+        )
 
         result = await runner.run_read_only(
             worktree_path=tmp_path,
@@ -34,6 +38,7 @@ def test_codex_runner_collects_stdout(tmp_path):
         assert result.timed_out is False
         assert result.command[-1] == "분석해줘"
         assert result.command[-3:-1] == ("--model", "gpt-5.5")
+        assert ("-c", 'model_reasoning_effort="high"') == result.command[-5:-3]
         assert "--ask-for-approval" not in result.command
 
     asyncio.run(scenario())
@@ -153,9 +158,20 @@ def test_codex_chat_responder_uses_scratch_workspace_and_skip_git_check(tmp_path
             "--sandbox",
             "read-only",
         ]
-        assert args[6:8] == ["--model", "gpt-5.4-mini"]
+        assert args[6:8] == ["-c", 'model_reasoning_effort="low"']
+        assert args[8:10] == ["--model", "gpt-5.4-mini"]
         assert "팡이 공통 스타일" in args[-1]
         assert "일반 대화 모드" in args[-1]
+        assert "인사와 자기소개" in args[-1]
+        assert "단순 인사" in args[-1]
+        assert "기능소개와 자기소개" in args[-1]
+        assert "PopPang 팀의 Slack AI 동료" in args[-1]
+        assert "PopPang 팀의 데이터(GitHub, 추후 Notion)" in args[-1]
+        assert "GitHub를 읽고 코드, PR, 커밋, 장애 원인" in args[-1]
+        assert "타 팀원의 작업 현황" in args[-1]
+        assert "Notion 문서까지 함께 읽을 수 있도록 준비 중" in args[-1]
+        assert "제품, 디자인, 커밋 문구 목록으로 대체하지 않습니다" in args[-1]
+        assert "코드 수정, PR 생성, 배포는 아직 직접 실행하지 않습니다" in args[-1]
         assert "사용자 메시지:\n안녕" in args[-1]
 
     asyncio.run(scenario())
