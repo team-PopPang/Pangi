@@ -18,11 +18,16 @@ DEFAULT_LIGHT_MODEL = "gpt-5.4-mini"
 DEFAULT_ANALYSIS_MODEL = "gpt-5.5"
 DEFAULT_CHAT_MODEL = DEFAULT_LIGHT_MODEL
 DEFAULT_ORCHESTRATOR_MODEL = DEFAULT_LIGHT_MODEL
+DEFAULT_LIGHT_REASONING_EFFORT = "low"
+DEFAULT_ANALYSIS_REASONING_EFFORT = "high"
+DEFAULT_CHAT_REASONING_EFFORT = DEFAULT_LIGHT_REASONING_EFFORT
+DEFAULT_ORCHESTRATOR_REASONING_EFFORT = DEFAULT_LIGHT_REASONING_EFFORT
 ALLOW_ALL_MARKER = "*"
 JOB_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 GIT_REF_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]*$")
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+REASONING_EFFORT_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 
 
 class SettingsError(ValueError):
@@ -50,9 +55,12 @@ class Settings:
     job_timeout_seconds: int = DEFAULT_JOB_TIMEOUT_SECONDS
     chat_timeout_seconds: int = DEFAULT_CHAT_TIMEOUT_SECONDS
     chat_model: str = DEFAULT_CHAT_MODEL
+    chat_reasoning_effort: str = DEFAULT_CHAT_REASONING_EFFORT
     orchestrator_timeout_seconds: int = DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS
     orchestrator_model: str = DEFAULT_ORCHESTRATOR_MODEL
+    orchestrator_reasoning_effort: str = DEFAULT_ORCHESTRATOR_REASONING_EFFORT
     analysis_model: str = DEFAULT_ANALYSIS_MODEL
+    analysis_reasoning_effort: str = DEFAULT_ANALYSIS_REASONING_EFFORT
     chat_workspace_root: Path | None = None
     enable_admin_pages: bool = False
     admin_password: str | None = field(default=None, repr=False)
@@ -132,6 +140,11 @@ class Settings:
                 DEFAULT_CHAT_MODEL,
                 "PANGI_CHAT_MODEL",
             ),
+            chat_reasoning_effort=_parse_reasoning_effort(
+                values.get("PANGI_CHAT_REASONING_EFFORT"),
+                DEFAULT_CHAT_REASONING_EFFORT,
+                "PANGI_CHAT_REASONING_EFFORT",
+            ),
             orchestrator_timeout_seconds=_parse_positive_int(
                 values.get("PANGI_ORCHESTRATOR_TIMEOUT_SECONDS", str(DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS)),
                 "PANGI_ORCHESTRATOR_TIMEOUT_SECONDS",
@@ -141,10 +154,20 @@ class Settings:
                 DEFAULT_ORCHESTRATOR_MODEL,
                 "PANGI_ORCHESTRATOR_MODEL",
             ),
+            orchestrator_reasoning_effort=_parse_reasoning_effort(
+                values.get("PANGI_ORCHESTRATOR_REASONING_EFFORT"),
+                DEFAULT_ORCHESTRATOR_REASONING_EFFORT,
+                "PANGI_ORCHESTRATOR_REASONING_EFFORT",
+            ),
             analysis_model=_parse_model_name(
                 values.get("PANGI_ANALYSIS_MODEL"),
                 DEFAULT_ANALYSIS_MODEL,
                 "PANGI_ANALYSIS_MODEL",
+            ),
+            analysis_reasoning_effort=_parse_reasoning_effort(
+                values.get("PANGI_ANALYSIS_REASONING_EFFORT"),
+                DEFAULT_ANALYSIS_REASONING_EFFORT,
+                "PANGI_ANALYSIS_REASONING_EFFORT",
             ),
             chat_workspace_root=chat_workspace_root,
             enable_admin_pages=enable_admin_pages,
@@ -289,6 +312,14 @@ def _parse_model_name(raw_value: str | None, default_value: str, name: str) -> s
     value = (raw_value or "").strip() or default_value
     if not MODEL_NAME_PATTERN.fullmatch(value) or value.startswith("-"):
         raise SettingsError(f"{name} must be a safe model name")
+    return value
+
+
+def _parse_reasoning_effort(raw_value: str | None, default_value: str, name: str) -> str:
+    value = ((raw_value or "").strip() or default_value).lower()
+    if value not in REASONING_EFFORT_VALUES:
+        allowed = ", ".join(sorted(REASONING_EFFORT_VALUES))
+        raise SettingsError(f"{name} must be one of: {allowed}")
     return value
 
 

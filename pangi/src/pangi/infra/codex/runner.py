@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pangi.infra.codex.options import append_model_reasoning_effort
 from pangi.usecase.ports import CodexExecutionResult
 
 
@@ -21,6 +22,7 @@ class CodexRunnerError(RuntimeError):
 class CodexExecRunner:
     command_prefix: tuple[str, ...] = ("codex", "exec")
     model: str | None = None
+    reasoning_effort: str | None = None
 
     async def run_read_only(
         self,
@@ -41,6 +43,7 @@ class CodexExecRunner:
             "--sandbox",
             CODEX_READ_ONLY_SANDBOX,
         ]
+        append_model_reasoning_effort(command, self.reasoning_effort)
         if self.model:
             command.extend(("--model", self.model))
         command.append(prompt)

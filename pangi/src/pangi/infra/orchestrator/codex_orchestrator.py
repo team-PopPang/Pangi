@@ -9,6 +9,7 @@ from contextlib import suppress
 from typing import Any
 
 from pangi.config import get_settings
+from pangi.infra.codex.options import append_model_reasoning_effort
 from pangi.prompts.loader import load_prompt
 from pangi.usecase.input_guardrail import (
     decide_guarded_request,
@@ -71,6 +72,7 @@ class GuardedRequestOrchestrator:
 class CodexRequestOrchestrator:
     command_prefix: tuple[str, ...] = DEFAULT_CODEX_ORCHESTRATOR_COMMAND
     model: str | None = None
+    reasoning_effort: str | None = None
     timeout_seconds: float = 20
     workspace_path: Path | None = None
 
@@ -122,6 +124,7 @@ class CodexRequestOrchestrator:
             "--output-last-message",
             str(output_path),
         ]
+        append_model_reasoning_effort(command, self.reasoning_effort)
         if self.model:
             command.extend(("--model", self.model))
         command.append(prompt)
@@ -220,6 +223,7 @@ def get_request_orchestrator() -> RequestOrchestrator:
     _request_orchestrator = GuardedRequestOrchestrator(
         CodexRequestOrchestrator(
             model=settings.orchestrator_model,
+            reasoning_effort=settings.orchestrator_reasoning_effort,
             timeout_seconds=settings.orchestrator_timeout_seconds,
         )
     )

@@ -30,13 +30,14 @@ Orchestrator는 입력 가드레일이 `ambiguous`로 남긴 요청만 받아 `c
 
 ```text
 model: gpt-5.4-mini
+reasoning effort: low
 timeout: 20 seconds
 output: JSON schema
 ```
 
-`PANGI_ORCHESTRATOR_MODEL`은 Codex CLI의 `--model` 옵션으로 전달한다. Orchestrator는 repo를 깊게 읽는 단계가 아니라 입력 가드레일이 확신하지 못한 요청의 방향성을 보조 판정하는 단계이므로 기본값은 mini 모델을 사용한다.
+`PANGI_ORCHESTRATOR_MODEL`은 Codex CLI의 `--model` 옵션으로 전달한다. `PANGI_ORCHESTRATOR_REASONING_EFFORT`는 `-c model_reasoning_effort="..."`로 전달한다. Orchestrator는 repo를 깊게 읽는 단계가 아니라 입력 가드레일이 확신하지 못한 요청의 방향성을 보조 판정하는 단계이므로 기본값은 mini 모델과 `low` reasoning을 사용한다.
 
-일반 대화는 `PANGI_CHAT_MODEL` 기본값 `gpt-5.4-mini`를 사용하고, 실제 repo read-only 분석은 `PANGI_ANALYSIS_MODEL` 기본값 `gpt-5.5`를 사용한다.
+일반 대화는 `PANGI_CHAT_MODEL` 기본값 `gpt-5.4-mini`, reasoning `low`를 사용하고, 실제 repo read-only 분석은 `PANGI_ANALYSIS_MODEL` 기본값 `gpt-5.5`, reasoning `high`를 사용한다.
 
 테스트와 일부 로컬 검증에서는 deterministic orchestrator를 직접 주입할 수 있지만, 기본 런타임은 HTTP AI API를 직접 호출하지 않고 Codex CLI를 호출한다.
 

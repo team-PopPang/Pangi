@@ -173,9 +173,12 @@ cd pangi
 - `PANGI_DEFAULT_BASE_BRANCH`: read-only 분석에서 먼저 시도할 기준 branch입니다. 기본값은 `develop`입니다. 이 branch가 없으면 `main`을 한 번 더 시도합니다.
 - `PANGI_JOB_TIMEOUT_SECONDS`: 기본값은 600초입니다.
 - `PANGI_CHAT_MODEL`: repo를 읽지 않는 일반 대화 모델입니다. 기본값은 `gpt-5.4-mini`입니다.
+- `PANGI_CHAT_REASONING_EFFORT`: 일반 대화용 Codex 호출의 추론 난이도입니다. 기본값은 `low`입니다.
 - `PANGI_ORCHESTRATOR_MODEL`: 입력 가드레일을 통과한 요청을 라우팅하는 모델입니다. 기본값은 `gpt-5.4-mini`입니다.
+- `PANGI_ORCHESTRATOR_REASONING_EFFORT`: orchestrator용 Codex 호출의 추론 난이도입니다. 기본값은 `low`입니다.
 - `PANGI_ORCHESTRATOR_TIMEOUT_SECONDS`: orchestrator Codex 호출 timeout입니다. 기본값은 20초입니다.
 - `PANGI_ANALYSIS_MODEL`: read-only worktree에서 repo 코드를 읽는 분석 모델입니다. 기본값은 `gpt-5.5`입니다.
+- `PANGI_ANALYSIS_REASONING_EFFORT`: repo 분석용 Codex 호출의 추론 난이도입니다. 기본값은 `high`입니다.
 - `PANGI_ENABLE_ADMIN_PAGES`: 관리자 페이지를 열려면 `1`로 설정합니다. 기본값은 `0`입니다.
 - `PANGI_ADMIN_PASSWORD`: 관리자 페이지 비밀번호입니다. 관리자 페이지를 켤 때만 필요합니다.
 

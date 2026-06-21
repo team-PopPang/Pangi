@@ -44,8 +44,11 @@ def test_settings_parses_allowlists_repo_paths_and_default_timeout():
     assert settings.orchestrator_timeout_seconds == 20
     assert settings.chat_workspace_root == Path("/tmp/pangi/worktrees/_chat").resolve(strict=False)
     assert settings.chat_model == "gpt-5.4-mini"
+    assert settings.chat_reasoning_effort == "low"
     assert settings.orchestrator_model == "gpt-5.4-mini"
+    assert settings.orchestrator_reasoning_effort == "low"
     assert settings.analysis_model == "gpt-5.5"
+    assert settings.analysis_reasoning_effort == "high"
     assert settings.enable_admin_pages is False
     assert settings.admin_password is None
 
@@ -62,18 +65,24 @@ def test_settings_uses_configured_chat_and_orchestrator_options():
             PANGI_CHAT_TIMEOUT_SECONDS="60",
             PANGI_CHAT_WORKSPACE_ROOT="/tmp/pangi/worktrees/chat",
             PANGI_CHAT_MODEL="gpt-5.4-mini-codex",
+            PANGI_CHAT_REASONING_EFFORT="medium",
             PANGI_ORCHESTRATOR_MODEL="gpt-5.5-codex",
+            PANGI_ORCHESTRATOR_REASONING_EFFORT="medium",
             PANGI_ORCHESTRATOR_TIMEOUT_SECONDS="30",
             PANGI_ANALYSIS_MODEL="gpt-5.5-codex",
+            PANGI_ANALYSIS_REASONING_EFFORT="xhigh",
         )
     )
 
     assert settings.chat_timeout_seconds == 60
     assert settings.chat_workspace_root == Path("/tmp/pangi/worktrees/chat").resolve(strict=False)
     assert settings.chat_model == "gpt-5.4-mini-codex"
+    assert settings.chat_reasoning_effort == "medium"
     assert settings.orchestrator_model == "gpt-5.5-codex"
+    assert settings.orchestrator_reasoning_effort == "medium"
     assert settings.orchestrator_timeout_seconds == 30
     assert settings.analysis_model == "gpt-5.5-codex"
+    assert settings.analysis_reasoning_effort == "xhigh"
 
 
 def test_settings_rejects_chat_workspace_outside_worktree_root():
@@ -89,6 +98,11 @@ def test_settings_rejects_invalid_orchestrator_timeout():
 def test_settings_rejects_unsafe_model_name():
     with pytest.raises(SettingsError, match="PANGI_CHAT_MODEL"):
         Settings.from_env(valid_env(PANGI_CHAT_MODEL="bad model"))
+
+
+def test_settings_rejects_invalid_reasoning_effort():
+    with pytest.raises(SettingsError, match="PANGI_CHAT_REASONING_EFFORT"):
+        Settings.from_env(valid_env(PANGI_CHAT_REASONING_EFFORT="fast"))
 
 
 def test_settings_uses_configured_default_base_branch():
@@ -189,9 +203,12 @@ def test_settings_loads_env_file_from_pangi_folder(tmp_path, monkeypatch):
         "PANGI_CHAT_TIMEOUT_SECONDS",
         "PANGI_CHAT_WORKSPACE_ROOT",
         "PANGI_CHAT_MODEL",
+        "PANGI_CHAT_REASONING_EFFORT",
         "PANGI_ORCHESTRATOR_MODEL",
+        "PANGI_ORCHESTRATOR_REASONING_EFFORT",
         "PANGI_ORCHESTRATOR_TIMEOUT_SECONDS",
         "PANGI_ANALYSIS_MODEL",
+        "PANGI_ANALYSIS_REASONING_EFFORT",
         "PANGI_ENABLE_ADMIN_PAGES",
         "PANGI_ADMIN_PASSWORD",
     ):
@@ -240,9 +257,12 @@ def test_settings_uses_env_example_for_empty_local_values(tmp_path, monkeypatch)
         "PANGI_CHAT_TIMEOUT_SECONDS",
         "PANGI_CHAT_WORKSPACE_ROOT",
         "PANGI_CHAT_MODEL",
+        "PANGI_CHAT_REASONING_EFFORT",
         "PANGI_ORCHESTRATOR_MODEL",
+        "PANGI_ORCHESTRATOR_REASONING_EFFORT",
         "PANGI_ORCHESTRATOR_TIMEOUT_SECONDS",
         "PANGI_ANALYSIS_MODEL",
+        "PANGI_ANALYSIS_REASONING_EFFORT",
         "PANGI_ENABLE_ADMIN_PAGES",
         "PANGI_ADMIN_PASSWORD",
     ):

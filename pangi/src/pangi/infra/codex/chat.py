@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pangi.config import get_settings
+from pangi.infra.codex.options import append_model_reasoning_effort
 from pangi.prompts.loader import load_prompt
 from pangi.usecase.ports import ChatResponder
 
@@ -21,6 +22,7 @@ class CodexChatError(RuntimeError):
 class CodexChatResponder:
     command_prefix: tuple[str, ...] = DEFAULT_CODEX_COMMAND
     model: str | None = None
+    reasoning_effort: str | None = None
 
     async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
         settings = get_settings()
@@ -31,6 +33,7 @@ class CodexChatResponder:
 
         prompt = _build_chat_prompt(text)
         model = self.model or settings.chat_model
+        reasoning_effort = self.reasoning_effort or settings.chat_reasoning_effort
         command = [
             *self.command_prefix,
             "exec",
@@ -40,6 +43,7 @@ class CodexChatResponder:
             "--sandbox",
             "read-only",
         ]
+        append_model_reasoning_effort(command, reasoning_effort)
         if model:
             command.extend(("--model", model))
         command.append(prompt)

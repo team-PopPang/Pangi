@@ -13,6 +13,7 @@ from pangi.infra.queue import InProcessJobQueue, set_job_queue
 from pangi.infra.slack import router as slack_router
 from pangi.infra.slack.client import get_slack_client
 from pangi.repository import get_job_repository
+from pangi.usecase.output_guardrail import prepare_output_markdown
 from pangi.usecase.run_analysis_job import RunAnalysisJobUseCase
 
 
@@ -26,7 +27,7 @@ async def slack_progress_hook(job: AgentJob, _status: JobStatus, message: str) -
         await get_slack_client().post_message(
             channel_id=job.slack_channel_id,
             thread_ts=job.slack_thread_ts,
-            text=f"{message} job_id: {job.id}",
+            text=prepare_output_markdown(f"{message} job_id: {job.id}"),
         )
     except Exception as error:
         logger.warning("Failed to post Slack progress message for job %s: %s", job.id, error)
@@ -41,7 +42,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     analysis_use_case = RunAnalysisJobUseCase(
         repository=repository,
         worktree_manager=get_worktree_manager(),
-        codex_runner=CodexExecRunner(model=settings.analysis_model),
+        codex_runner=CodexExecRunner(
+            model=settings.analysis_model,
+            reasoning_effort=settings.analysis_reasoning_effort,
+        ),
         slack_notifier=slack_client,
         timeout_seconds=settings.job_timeout_seconds,
     )

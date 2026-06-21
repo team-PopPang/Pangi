@@ -41,7 +41,7 @@ flowchart TD
     E -->|일반 대화 확실| CHAT["codex_chat"]
     E -->|repo 불명확 확실| ASK["needs_repo"]
     E -->|허용 repo 분석 확실| JOB["repo_analysis"]
-    E -->|애매함| AI["AI Orchestrator<br/>gpt-5.4-mini"]
+    E -->|애매함| AI["AI Orchestrator<br/>gpt-5.4-mini / low"]
     AI --> P["Policy Enforcement"]
     P --> OUT["ClassifiedRequest"]
     CHAT --> OUT

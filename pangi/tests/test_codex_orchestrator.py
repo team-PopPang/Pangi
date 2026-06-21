@@ -44,6 +44,7 @@ def test_codex_orchestrator_builds_codex_exec_command(tmp_path):
     orchestrator = CodexRequestOrchestrator(
         command_prefix=("codex", "exec"),
         model="test-model",
+        reasoning_effort="low",
         workspace_path=tmp_path,
     )
 
@@ -65,6 +66,7 @@ def test_codex_orchestrator_builds_codex_exec_command(tmp_path):
         "--output-schema",
     )
     assert "--output-last-message" in command
+    assert ("-c", 'model_reasoning_effort="low"') == command[-5:-3]
     assert ("--model", "test-model") == command[-3:-1]
     assert command[-1] == "분류해줘"
 

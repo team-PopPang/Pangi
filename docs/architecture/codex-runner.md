@@ -9,11 +9,13 @@ Codex Runner는 서버에서 `codex exec`를 안전하게 실행하고 결과를
 분석 모드:
 
 ```bash
-codex exec -C {worktree_path} --sandbox read-only --model {PANGI_ANALYSIS_MODEL} "{prompt}"
+codex exec -C {worktree_path} --sandbox read-only -c model_reasoning_effort="{PANGI_ANALYSIS_REASONING_EFFORT}" --model {PANGI_ANALYSIS_MODEL} "{prompt}"
 ```
 
 repo read-only 분석은 실제 코드를 읽고 근거를 정리하는 단계이므로 기본 모델은 `PANGI_ANALYSIS_MODEL=gpt-5.5`를 사용한다.
-일반 대화와 orchestrator 라우팅은 각각 `PANGI_CHAT_MODEL`, `PANGI_ORCHESTRATOR_MODEL` 기본값 `gpt-5.4-mini`를 사용한다.
+일반 대화와 orchestrator 라우팅은 각각 `PANGI_CHAT_MODEL`, `PANGI_ORCHESTRATOR_MODEL` 기본값 `gpt-5.4-mini`와 reasoning `low`를 사용한다. repo 분석은 기본 reasoning `high`를 사용한다.
+
+팡이를 개발하는 Codex의 `.codex/config.toml`은 팡이 런타임 설정이 아니다. 팡이가 실행하는 `codex exec`는 각 호출에서 `-c model_reasoning_effort="..."`를 명시해 프로젝트/사용자 Codex 설정이 몰래 상속되지 않게 한다.
 
 수정 모드는 1차 MVP에서 실행하지 않는다. 나중에 Slack 승인 이후에만 사용한다.
 
