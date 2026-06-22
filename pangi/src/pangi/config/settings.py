@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
+from urllib.parse import urlparse
 
 
 DEFAULT_JOB_TIMEOUT_SECONDS = 600
@@ -22,11 +23,20 @@ DEFAULT_LIGHT_REASONING_EFFORT = "low"
 DEFAULT_ANALYSIS_REASONING_EFFORT = "high"
 DEFAULT_CHAT_REASONING_EFFORT = DEFAULT_LIGHT_REASONING_EFFORT
 DEFAULT_ORCHESTRATOR_REASONING_EFFORT = DEFAULT_LIGHT_REASONING_EFFORT
+DEFAULT_NOTION_MCP_URL = "https://mcp.notion.com/mcp"
+DEFAULT_NOTION_CONTEXT_MAX_CHARS = 6000
+DEFAULT_NOTION_TIMEOUT_SECONDS = 20
+DEFAULT_NOTION_TOKEN_STORE_NAME = "notion-oauth.json"
+DEFAULT_GIT_MCP_URL = "https://api.githubcopilot.com/mcp/"
+DEFAULT_GIT_MCP_CONTEXT_MAX_CHARS = 6000
+DEFAULT_GIT_MCP_TIMEOUT_SECONDS = 20
 ALLOW_ALL_MARKER = "*"
 JOB_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 GIT_REF_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]*$")
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+GIT_ORG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+NOTION_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 REASONING_EFFORT_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
 
 
@@ -39,7 +49,7 @@ class AccessDeniedError(PermissionError):
 
 
 class UnknownRepoError(KeyError):
-    """Raised when a requested repo key is not in the repo allowlist."""
+    """Raised when a requested repo key is not under the source repo root."""
 
 
 @dataclass(frozen=True)
@@ -62,6 +72,22 @@ class Settings:
     analysis_model: str = DEFAULT_ANALYSIS_MODEL
     analysis_reasoning_effort: str = DEFAULT_ANALYSIS_REASONING_EFFORT
     chat_workspace_root: Path | None = None
+    public_base_url: str | None = None
+    notion_enabled: bool = False
+    notion_mcp_url: str = DEFAULT_NOTION_MCP_URL
+    notion_allowed_page_ids: frozenset[str] = frozenset()
+    notion_allowed_database_ids: frozenset[str] = frozenset()
+    notion_context_max_chars: int = DEFAULT_NOTION_CONTEXT_MAX_CHARS
+    notion_timeout_seconds: int = DEFAULT_NOTION_TIMEOUT_SECONDS
+    notion_token_store_path: Path | None = None
+    notion_write_enabled: bool = False
+    git_mcp_enabled: bool = False
+    git_mcp_url: str = DEFAULT_GIT_MCP_URL
+    git_mcp_token: str | None = field(default=None, repr=False)
+    git_mcp_org: str | None = None
+    git_mcp_context_max_chars: int = DEFAULT_GIT_MCP_CONTEXT_MAX_CHARS
+    git_mcp_timeout_seconds: int = DEFAULT_GIT_MCP_TIMEOUT_SECONDS
+    git_mcp_write_enabled: bool = False
     enable_admin_pages: bool = False
     admin_password: str | None = field(default=None, repr=False)
 
@@ -75,7 +101,6 @@ class Settings:
             "SLACK_BOT_TOKEN",
             "SLACK_ALLOWED_USER_IDS",
             "SLACK_ALLOWED_CHANNEL_IDS",
-            "PANGI_ALLOWED_REPOS",
             "PANGI_WORKTREE_ROOT",
             "PANGI_SOURCE_REPO_ROOT",
         )
@@ -95,10 +120,7 @@ class Settings:
             raise SettingsError("PANGI_ADMIN_PASSWORD is required when PANGI_ENABLE_ADMIN_PAGES=1")
 
         allowed_repos = MappingProxyType(
-            _parse_repo_allowlist(
-                values["PANGI_ALLOWED_REPOS"],
-                source_repo_root=source_repo_root,
-            )
+            _discover_source_repos(source_repo_root)
         )
         default_base_branch = _parse_git_ref(
             values.get("PANGI_DEFAULT_BASE_BRANCH") or DEFAULT_BASE_BRANCH,
@@ -111,6 +133,13 @@ class Settings:
             else (worktree_root / "_chat").resolve(strict=False)
         )
         _ensure_path_under_root(chat_workspace_root, worktree_root, "chat workspace path")
+        raw_notion_token_store_path = values.get("PANGI_NOTION_TOKEN_STORE_PATH", "").strip()
+        notion_token_store_path = (
+            _parse_absolute_path(raw_notion_token_store_path, "PANGI_NOTION_TOKEN_STORE_PATH")
+            if raw_notion_token_store_path
+            else (worktree_root / "_notion" / DEFAULT_NOTION_TOKEN_STORE_NAME).resolve(strict=False)
+        )
+        _ensure_path_under_root(notion_token_store_path, worktree_root, "Notion token store path")
 
         return cls(
             slack_signing_secret=values["SLACK_SIGNING_SECRET"],
@@ -170,6 +199,54 @@ class Settings:
                 "PANGI_ANALYSIS_REASONING_EFFORT",
             ),
             chat_workspace_root=chat_workspace_root,
+            public_base_url=_parse_optional_url(values.get("PANGI_PUBLIC_BASE_URL"), "PANGI_PUBLIC_BASE_URL"),
+            notion_enabled=_parse_bool(values.get("PANGI_NOTION_ENABLED", "0"), "PANGI_NOTION_ENABLED"),
+            notion_mcp_url=_parse_url(
+                values.get("PANGI_NOTION_MCP_URL"),
+                DEFAULT_NOTION_MCP_URL,
+                "PANGI_NOTION_MCP_URL",
+            ),
+            notion_allowed_page_ids=_parse_notion_id_set(
+                values.get("PANGI_NOTION_ALLOWED_PAGE_IDS", ""),
+                "PANGI_NOTION_ALLOWED_PAGE_IDS",
+            ),
+            notion_allowed_database_ids=_parse_notion_id_set(
+                values.get("PANGI_NOTION_ALLOWED_DATABASE_IDS", ""),
+                "PANGI_NOTION_ALLOWED_DATABASE_IDS",
+            ),
+            notion_context_max_chars=_parse_positive_int(
+                values.get("PANGI_NOTION_CONTEXT_MAX_CHARS", str(DEFAULT_NOTION_CONTEXT_MAX_CHARS)),
+                "PANGI_NOTION_CONTEXT_MAX_CHARS",
+            ),
+            notion_timeout_seconds=_parse_positive_int(
+                values.get("PANGI_NOTION_TIMEOUT_SECONDS", str(DEFAULT_NOTION_TIMEOUT_SECONDS)),
+                "PANGI_NOTION_TIMEOUT_SECONDS",
+            ),
+            notion_token_store_path=notion_token_store_path,
+            notion_write_enabled=_parse_bool(
+                values.get("PANGI_NOTION_WRITE_ENABLED", "0"),
+                "PANGI_NOTION_WRITE_ENABLED",
+            ),
+            git_mcp_enabled=_parse_bool(values.get("PANGI_GIT_MCP_ENABLED", "0"), "PANGI_GIT_MCP_ENABLED"),
+            git_mcp_url=_parse_url(
+                values.get("PANGI_GIT_MCP_URL"),
+                DEFAULT_GIT_MCP_URL,
+                "PANGI_GIT_MCP_URL",
+            ),
+            git_mcp_token=values.get("PANGI_GIT_MCP_TOKEN", "").strip() or None,
+            git_mcp_org=_parse_optional_git_org(values.get("PANGI_GIT_MCP_ORG"), "PANGI_GIT_MCP_ORG"),
+            git_mcp_context_max_chars=_parse_positive_int(
+                values.get("PANGI_GIT_MCP_CONTEXT_MAX_CHARS", str(DEFAULT_GIT_MCP_CONTEXT_MAX_CHARS)),
+                "PANGI_GIT_MCP_CONTEXT_MAX_CHARS",
+            ),
+            git_mcp_timeout_seconds=_parse_positive_int(
+                values.get("PANGI_GIT_MCP_TIMEOUT_SECONDS", str(DEFAULT_GIT_MCP_TIMEOUT_SECONDS)),
+                "PANGI_GIT_MCP_TIMEOUT_SECONDS",
+            ),
+            git_mcp_write_enabled=_parse_bool(
+                values.get("PANGI_GIT_MCP_WRITE_ENABLED", "0"),
+                "PANGI_GIT_MCP_WRITE_ENABLED",
+            ),
             enable_admin_pages=enable_admin_pages,
             admin_password=admin_password,
         )
@@ -192,6 +269,9 @@ class Settings:
         except KeyError:
             raise UnknownRepoError(repo_key) from None
 
+    def available_repo_keys(self) -> tuple[str, ...]:
+        return tuple(sorted(self.allowed_repos))
+
     def base_branch_for_key(self, repo_key: str) -> str:
         if repo_key not in self.allowed_repos:
             raise UnknownRepoError(repo_key)
@@ -210,6 +290,12 @@ class Settings:
         worktree_path = (self.worktree_root / job_id).resolve(strict=False)
         _ensure_path_under_root(worktree_path, self.worktree_root, "job worktree path")
         return worktree_path
+
+    def is_notion_page_allowed(self, notion_id: str) -> bool:
+        return normalize_notion_id(notion_id) in self.notion_allowed_page_ids
+
+    def is_notion_database_allowed(self, notion_id: str) -> bool:
+        return normalize_notion_id(notion_id) in self.notion_allowed_database_ids
 
 
 def _parse_csv_set(raw_value: str, name: str) -> frozenset[str]:
@@ -262,32 +348,46 @@ def _load_dotenv_file(path: Path) -> None:
 
 
 def _parse_dotenv_value(raw_value: str) -> str:
+    raw_value = _strip_dotenv_inline_comment(raw_value)
     if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"'", '"'}:
         return raw_value[1:-1]
     return raw_value
 
 
-def _parse_repo_allowlist(raw_value: str, *, source_repo_root: Path) -> dict[str, Path]:
-    repos: dict[str, Path] = {}
-    for entry in raw_value.split(","):
-        stripped = entry.strip()
-        if not stripped:
+def _strip_dotenv_inline_comment(raw_value: str) -> str:
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(raw_value):
+        if escaped:
+            escaped = False
             continue
-        if "=" not in stripped:
-            raise SettingsError("PANGI_ALLOWED_REPOS entries must use RepoKey=/absolute/path format")
+        if quote == '"' and char == "\\":
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            continue
+        if char == "#" and (index == 0 or raw_value[index - 1].isspace()):
+            return raw_value[:index].rstrip()
+    return raw_value.strip()
 
-        repo_key, raw_path = (part.strip() for part in stripped.split("=", 1))
-        if not repo_key or not raw_path:
-            raise SettingsError("PANGI_ALLOWED_REPOS entries must include both repo key and path")
-        if repo_key in repos:
-            raise SettingsError(f"Duplicate repo key in PANGI_ALLOWED_REPOS: {repo_key}")
 
-        repo_path = _parse_absolute_path(raw_path, f"PANGI_ALLOWED_REPOS[{repo_key}]")
-        _ensure_path_under_root(repo_path, source_repo_root, f"repo path for {repo_key}")
-        repos[repo_key] = repo_path
+def _discover_source_repos(source_repo_root: Path) -> dict[str, Path]:
+    repos: dict[str, Path] = {}
+    if not source_repo_root.exists():
+        return repos
+    if not source_repo_root.is_dir():
+        raise SettingsError("PANGI_SOURCE_REPO_ROOT must be a directory")
 
-    if not repos:
-        raise SettingsError("PANGI_ALLOWED_REPOS must contain at least one repo")
+    for child in sorted(source_repo_root.iterdir(), key=lambda path: path.name):
+        if child.name.startswith(".") or not child.is_dir():
+            continue
+        _ensure_path_under_root(child, source_repo_root, f"repo path for {child.name}")
+        repos[child.name] = child.resolve(strict=False)
     return repos
 
 
@@ -320,6 +420,49 @@ def _parse_reasoning_effort(raw_value: str | None, default_value: str, name: str
     if value not in REASONING_EFFORT_VALUES:
         allowed = ", ".join(sorted(REASONING_EFFORT_VALUES))
         raise SettingsError(f"{name} must be one of: {allowed}")
+    return value
+
+
+def _parse_url(raw_value: str | None, default_value: str, name: str) -> str:
+    value = (raw_value or "").strip() or default_value
+    _validate_http_url(value, name)
+    return value
+
+
+def _parse_optional_url(raw_value: str | None, name: str) -> str | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    _validate_http_url(value, name)
+    return value.rstrip("/")
+
+
+def _parse_optional_git_org(raw_value: str | None, name: str) -> str | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    if not GIT_ORG_PATTERN.fullmatch(value) or value.startswith("-"):
+        raise SettingsError(f"{name} must be a safe GitHub organization name")
+    return value
+
+
+def _validate_http_url(value: str, name: str) -> None:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise SettingsError(f"{name} must be an http or https URL")
+    if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise SettingsError(f"{name} must use https unless it points to localhost")
+
+
+def _parse_notion_id_set(raw_value: str, name: str) -> frozenset[str]:
+    values = [item.strip() for item in raw_value.split(",") if item.strip()]
+    return frozenset(normalize_notion_id(value, name=name) for value in values)
+
+
+def normalize_notion_id(raw_value: str, *, name: str = "Notion id") -> str:
+    value = raw_value.strip().lower().replace("-", "")
+    if not NOTION_ID_PATTERN.fullmatch(value):
+        raise SettingsError(f"{name} must be a 32 character Notion UUID")
     return value
 
 

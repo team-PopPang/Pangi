@@ -5,7 +5,7 @@
 ## 민감 정보
 
 - `.env` 파일을 열람하거나 출력하지 않는다.
-- Slack token, signing secret, GitHub token, Notion token, Codex auth 정보를 문서나 로그에 쓰지 않는다.
+- Slack token, signing secret, GitHub token, Notion token, Notion OAuth token store, Codex auth 정보를 문서나 로그에 쓰지 않는다.
 - Slack/Notion/GitHub로 보내기 전 secret redaction을 적용한다.
 
 ## Slack 접근 제한
@@ -17,10 +17,23 @@
 
 ## Repo 접근 제한
 
-- repo allowlist를 강제한다.
+- `PANGI_SOURCE_REPO_ROOT` 하위 repo만 접근 가능하게 제한한다.
 - 사용자가 Slack 메시지로 임의 repo path를 지정할 수 없게 한다.
 - 원본 source repo에서 Codex를 직접 실행하지 않는다.
 - Codex 실행 경로는 서버가 만든 worktree여야 한다.
+
+## Notion 접근 제한
+
+- Notion page/database allowlist를 강제한다.
+- MVP에서는 Notion read-only 조회만 허용하고 생성/수정/삭제/기록 요청은 차단한다.
+- Codex에는 Notion MCP 권한을 직접 주지 않고, 팡이 서버가 정규화한 Markdown context만 전달한다.
+
+## Git MCP 접근 제한
+
+- Git MCP token은 Slack 응답, 로그, 테스트 fixture에 출력하지 않는다.
+- MVP에서는 Git MCP read-only context 조회만 허용하고 PR 생성, issue 생성, commit, push, merge 요청은 차단한다.
+- Codex에는 Git MCP 권한을 직접 주지 않고, 팡이 서버가 정규화한 Markdown context만 전달한다.
+- Git MCP repo 목록은 catalog 용도이며, 실제 코드 분석 가능 여부는 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone 존재 여부로 판단한다.
 
 ## Shell 실행 제한
 

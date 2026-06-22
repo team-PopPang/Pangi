@@ -13,7 +13,7 @@
 - `domain/usecase/repository/infra` 기준 패키지 구조
 - 환경변수 기반 설정 로더
 - Slack user/channel allowlist 파서
-- repo allowlist와 worktree root 설정
+- source repo root 자동 탐색과 worktree root 설정
 - Slack Events API route
 - Slack slash command route
 - Slack interactions placeholder
@@ -21,6 +21,8 @@
 - app mention 정규화와 retry 중복 방지
 - 입력 가드레일 기반 외부 웹/쓰기 요청 조기 차단
 - 입력 가드레일 1차 라우팅과 Codex CLI 기반 orchestrator 보조 분류
+- Notion 문서 읽기 요청 분류와 공식 MCP 기반 Notion context provider
+- Git MCP 기반 GitHub/Git context 요청 분류와 repo catalog 응답
 - `SlackThread`, `AgentJob`, `CodexRun` 모델
 - SQLite 기반 job 저장소
 - Slack 요청을 `queued` 상태 job으로 저장
@@ -43,6 +45,7 @@
 - 일반 대화와 read-only 분석 성공 응답 시 원본 메시지 `eyes` reaction을 `white_check_mark`로 전환
 - 관리자 로그인 페이지
 - 관리자용 SQLite DB 확인 페이지 `/pangi-admin/db`
+- 관리자용 Notion OAuth 연결 페이지 `/pangi-admin/notion`
 - health와 설정 테스트
 
 Slack 요청을 받으면 검증과 정규화를 수행한 뒤 SQLite에 job으로 저장하고 background worker에 넘깁니다. worker는 허용된 source repo에서 read-only 분석용 detached worktree를 만들고, 그 worktree에서 Codex read-only 분석을 실행한 뒤 결과를 Slack thread에 반환합니다.
@@ -66,13 +69,18 @@ infra/                 FastAPI route, Slack API, queue, git, codex 같은 외부
 infra/slack/routes.py                  Slack Events API route
 infra/slack/client.py                  Slack Web API client
 infra/orchestrator/codex_orchestrator.py  Codex CLI 기반 보조 요청 분류 adapter
+infra/notion/__init__.py               Notion context provider registry
+infra/git_mcp/__init__.py              Git MCP context provider registry
 infra/queue/in_process_queue.py        in-process background worker
 infra/git/worktree_manager.py          read-only 분석용 git worktree 생성
 infra/codex/runner.py                  Codex read-only 실행 adapter
 usecase/input_guardrail.py             외부 웹/쓰기 요청 차단과 orchestrator decision 보정
+usecase/notion_context.py              Notion context prompt 주입 helper
+usecase/git_context.py                 Git context prompt 주입과 repo catalog helper
 usecase/request_decision.py            요청 분기 decision 타입
 prompts/pangi_agent.md                 PopPang 코드/개발/커밋/디자인 공통 스타일 프롬프트
 prompts/orchestrator.md                Slack 요청 분류용 orchestrator 프롬프트
+prompts/git_context.md                 Git MCP context 답변 모드 프롬프트
 prompts/chat.md                        일반 대화 모드 프롬프트
 prompts/read_only_analysis.md          read-only 코드 분석 모드 프롬프트
 repository/job_repository_protocol.py     저장소 Protocol
@@ -85,6 +93,7 @@ domain/models.py                       SlackThread, AgentJob, CodexRun 모델
 - 실제 Slack 환경에서의 1차 MVP end-to-end 검증
 - worktree cleanup 정책
 - PR 승인 전 diff 수집/검토 흐름
+- Notion DB context 선별 품질 고도화
 - Notion 기록
 - 코드 수정 승인 흐름
 - PR 생성 흐름
@@ -164,7 +173,6 @@ cd pangi
 - `SLACK_BOT_TOKEN`
 - `SLACK_ALLOWED_USER_IDS`
 - `SLACK_ALLOWED_CHANNEL_IDS`
-- `PANGI_ALLOWED_REPOS`
 - `PANGI_WORKTREE_ROOT`
 - `PANGI_SOURCE_REPO_ROOT`
 
@@ -179,10 +187,20 @@ cd pangi
 - `PANGI_ORCHESTRATOR_TIMEOUT_SECONDS`: orchestrator Codex 호출 timeout입니다. 기본값은 20초입니다.
 - `PANGI_ANALYSIS_MODEL`: read-only worktree에서 repo 코드를 읽는 분석 모델입니다. 기본값은 `gpt-5.5`입니다.
 - `PANGI_ANALYSIS_REASONING_EFFORT`: repo 분석용 Codex 호출의 추론 난이도입니다. 기본값은 `high`입니다.
+- `PANGI_PUBLIC_BASE_URL`: Notion OAuth callback을 받을 공개 서버 URL입니다. 비우면 요청 host 기준으로 callback URL을 만듭니다.
+- `PANGI_NOTION_ENABLED`: Notion context provider 사용 여부입니다. 기본값은 `0`입니다.
+- `PANGI_NOTION_MCP_URL`: 공식 Notion MCP endpoint입니다. 기본값은 `https://mcp.notion.com/mcp`입니다.
+- `PANGI_NOTION_ALLOWED_PAGE_IDS`: 팡이가 읽을 수 있는 Notion page id allowlist입니다.
+- `PANGI_NOTION_ALLOWED_DATABASE_IDS`: 팡이가 읽을 수 있는 Notion database id allowlist입니다.
+- `PANGI_NOTION_CONTEXT_MAX_CHARS`: Codex prompt에 붙일 Notion context 최대 길이입니다. 기본값은 6000입니다.
+- `PANGI_NOTION_TIMEOUT_SECONDS`: Notion context 조회 timeout입니다. 기본값은 20초입니다.
+- `PANGI_NOTION_TOKEN_STORE_PATH`: Notion OAuth token store 경로입니다. 비우면 worktree root 아래 `_notion/notion-oauth.json`을 사용합니다.
+- `PANGI_NOTION_WRITE_ENABLED`: 예약 설정값입니다. MVP에서는 Notion write 요청을 지원하지 않습니다.
 - `PANGI_ENABLE_ADMIN_PAGES`: 관리자 페이지를 열려면 `1`로 설정합니다. 기본값은 `0`입니다.
 - `PANGI_ADMIN_PASSWORD`: 관리자 페이지 비밀번호입니다. 관리자 페이지를 켤 때만 필요합니다.
 
-`PANGI_ALLOWED_REPOS`는 사용자가 Slack 메시지로 임의 경로를 지정하지 못하도록 `RepoKey=/absolute/path` 형식의 allowlist로 관리합니다.
+`PANGI_SOURCE_REPO_ROOT` 아래 direct child 디렉터리 이름을 그대로 repo key로 사용합니다.
+예를 들어 `.../repos/PopPang-iOS`가 있으면 Slack에서는 `PopPang-iOS`로 요청할 수 있습니다.
 
 read-only 분석용 worktree는 `PANGI_WORKTREE_ROOT/{job_id}` 아래에 만들어집니다. 현재 MVP에서는 새 작업 branch를 만들지 않고 `origin/{base_branch}`를 detached checkout으로 가져와 Codex가 읽을 격리 폴더로 사용합니다.
 
@@ -237,6 +255,8 @@ http://127.0.0.1:8000/pangi-admin/login
 - 비밀번호: `PANGI_ADMIN_PASSWORD`에 설정한 값
 
 로그인 후 `/pangi-admin/db`에서 최근 `agent_jobs`, `slack_threads`, `codex_runs`를 확인할 수 있습니다.
+
+Notion context를 사용하려면 로그인 후 `/pangi-admin/notion`에서 Notion OAuth 연결을 완료합니다. 운영 서버에서는 `PANGI_PUBLIC_BASE_URL`을 외부에서 접근 가능한 팡이 서버 URL로 설정합니다.
 
 ## 테스트
 

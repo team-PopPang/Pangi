@@ -136,8 +136,8 @@ MVP:
 권장 경로:
 
 ```text
-/repos/sources/PopPang-iOS
-/repos/worktrees/{job_id}
+/home/poppang/admin/pangi/repos/PopPang-iOS
+/home/poppang/admin/pangi/.data/worktrees/{job_id}
 ```
 
 ### Notion Reporter
@@ -511,7 +511,7 @@ Codex 실행 여부:
 
 ```bash
 codex exec \
-  -C /repos/worktrees/{job_id} \
+  -C /home/poppang/admin/pangi/.data/worktrees/{job_id} \
   --sandbox read-only \
   --ask-for-approval never \
   "{prompt}"
@@ -528,7 +528,7 @@ codex exec \
 
 ```bash
 codex exec \
-  -C /repos/worktrees/{job_id} \
+  -C /home/poppang/admin/pangi/.data/worktrees/{job_id} \
   --sandbox workspace-write \
   --ask-for-approval never \
   "{prompt}"
@@ -549,9 +549,9 @@ codex exec \
 ### PR 생성 전 diff 확인
 
 ```bash
-git -C /repos/worktrees/{job_id} status --short
-git -C /repos/worktrees/{job_id} diff --stat
-git -C /repos/worktrees/{job_id} diff -- . ':!*.xcuserstate'
+git -C /home/poppang/admin/pangi/.data/worktrees/{job_id} status --short
+git -C /home/poppang/admin/pangi/.data/worktrees/{job_id} diff --stat
+git -C /home/poppang/admin/pangi/.data/worktrees/{job_id} diff -- . ':!*.xcuserstate'
 ```
 
 서버는 이 결과를 요약해 Slack에 보여준 뒤 PR 생성 승인을 받는다.
@@ -568,7 +568,7 @@ git -C /repos/worktrees/{job_id} diff -- . ':!*.xcuserstate'
 
 ```bash
 codex exec resume {session_id} \
-  -C /repos/worktrees/{job_id} \
+  -C /home/poppang/admin/pangi/.data/worktrees/{job_id} \
   --sandbox read-only \
   --ask-for-approval never \
   "{prompt}"
@@ -600,14 +600,14 @@ codex exec resume {session_id} \
 금지:
 
 - worktree 경로가 검증되지 않았을 때
-- repo allowlist에 없는 경로일 때
+- `PANGI_SOURCE_REPO_ROOT` 하위가 아닌 경로일 때
 - 임시 디렉터리나 사용자가 지정한 임의 경로일 때
 - main/develop 원본 repo에서 실행할 가능성이 있을 때
 
 허용 검토:
 
 - 서버가 생성한 worktree이고
-- repo allowlist를 통과했고
+- `PANGI_SOURCE_REPO_ROOT` 하위 repo에서 만든 worktree이고
 - branch/worktree metadata가 DB와 일치하며
 - 별도 sandbox 정책이 적용된 경우
 
@@ -670,8 +670,8 @@ timeout 시:
 ### Codex가 수정한 파일 감지
 
 ```bash
-git -C /repos/worktrees/{job_id} status --porcelain=v1
-git -C /repos/worktrees/{job_id} diff --name-only
+git -C /home/poppang/admin/pangi/.data/worktrees/{job_id} status --porcelain=v1
+git -C /home/poppang/admin/pangi/.data/worktrees/{job_id} diff --name-only
 ```
 
 서버는 changed files를 DB에 저장하고, 허용 경로 밖 변경이 있으면 PR 생성을 막는다.
@@ -1206,7 +1206,7 @@ Slack 승인 버튼
 
 - Slack user allowlist
 - Slack channel allowlist
-- repo allowlist
+- `PANGI_SOURCE_REPO_ROOT` 하위 repo 제한
 - branch allowlist
 - prompt injection 방지
 - Codex auth 파일 보호

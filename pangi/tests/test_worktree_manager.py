@@ -15,7 +15,6 @@ def settings_for(tmp_path: Path, source_repo: Path, **overrides: str) -> Setting
         "SLACK_BOT_TOKEN": "placeholder-bot-token",
         "SLACK_ALLOWED_USER_IDS": "U123",
         "SLACK_ALLOWED_CHANNEL_IDS": "C123",
-        "PANGI_ALLOWED_REPOS": f"PopPang-iOS={source_repo}",
         "PANGI_WORKTREE_ROOT": str(tmp_path / "worktrees"),
         "PANGI_SOURCE_REPO_ROOT": str(source_root),
         "PANGI_DEFAULT_BASE_BRANCH": "develop",

@@ -123,6 +123,8 @@ FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
 
 - Slack 수신/응답 작업: [docs/architecture/slack.md](docs/architecture/slack.md)
 - 요청 분류/흐름 제어 작업: [docs/architecture/orchestrator.md](docs/architecture/orchestrator.md)
+- Notion 문서 context 작업: [docs/architecture/notion-context.md](docs/architecture/notion-context.md)
+- Git MCP context 작업: [docs/architecture/git-context.md](docs/architecture/git-context.md)
 - background job 작업: [docs/architecture/jobs.md](docs/architecture/jobs.md)
 - Codex 실행 작업: [docs/architecture/codex-runner.md](docs/architecture/codex-runner.md)
 - 출력 가드레일/Slack 응답 포맷 작업: [docs/architecture/output-pipeline.md](docs/architecture/output-pipeline.md)
@@ -155,7 +157,8 @@ FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
 - 원본 source repo에서 Codex를 직접 실행하지 않는다.
 - main/develop 같은 기본 브랜치를 직접 수정하지 않는다.
 - Codex가 직접 commit/push/PR 생성을 하게 두지 않는다. git 상태와 PR 생성은 서버가 통제한다.
-- Slack user allowlist, channel allowlist, repo allowlist를 우선 구현한다.
+- Slack user allowlist, channel allowlist, source repo root 하위 repo 제한을 우선 구현한다.
+- Git MCP token은 출력하지 않고, MVP에서는 Git MCP write 기능을 사용하지 않는다.
 - timeout 없는 외부 명령 실행을 만들지 않는다.
 
 ## 문서 작성 규칙

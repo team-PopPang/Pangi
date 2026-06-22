@@ -130,7 +130,7 @@ def test_codex_chat_responder_uses_scratch_workspace_and_skip_git_check(tmp_path
         monkeypatch.setenv("SLACK_BOT_TOKEN", "placeholder-bot-token")
         monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "U123")
         monkeypatch.setenv("SLACK_ALLOWED_CHANNEL_IDS", "C123")
-        monkeypatch.setenv("PANGI_ALLOWED_REPOS", f"PopPang-iOS={source_root / 'PopPang-iOS'}")
+        (source_root / "PopPang-iOS").mkdir(parents=True, exist_ok=True)
         monkeypatch.setenv("PANGI_WORKTREE_ROOT", str(worktree_root))
         monkeypatch.setenv("PANGI_SOURCE_REPO_ROOT", str(source_root))
         monkeypatch.setenv("PANGI_CHAT_WORKSPACE_ROOT", str(chat_root))
@@ -166,12 +166,18 @@ def test_codex_chat_responder_uses_scratch_workspace_and_skip_git_check(tmp_path
         assert "단순 인사" in args[-1]
         assert "기능소개와 자기소개" in args[-1]
         assert "PopPang 팀의 Slack AI 동료" in args[-1]
-        assert "PopPang 팀의 데이터(GitHub, 추후 Notion)" in args[-1]
+        assert "Markdown을 적당히 사용" in args[-1]
+        assert "*핵심*" in args[-1]
+        assert "PopPang 팀의 GitHub와 Notion 문서" in args[-1]
         assert "GitHub를 읽고 코드, PR, 커밋, 장애 원인" in args[-1]
+        assert "Notion 문서와 회의록을 읽고 결정사항" in args[-1]
         assert "타 팀원의 작업 현황" in args[-1]
-        assert "Notion 문서까지 함께 읽을 수 있도록 준비 중" in args[-1]
+        assert "불가피하게 회의에 참석하지 못해도 팡이가 회의 내용을 요약" in args[-1]
+        assert "추후 Notion" not in args[-1]
+        assert "Notion 준비 중" not in args[-1]
         assert "제품, 디자인, 커밋 문구 목록으로 대체하지 않습니다" in args[-1]
-        assert "코드 수정, PR 생성, 배포는 아직 직접 실행하지 않습니다" in args[-1]
+        assert "코드 수정, PR 생성, issue 생성/수정, commit, push, merge, 배포는 아직 직접 실행하지 않습니다" in args[-1]
+        assert "GitHub token 권한이 있더라도 지금은 읽기와 설명만 가능" in args[-1]
         assert "사용자 메시지:\n안녕" in args[-1]
 
     asyncio.run(scenario())

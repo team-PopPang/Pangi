@@ -19,6 +19,18 @@ def test_markdown_to_slack_formats_common_markdown_for_slack_readability():
 `**코드** [링크](x)`"""
 
 
+def test_markdown_to_slack_keeps_inline_emphasis_slack_safe_before_korean_suffix():
+    markdown = "6월 4일 회의는 *팝업 제보하기 기능과 관리자 페이지 범위를 정리한 회의*입니다."
+
+    assert markdown_to_slack(markdown) == "6월 4일 회의는 *팝업 제보하기 기능과 관리자 페이지 범위를 정리한 회의입니다*."
+
+
+def test_markdown_to_slack_keeps_markdown_bold_slack_safe_before_korean_suffix():
+    markdown = "상태는 **확인 필요**입니다."
+
+    assert markdown_to_slack(markdown) == "상태는 *확인 필요입니다*."
+
+
 def test_markdown_to_slack_preserves_fenced_code_blocks():
     markdown = """\
 ```swift

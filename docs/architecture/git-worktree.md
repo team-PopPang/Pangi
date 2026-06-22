@@ -9,12 +9,12 @@ Worktree Manager는 Codex가 원본 repo를 직접 건드리지 않도록 job마
 ## 기본 경로
 
 ```text
-source repo:   /repos/sources/PopPang-iOS
-worktree root: /repos/worktrees
-job worktree:  /repos/worktrees/{job_id}
+source repo:   /home/poppang/admin/pangi/repos/PopPang-iOS
+worktree root: /home/poppang/admin/pangi/.data/worktrees
+job worktree:  /home/poppang/admin/pangi/.data/worktrees/{job_id}
 ```
 
-실제 경로는 환경변수와 repo allowlist에서 가져온다. Slack 메시지에서 임의 경로를 받지 않는다.
+실제 경로는 `PANGI_SOURCE_REPO_ROOT` 하위 direct child repo에서 가져온다. Slack 메시지에서 임의 경로를 받지 않는다.
 
 ## read-only 분석 규칙
 
@@ -37,7 +37,7 @@ pangi/job-{job_id_short}
 ## MVP 흐름
 
 ```text
-repo allowlist lookup
+source repo root child lookup
 -> git repo 확인
 -> git fetch origin
 -> git worktree add --detach {worktree_path} origin/{base_branch}

@@ -10,7 +10,8 @@ TABLE_SEPARATOR_PATTERN = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)
 INLINE_CODE_PATTERN = re.compile(r"`[^`\n]+`")
 IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 LINK_PATTERN = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)\)")
-BOLD_PATTERN = re.compile(r"\*\*([^*\n]+)\*\*")
+BOLD_PATTERN = re.compile(r"\*\*([^*\n]+)\*\*([0-9A-Za-z가-힣_]+)?")
+SINGLE_ASTERISK_EMPHASIS_PATTERN = re.compile(r"(?<!\*)\*([^\s*\n](?:[^*\n]*?[^\s*\n])?)\*(?!\*)([0-9A-Za-z가-힣_]+)?")
 
 
 def markdown_to_slack(text: str | None) -> str:
@@ -91,13 +92,26 @@ def _transform_inline(text: str) -> str:
 def _transform_non_code_inline(text: str) -> str:
     text = IMAGE_PATTERN.sub(_replace_image, text)
     text = LINK_PATTERN.sub(r"<\2|\1>", text)
-    return BOLD_PATTERN.sub(r"*\1*", text)
+    text = BOLD_PATTERN.sub(_replace_bold, text)
+    return SINGLE_ASTERISK_EMPHASIS_PATTERN.sub(_replace_single_asterisk_emphasis, text)
 
 
 def _replace_image(match: re.Match[str]) -> str:
     label = match.group(1).strip() or "image"
     url = match.group(2)
     return f"<{url}|{label}>"
+
+
+def _replace_bold(match: re.Match[str]) -> str:
+    return _slack_bold(match.group(1), match.group(2) or "")
+
+
+def _replace_single_asterisk_emphasis(match: re.Match[str]) -> str:
+    return _slack_bold(match.group(1), match.group(2) or "")
+
+
+def _slack_bold(content: str, suffix: str) -> str:
+    return f"*{content}{suffix}*"
 
 
 def _has_next_content_line(lines: list[str], index: int) -> bool:

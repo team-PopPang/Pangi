@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from pangi.usecase.git_context import GitContext, GitRepoCatalog
+from pangi.usecase.notion_context import NotionContext
 from pangi.usecase.request_decision import ClassifiedRequest
 
 
@@ -50,6 +52,26 @@ class ChatResponder(Protocol):
 
     async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
         """Slack 일반 대화 요청에 대한 답변 텍스트를 생성한다."""
+        ...
+
+
+class NotionContextProvider(Protocol):
+    """usecase가 Notion 문서를 읽어 Codex prompt context로 만들기 위해 사용하는 포트."""
+
+    async def fetch_context(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> NotionContext:
+        """Slack 요청에 필요한 Notion context를 read-only로 조회한다."""
+        ...
+
+
+class GitContextProvider(Protocol):
+    """usecase가 Git MCP를 통해 GitHub/Git 맥락을 읽기 위해 사용하는 포트."""
+
+    async def fetch_context(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> GitContext:
+        """Slack 요청에 필요한 Git context를 read-only로 조회한다."""
+        ...
+
+    async def fetch_repo_catalog(self, *, local_repo_keys: tuple[str, ...]) -> GitRepoCatalog:
+        """Git MCP repo 목록과 로컬 source repo 목록을 비교해 반환한다."""
         ...
 
 

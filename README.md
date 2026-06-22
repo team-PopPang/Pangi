@@ -12,10 +12,13 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 ## 지금 팡이가 할 수 있는 것
 
 - Slack에서 `@팡이` mention과 slash command 요청을 받을 수 있습니다.
-- 허용된 user/channel/repo allowlist를 통과한 요청만 처리합니다.
+- 허용된 user/channel과 `PANGI_SOURCE_REPO_ROOT` 하위 repo만 처리합니다.
 - 인사나 자기소개 요청에는 팡이가 누구이고 무엇을 할 수 있는지 짧게 소개합니다.
 - 일반 대화, 문장 정리, repo를 직접 읽지 않는 간단한 판단은 Codex chat으로 답합니다.
 - 허용된 PopPang repo 이름이 명시된 분석 요청은 SQLite job으로 저장하고, 격리된 read-only worktree에서 `codex exec --sandbox read-only`로 코드를 읽은 뒤 Slack thread에 결과를 남깁니다.
+- Notion 문서/회의록 읽기 요청은 repo 분석과 분리된 `notion_context_chat` 흐름으로 분류합니다. 관리자 페이지에서 Notion OAuth 연결을 마치면 허용된 Notion context만 Codex chat prompt에 붙입니다.
+- GitHub/Git의 PR, issue, Actions, commit 맥락 요청은 repo 분석과 분리된 `git_context_chat` 흐름으로 분류합니다. Git MCP가 연결되면 read-only Git context만 Codex chat prompt에 붙입니다.
+- 분석 가능한 repo 목록 요청은 `repo_catalog` 흐름으로 분류하고, Git MCP repo 목록과 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone 목록을 비교해 답합니다.
 - 외부 웹/URL 분석, 코드 수정, PR 생성, 배포, commit/push 요청은 입력 가드레일에서 차단하고 안내 응답만 보냅니다.
 - 요청을 받으면 원본 Slack 메시지에 `eyes` reaction을 달고, 일반 대화나 read-only 분석 응답에 성공하면 `white_check_mark`로 전환합니다. 실패나 timeout은 `x`로 전환합니다.
 - 관리자 DB 확인 페이지에서 Slack thread, job, Codex run 기록을 확인할 수 있습니다.
@@ -44,10 +47,19 @@ flowchart TD
     BG --> D["입력 가드레일<br/>코드 기반 1차 판정"]
     D -->|외부 웹/쓰기 요청| X["안내 응답"]
     D -->|일반 대화| Y["Codex chat 응답<br/>(gpt-5.4-mini / low)"]
+    D -->|Notion 문서 읽기| N["Notion context provider<br/>공식 Notion MCP / allowlist"]
+    N --> YN["Codex chat + Notion context<br/>(gpt-5.4-mini / low)"]
+    D -->|GitHub/PR/Issue/Actions 질문| GM["Git context provider<br/>Git MCP / read-only"]
+    GM --> YG["Codex chat + Git context<br/>(gpt-5.4-mini / low)"]
+    D -->|분석 가능 repo 목록 질문| RL["Repo catalog<br/>Git MCP repo 목록 + 로컬 source repo 목록"]
+    RL --> RLA["분석 가능 여부 정리"]
     D -->|repo 불명확| Z["repo 확인 질문"]
     D -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
     D -->|애매한 요청만| E["Codex CLI Orchestrator<br/>보조 판정<br/>(gpt-5.4-mini / low)"]
     E -->|일반 대화| Y
+    E -->|Notion 문서 읽기| N
+    E -->|GitHub/PR/Issue/Actions 질문| GM
+    E -->|분석 가능 repo 목록 질문| RL
     E -->|repo 불명확| Z
     E -->|허용 repo 분석| F
     E -->|지원 안 함| X
@@ -59,6 +71,9 @@ flowchart TD
     K --> L["분석 결과 Markdown"]
     X --> O["출력 가드레일"]
     Y --> O
+    YN --> O
+    YG --> O
+    RLA --> O
     Z --> O
     L --> O
     O --> M["Markdown to Slack<br/>Slack bot 전용"]
@@ -75,10 +90,12 @@ flowchart TD
 - Slack Events API와 slash command 수신
 - Slack request signature 검증
 - Slack user/channel allowlist
-- repo allowlist와 worktree root 설정
+- source repo root 자동 탐색과 worktree root 설정
 - Slack app mention 정규화와 retry 중복 방지
 - Slack app mention 빠른 ACK와 background 처리
 - 입력 가드레일 기반 외부 웹/쓰기 요청 조기 차단과 1차 라우팅
+- Notion 문서 읽기 요청의 별도 분류와 공식 MCP 기반 Notion context provider
+- Git MCP context 요청과 repo catalog 요청의 별도 분류
 - 애매한 요청만 처리하는 Codex CLI 기반 orchestrator adapter
 - Codex chat 응답 경로
 - 외부 웹/인터넷 분석 요청 차단
@@ -95,13 +112,15 @@ flowchart TD
 - Slack/외부 출력 전 secret redaction과 길이 제한
 - Slack bot 응답 전용 Markdown to Slack 변환
 - 관리자 DB 확인 페이지 `/pangi-admin/db`
+- 관리자 Notion OAuth 연결 페이지 `/pangi-admin/notion`
 
 ## 아직 남은 것
 
 - 실제 Slack 환경 end-to-end 검증
 - worktree cleanup 정책
 - PR 승인 전 diff 수집/검토 흐름
-- Notion 기록
+- Notion DB context 선별 품질 고도화
+- Notion episode report 기록
 - 코드 수정 승인 흐름
 - PR 생성 흐름
 
@@ -292,7 +311,6 @@ SLACK_SIGNING_SECRET=
 SLACK_BOT_TOKEN=
 SLACK_ALLOWED_USER_IDS=
 SLACK_ALLOWED_CHANNEL_IDS=
-PANGI_ALLOWED_REPOS=
 PANGI_WORKTREE_ROOT=
 PANGI_SOURCE_REPO_ROOT=
 ```
@@ -304,6 +322,7 @@ PANGI_DEFAULT_BASE_BRANCH=develop
 PANGI_JOB_TIMEOUT_SECONDS=600
 PANGI_CHAT_TIMEOUT_SECONDS=120
 PANGI_CHAT_WORKSPACE_ROOT=
+PANGI_PUBLIC_BASE_URL=
 PANGI_CHAT_MODEL=gpt-5.4-mini
 PANGI_CHAT_REASONING_EFFORT=low
 PANGI_ORCHESTRATOR_MODEL=gpt-5.4-mini
@@ -311,6 +330,21 @@ PANGI_ORCHESTRATOR_REASONING_EFFORT=low
 PANGI_ORCHESTRATOR_TIMEOUT_SECONDS=20
 PANGI_ANALYSIS_MODEL=gpt-5.5
 PANGI_ANALYSIS_REASONING_EFFORT=high
+PANGI_NOTION_ENABLED=0
+PANGI_NOTION_MCP_URL=https://mcp.notion.com/mcp
+PANGI_NOTION_ALLOWED_PAGE_IDS=
+PANGI_NOTION_ALLOWED_DATABASE_IDS=
+PANGI_NOTION_CONTEXT_MAX_CHARS=6000
+PANGI_NOTION_TIMEOUT_SECONDS=20
+PANGI_NOTION_TOKEN_STORE_PATH=
+PANGI_NOTION_WRITE_ENABLED=0
+PANGI_GIT_MCP_ENABLED=0
+PANGI_GIT_MCP_URL=https://api.githubcopilot.com/mcp/
+PANGI_GIT_MCP_TOKEN=
+PANGI_GIT_MCP_ORG=team-PopPang
+PANGI_GIT_MCP_CONTEXT_MAX_CHARS=6000
+PANGI_GIT_MCP_TIMEOUT_SECONDS=20
+PANGI_GIT_MCP_WRITE_ENABLED=0
 PANGI_ENABLE_ADMIN_PAGES=0
 PANGI_ADMIN_PASSWORD=
 ```
@@ -325,8 +359,28 @@ PANGI_ADMIN_PASSWORD=
 | `PANGI_CHAT_REASONING_EFFORT` | `low` | 일반 대화용 Codex 호출의 추론 난이도 |
 | `PANGI_ANALYSIS_MODEL` | `gpt-5.5` | read-only worktree에서 실제 repo 코드를 읽는 분석 |
 | `PANGI_ANALYSIS_REASONING_EFFORT` | `high` | repo 분석용 Codex 호출의 추론 난이도 |
+| `PANGI_PUBLIC_BASE_URL` | 빈 값 | Notion OAuth callback을 받을 공개 서버 URL. 비우면 요청 host 기준으로 callback URL을 만듦 |
+| `PANGI_NOTION_ENABLED` | `0` | Notion context provider 사용 여부 |
+| `PANGI_NOTION_MCP_URL` | `https://mcp.notion.com/mcp` | 공식 Notion MCP Streamable HTTP endpoint |
+| `PANGI_NOTION_ALLOWED_PAGE_IDS` | 빈 값 | 팡이가 읽을 수 있는 Notion page id allowlist |
+| `PANGI_NOTION_ALLOWED_DATABASE_IDS` | 빈 값 | 팡이가 읽을 수 있는 Notion database id allowlist |
+| `PANGI_NOTION_CONTEXT_MAX_CHARS` | `6000` | Codex prompt에 붙일 Notion context 최대 길이 |
+| `PANGI_NOTION_TIMEOUT_SECONDS` | `20` | Notion context 조회 timeout |
+| `PANGI_NOTION_TOKEN_STORE_PATH` | 빈 값 | Notion OAuth token store 경로. 비우면 worktree root 아래 `_notion/notion-oauth.json` 사용 |
+| `PANGI_NOTION_WRITE_ENABLED` | `0` | 예약 설정값. MVP에서는 Notion write 요청을 지원하지 않음 |
+| `PANGI_GIT_MCP_ENABLED` | `0` | Git MCP context provider 사용 여부 |
+| `PANGI_GIT_MCP_URL` | `https://api.githubcopilot.com/mcp/` | Git MCP Streamable HTTP endpoint |
+| `PANGI_GIT_MCP_TOKEN` | 빈 값 | Git MCP 인증 token. 실제 값은 `.env` 또는 배포 환경에만 저장 |
+| `PANGI_GIT_MCP_ORG` | 빈 값 | repo catalog를 조회할 GitHub organization 이름 |
+| `PANGI_GIT_MCP_CONTEXT_MAX_CHARS` | `6000` | Codex prompt에 붙일 Git context 최대 길이 |
+| `PANGI_GIT_MCP_TIMEOUT_SECONDS` | `20` | Git MCP context 조회 timeout |
+| `PANGI_GIT_MCP_WRITE_ENABLED` | `0` | 예약 설정값. MVP에서는 Git write 요청을 지원하지 않음 |
 
 입력 가드레일은 AI가 아니라 코드로 유지합니다. Orchestrator는 심층 repo 분석이 아니라 흐름을 정하는 단계이므로 기본 mini 모델과 `low` reasoning을 사용합니다. 팡이가 실행하는 `codex exec`는 `-c model_reasoning_effort="..."`를 명시해, 팡이를 개발하는 사람의 `.codex/config.toml` 설정이 런타임 호출에 섞이지 않게 합니다.
+
+Notion context는 공식 Notion MCP를 직접 Codex에 열지 않고, 팡이 서버가 허용된 page/database만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. Notion 연결은 관리자 페이지 `/pangi-admin/notion`에서 OAuth로 진행합니다. 자세한 기준은 [docs/architecture/notion-context.md](docs/architecture/notion-context.md)를 봅니다.
+
+Git context도 Codex에 Git MCP 권한을 직접 열지 않고, 팡이 서버가 Git MCP에서 필요한 repo/PR/issue/Actions context만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. 실제 코드 전체 분석은 계속 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone과 read-only worktree에서 수행합니다.
 
 임시 개발 환경에서 모든 Slack user/channel을 허용하려면 `*`를 사용할 수 있습니다.
 
@@ -335,13 +389,15 @@ SLACK_ALLOWED_USER_IDS=*
 SLACK_ALLOWED_CHANNEL_IDS=*
 ```
 
-repo allowlist 예시:
+source repo root 예시:
 
 ```env
-PANGI_SOURCE_REPO_ROOT=/home/poppang/repos
-PANGI_ALLOWED_REPOS=PopPang-iOS=/home/poppang/repos/PopPang-iOS
-PANGI_WORKTREE_ROOT=/home/poppang/worktrees
+PANGI_SOURCE_REPO_ROOT=/home/poppang/admin/pangi/repos
+PANGI_WORKTREE_ROOT=/home/poppang/admin/pangi/.data/worktrees
 ```
+
+`PANGI_SOURCE_REPO_ROOT` 아래 direct child 디렉터리 이름을 그대로 repo key로 사용합니다.
+예를 들어 `/home/poppang/admin/pangi/repos/PopPang-iOS`가 있으면 Slack에서는 `PopPang-iOS`로 요청할 수 있습니다.
 
 branch 선택은 단순합니다.
 
@@ -399,6 +455,14 @@ PANGI_ADMIN_PASSWORD=change-this-password
 http://127.0.0.1:8000/pangi-admin/login
 ```
 
+Notion context를 사용하려면 관리자 로그인 후 아래 주소에서 OAuth 연결을 완료합니다.
+
+```text
+http://127.0.0.1:8000/pangi-admin/notion
+```
+
+운영 서버에서는 `PANGI_PUBLIC_BASE_URL`을 외부에서 접근 가능한 팡이 서버 URL로 설정해야 Notion OAuth callback이 돌아올 수 있습니다.
+
 ## 테스트
 
 ```bash
@@ -410,7 +474,7 @@ pytest
 ## 안전 원칙
 
 - `.env`, token, signing secret, Codex auth 파일을 git에 올리지 않습니다.
-- Slack user/channel/repo allowlist를 강제합니다.
+- Slack user/channel allowlist와 `PANGI_SOURCE_REPO_ROOT` 하위 repo 제한을 강제합니다.
 - 사용자의 Slack 메시지를 shell command로 직접 실행하지 않습니다.
 - 외부 명령은 argv list로 실행하고 `shell=True`를 사용하지 않습니다.
 - Codex 분석은 `--sandbox read-only`로 실행합니다.
@@ -479,6 +543,8 @@ flowchart TB
     subgraph Usecase["Usecase"]
         Submit["usecase/submit_slack_request.py<br/>Slack 요청 처리"]
         Guardrail["usecase/input_guardrail.py<br/>입력 가드레일"]
+        NotionContext["usecase/notion_context.py<br/>Notion context prompt"]
+        GitContext["usecase/git_context.py<br/>Git context prompt"]
         RunJob["usecase/run_analysis_job.py<br/>분석 job 실행"]
         Prompt["usecase/build_prompt.py<br/>prompt 조립"]
         Ports["usecase/ports.py<br/>외부 adapter 계약"]
@@ -501,12 +567,16 @@ flowchart TB
         CodexRunner["infra/codex/runner.py<br/>Codex read-only"]
         CodexChat["infra/codex/chat.py<br/>Codex chat"]
         Orchestrator["infra/orchestrator/codex_orchestrator.py<br/>AI 보조 판정"]
+        NotionInfra["infra/notion<br/>Notion context provider"]
+        GitMcpInfra["infra/git_mcp<br/>Git MCP context provider"]
     end
 
     App --> SlackRoutes
     App --> AdminRoutes
     SlackRoutes --> Submit
     Submit --> Guardrail
+    Submit --> NotionContext
+    Submit --> GitContext
     Submit --> Ports
     Submit --> RepoPort
     RunJob --> Prompt
@@ -525,4 +595,6 @@ flowchart TB
     CodexRunner --> Ports
     CodexChat --> Ports
     Orchestrator --> Ports
+    NotionInfra --> Ports
+    GitMcpInfra --> Ports
 ```

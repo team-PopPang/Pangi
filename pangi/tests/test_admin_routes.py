@@ -77,20 +77,32 @@ def request(
     return asyncio.run(asgi_request(method, path, body, headers))
 
 
-def configure_settings(monkeypatch, tmp_path, *, enable_admin=False):
+def configure_settings(monkeypatch, tmp_path, *, enable_admin=False, enable_notion=False):
+    source_root = Path("/tmp/pangi/sources")
+    source_root.mkdir(parents=True, exist_ok=True)
+    (source_root / "PopPang-iOS").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "placeholder-signing-secret")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "placeholder-bot-token")
     monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "U123")
     monkeypatch.setenv("SLACK_ALLOWED_CHANNEL_IDS", "C123")
-    monkeypatch.setenv("PANGI_ALLOWED_REPOS", "PopPang-iOS=/tmp/pangi/sources/PopPang-iOS")
     monkeypatch.setenv("PANGI_WORKTREE_ROOT", "/tmp/pangi/worktrees")
     monkeypatch.setenv("PANGI_SOURCE_REPO_ROOT", "/tmp/pangi/sources")
     if enable_admin:
         monkeypatch.setenv("PANGI_ENABLE_ADMIN_PAGES", "1")
         monkeypatch.setenv("PANGI_ADMIN_PASSWORD", "admin-password")
     else:
-        monkeypatch.delenv("PANGI_ENABLE_ADMIN_PAGES", raising=False)
-        monkeypatch.delenv("PANGI_ADMIN_PASSWORD", raising=False)
+        monkeypatch.setenv("PANGI_ENABLE_ADMIN_PAGES", "0")
+        monkeypatch.setenv("PANGI_ADMIN_PASSWORD", "")
+    if enable_notion:
+        monkeypatch.setenv("PANGI_NOTION_ENABLED", "1")
+        monkeypatch.setenv("PANGI_NOTION_ALLOWED_PAGE_IDS", "265db9e736cf80018f00e19a0fb1185d")
+        monkeypatch.setenv("PANGI_NOTION_ALLOWED_DATABASE_IDS", "37bdb9e736cf80028251c8d070cd4110")
+        monkeypatch.setenv("PANGI_NOTION_TOKEN_STORE_PATH", "/tmp/pangi/worktrees/_notion/oauth.json")
+    else:
+        monkeypatch.delenv("PANGI_NOTION_ENABLED", raising=False)
+        monkeypatch.delenv("PANGI_NOTION_ALLOWED_PAGE_IDS", raising=False)
+        monkeypatch.delenv("PANGI_NOTION_ALLOWED_DATABASE_IDS", raising=False)
+        monkeypatch.delenv("PANGI_NOTION_TOKEN_STORE_PATH", raising=False)
     clear_settings_cache()
     repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
     set_job_repository(repository)
@@ -160,6 +172,37 @@ def test_admin_login_can_view_db_page(monkeypatch, tmp_path):
     assert job.id in html
     assert "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;" in html
     assert "<script>alert('x')</script>" not in html
+
+
+def test_admin_login_can_view_notion_page(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path, enable_admin=True, enable_notion=True)
+    body = urlencode({"username": "pangi", "password": "admin-password"}).encode("utf-8")
+
+    login_status, login_headers, _ = request(
+        "POST",
+        "/pangi-admin/login",
+        body=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    cookie = login_headers["set-cookie"].split(";", 1)[0]
+    notion_status, _, notion_body = request("GET", "/pangi-admin/notion", headers={"Cookie": cookie})
+    html = notion_body.decode("utf-8")
+
+    assert login_status == 303
+    assert notion_status == 200
+    assert "Pangi Notion" in html
+    assert "허용 page</dt><dd>1개" in html
+    assert "허용 database</dt><dd>1개" in html
+    assert "access-token" not in html
+
+
+def test_admin_notion_page_requires_login(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path, enable_admin=True, enable_notion=True)
+
+    status, headers, _ = request("GET", "/pangi-admin/notion")
+
+    assert status == 303
+    assert headers["location"] == "/pangi-admin/login"
 
 
 def test_admin_does_not_mount_generic_admin_path(monkeypatch, tmp_path):

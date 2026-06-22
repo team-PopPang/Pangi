@@ -7,6 +7,7 @@ from pangi.config.settings import (
     UnknownRepoError,
     clear_settings_cache,
     get_settings,
+    normalize_notion_id,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "UnknownRepoError",
     "clear_settings_cache",
     "get_settings",
+    "normalize_notion_id",
 ]

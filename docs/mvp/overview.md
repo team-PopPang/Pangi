@@ -4,7 +4,7 @@
 
 팡이 1차 MVP는 Slack에서 팡이와 기본 AI 대화를 할 수 있고, 허용된 PopPang repo 분석 요청은 서버가 격리된 git worktree에서 `codex exec --sandbox read-only`를 실행한 뒤 결과를 Slack thread에 반환하는 것이다.
 
-처음부터 코드 수정, PR 생성, Notion 기록, session resume까지 만들지 않는다. 먼저 "팡이가 대화하고, 필요한 repo만 안전하게 읽고 답한다"는 경험을 완성한다.
+처음부터 코드 수정, PR 생성, Notion 기록, session resume까지 만들지 않는다. 먼저 "팡이가 대화하고, 필요한 repo와 팀 데이터를 안전하게 읽고 답한다"는 경험을 완성한다.
 
 ## 제품 컨셉
 
@@ -32,6 +32,7 @@ Slack
 -> 입력 가드레일
 -> Orchestrator
 -> 일반 대화는 Codex Chat
+-> Notion/Git context는 provider가 read-only 조회 후 Codex Chat
 -> repo 분석은 Job Worker
 -> Worktree Manager
 -> Codex Runner
@@ -44,7 +45,7 @@ Slack
 
 - Slack app mention 수신
 - Slack request signature 검증
-- user/channel/repo allowlist
+- user/channel allowlist와 source repo root 하위 repo 제한
 - 입력 가드레일 기반 외부 웹/쓰기 요청 차단과 코드 기반 1차 라우팅
 - 애매한 요청만 Codex CLI orchestrator를 통한 보조 분류
 - repo worktree 없는 Codex chat 응답
@@ -65,6 +66,7 @@ Slack
 - 코드 수정
 - PR 생성
 - Notion report
+- Git write 작업
 - Codex session resume
 - xcodebuild 자동 실행
 - dashboard

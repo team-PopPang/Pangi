@@ -7,9 +7,37 @@ from dataclasses import dataclass
 
 from pangi.domain.models import JobStatus
 from pangi.repository import DuplicateEventError, JobRepository
+from pangi.usecase.git_context import (
+    GitContextAccessDeniedError,
+    GitContextDisabledError,
+    GitRepoCatalog,
+    GitRepoCatalogItem,
+    build_git_context_prompt,
+    format_repo_catalog_response,
+)
+from pangi.usecase.notion_context import (
+    NotionContextAccessDeniedError,
+    NotionContextDisabledError,
+    build_notion_context_prompt,
+)
 from pangi.usecase.output_guardrail import prepare_output_markdown
-from pangi.usecase.request_decision import NEEDS_REPO_MESSAGE, RequestClassification
-from pangi.usecase.ports import ChatResponder, JobQueue, RequestOrchestrator, SlackNotifier
+from pangi.usecase.request_decision import (
+    GIT_CONTEXT_ACCESS_DENIED_MESSAGE,
+    GIT_CONTEXT_DISABLED_MESSAGE,
+    NEEDS_REPO_MESSAGE,
+    NOTION_CONTEXT_ACCESS_DENIED_MESSAGE,
+    NOTION_CONTEXT_DISABLED_MESSAGE,
+    RequestClassification,
+    build_needs_repo_message,
+)
+from pangi.usecase.ports import (
+    ChatResponder,
+    GitContextProvider,
+    JobQueue,
+    NotionContextProvider,
+    RequestOrchestrator,
+    SlackNotifier,
+)
 
 
 IN_PROGRESS_REACTION_NAME = "eyes"
@@ -54,6 +82,8 @@ class SubmitSlackRequestUseCase:
         request_orchestrator: RequestOrchestrator,
         chat_responder: ChatResponder,
         allowed_repo_keys: tuple[str, ...],
+        notion_context_provider: NotionContextProvider | None = None,
+        git_context_provider: GitContextProvider | None = None,
         background_runner: BackgroundRunner = _default_background_runner,
     ) -> None:
         self._repository = repository
@@ -62,6 +92,8 @@ class SubmitSlackRequestUseCase:
         self._request_orchestrator = request_orchestrator
         self._chat_responder = chat_responder
         self._allowed_repo_keys = allowed_repo_keys
+        self._notion_context_provider = notion_context_provider
+        self._git_context_provider = git_context_provider
         self._background_runner = background_runner
 
     async def execute(self, request: SubmitSlackRequestInput) -> SubmitSlackRequestResult:
@@ -89,8 +121,32 @@ class SubmitSlackRequestUseCase:
                 classification=decision.kind,
             )
 
+        if decision.kind == RequestClassification.NOTION_CONTEXT_CHAT:
+            self._background_runner(self._post_notion_context_response(request))
+            return SubmitSlackRequestResult(
+                job_id=None,
+                job_status=None,
+                classification=decision.kind,
+            )
+
+        if decision.kind == RequestClassification.GIT_CONTEXT_CHAT:
+            self._background_runner(self._post_git_context_response(request))
+            return SubmitSlackRequestResult(
+                job_id=None,
+                job_status=None,
+                classification=decision.kind,
+            )
+
+        if decision.kind == RequestClassification.REPO_CATALOG:
+            self._background_runner(self._post_repo_catalog_response(request))
+            return SubmitSlackRequestResult(
+                job_id=None,
+                job_status=None,
+                classification=decision.kind,
+            )
+
         if not decision.should_create_job:
-            await self._post_policy_message(request, decision.reply_text or NEEDS_REPO_MESSAGE)
+            await self._post_policy_message(request, self._reply_text_for_non_job_decision(decision))
             await self._replace_in_progress_reaction(request, name=SUCCESS_REACTION_NAME)
             return SubmitSlackRequestResult(
                 job_id=None,
@@ -99,7 +155,7 @@ class SubmitSlackRequestUseCase:
             )
 
         if decision.kind != RequestClassification.REPO_ANALYSIS or decision.repo_key is None:
-            await self._post_policy_message(request, NEEDS_REPO_MESSAGE)
+            await self._post_policy_message(request, build_needs_repo_message(self._allowed_repo_keys))
             await self._replace_in_progress_reaction(request, name=SUCCESS_REACTION_NAME)
             return SubmitSlackRequestResult(
                 job_id=None,
@@ -139,6 +195,13 @@ class SubmitSlackRequestUseCase:
             job_status=job.status,
             classification=decision.kind,
         )
+
+    def _reply_text_for_non_job_decision(self, decision) -> str:
+        if decision.reply_text:
+            return decision.reply_text
+        if decision.kind == RequestClassification.NEEDS_REPO:
+            return build_needs_repo_message(self._allowed_repo_keys)
+        return NEEDS_REPO_MESSAGE
 
     async def _add_in_progress_reaction(self, request: SubmitSlackRequestInput) -> None:
         if not request.message_ts:
@@ -223,4 +286,130 @@ class SubmitSlackRequestUseCase:
             )
         except Exception as error:
             logger.warning("Failed to post Slack chat response: %s", error)
+            await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
+
+    async def _post_notion_context_response(self, request: SubmitSlackRequestInput) -> None:
+        succeeded = True
+        if self._notion_context_provider is None:
+            response_text = NOTION_CONTEXT_DISABLED_MESSAGE
+        else:
+            try:
+                context = await self._notion_context_provider.fetch_context(
+                    text=request.text,
+                    user_id=request.user_id,
+                    channel_id=request.channel_id,
+                    thread_ts=request.thread_ts,
+                )
+                response_text = await self._chat_responder.respond(
+                    text=build_notion_context_prompt(user_text=request.text, context=context),
+                    user_id=request.user_id,
+                    channel_id=request.channel_id,
+                    thread_ts=request.thread_ts,
+                )
+            except NotionContextDisabledError:
+                response_text = NOTION_CONTEXT_DISABLED_MESSAGE
+            except NotionContextAccessDeniedError:
+                response_text = NOTION_CONTEXT_ACCESS_DENIED_MESSAGE
+            except Exception as error:
+                logger.warning("Failed to generate Notion context response: %s", error)
+                succeeded = False
+                response_text = "Notion 문서 확인에 실패했습니다. 잠시 후 다시 요청해주세요."
+
+        safe_text = prepare_output_markdown(response_text, max_chars=CHAT_REPLY_MAX_CHARS)
+        try:
+            await self._slack_notifier.post_message(
+                channel_id=request.channel_id,
+                thread_ts=request.thread_ts,
+                text=safe_text,
+            )
+            await self._replace_in_progress_reaction(
+                request,
+                name=SUCCESS_REACTION_NAME if succeeded else FAILURE_REACTION_NAME,
+            )
+        except Exception as error:
+            logger.warning("Failed to post Slack Notion context response: %s", error)
+            await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
+
+    async def _post_git_context_response(self, request: SubmitSlackRequestInput) -> None:
+        succeeded = True
+        if self._git_context_provider is None:
+            response_text = GIT_CONTEXT_DISABLED_MESSAGE
+        else:
+            try:
+                context = await self._git_context_provider.fetch_context(
+                    text=request.text,
+                    user_id=request.user_id,
+                    channel_id=request.channel_id,
+                    thread_ts=request.thread_ts,
+                )
+                response_text = await self._chat_responder.respond(
+                    text=build_git_context_prompt(user_text=request.text, context=context),
+                    user_id=request.user_id,
+                    channel_id=request.channel_id,
+                    thread_ts=request.thread_ts,
+                )
+            except GitContextDisabledError:
+                response_text = GIT_CONTEXT_DISABLED_MESSAGE
+            except GitContextAccessDeniedError:
+                response_text = GIT_CONTEXT_ACCESS_DENIED_MESSAGE
+            except Exception as error:
+                logger.warning("Failed to generate Git context response: %s", error)
+                succeeded = False
+                response_text = "Git context 확인에 실패했습니다. 잠시 후 다시 요청해주세요."
+
+        safe_text = prepare_output_markdown(response_text, max_chars=CHAT_REPLY_MAX_CHARS)
+        try:
+            await self._slack_notifier.post_message(
+                channel_id=request.channel_id,
+                thread_ts=request.thread_ts,
+                text=safe_text,
+            )
+            await self._replace_in_progress_reaction(
+                request,
+                name=SUCCESS_REACTION_NAME if succeeded else FAILURE_REACTION_NAME,
+            )
+        except Exception as error:
+            logger.warning("Failed to post Slack Git context response: %s", error)
+            await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
+
+    async def _post_repo_catalog_response(self, request: SubmitSlackRequestInput) -> None:
+        succeeded = True
+        if self._git_context_provider is None:
+            catalog = GitRepoCatalog(
+                items=tuple(GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in self._allowed_repo_keys),
+                git_mcp_enabled=False,
+            )
+        else:
+            try:
+                catalog = await self._git_context_provider.fetch_repo_catalog(local_repo_keys=self._allowed_repo_keys)
+            except GitContextDisabledError:
+                catalog = GitRepoCatalog(
+                    items=tuple(
+                        GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in self._allowed_repo_keys
+                    ),
+                    git_mcp_enabled=False,
+                )
+            except Exception as error:
+                logger.warning("Failed to fetch repo catalog: %s", error)
+                succeeded = False
+                catalog = GitRepoCatalog(
+                    items=tuple(
+                        GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in self._allowed_repo_keys
+                    ),
+                    git_mcp_enabled=False,
+                )
+
+        safe_text = prepare_output_markdown(format_repo_catalog_response(catalog), max_chars=CHAT_REPLY_MAX_CHARS)
+        try:
+            await self._slack_notifier.post_message(
+                channel_id=request.channel_id,
+                thread_ts=request.thread_ts,
+                text=safe_text,
+            )
+            await self._replace_in_progress_reaction(
+                request,
+                name=SUCCESS_REACTION_NAME if succeeded else FAILURE_REACTION_NAME,
+            )
+        except Exception as error:
+            logger.warning("Failed to post Slack repo catalog response: %s", error)
             await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)

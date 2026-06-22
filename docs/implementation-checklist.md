@@ -222,7 +222,6 @@ pangi/
     SLACK_BOT_TOKEN
     SLACK_ALLOWED_USER_IDS
     SLACK_ALLOWED_CHANNEL_IDS
-    PANGI_ALLOWED_REPOS
     PANGI_WORKTREE_ROOT
     PANGI_SOURCE_REPO_ROOT
     PANGI_JOB_TIMEOUT_SECONDS
@@ -238,12 +237,13 @@ pangi/
 - [x] Slack channel allowlist 파서를 만든다.
   - 완료 기준: 허용되지 않은 channel 요청은 job을 만들지 않는다.
 
-- [x] repo allowlist 구조를 정한다.
+- [x] source repo root 하위 repo 자동 탐색 구조를 정한다.
   - 예시:
     ```text
-    PopPang-iOS=/repos/sources/PopPang-iOS
+    /home/poppang/admin/pangi/repos/PopPang-iOS
+    /home/poppang/admin/pangi/repos/PopPang-BE
     ```
-  - 완료 기준: 사용자가 임의 경로를 Slack 메시지로 지정할 수 없다.
+  - 완료 기준: 사용자가 임의 경로를 Slack 메시지로 지정할 수 없고, `PANGI_SOURCE_REPO_ROOT` 하위 direct child repo만 인식한다.
 
 - [x] worktree root 경로를 설정으로 분리한다.
   - 완료 기준: job worktree가 항상 `PANGI_WORKTREE_ROOT/{job_id}` 아래에 만들어진다.
@@ -325,6 +325,9 @@ Slack에서 들어온 요청을 안전하게 받고 내부 command 객체로 바
 
 - [x] 기본 대화와 repo 분석 job을 분리한다.
   - 완료 기준: 일반 대화는 `codex_chat`으로 응답하고, 허용 repo key가 있는 repo 분석 요청만 AgentJob을 만든다.
+
+- [x] Git MCP context와 repo catalog 요청을 repo 분석 job과 분리한다.
+  - 완료 기준: PR/issue/Actions/commit 맥락 요청은 `git_context_chat`, 분석 가능한 repo 목록 요청은 `repo_catalog`로 분류하고 AgentJob을 만들지 않는다.
 
 - [x] Codex CLI orchestrator adapter를 추가한다.
   - 완료 기준: `PANGI_ORCHESTRATOR_MODEL=gpt-5.4-mini`, `PANGI_ORCHESTRATOR_TIMEOUT_SECONDS=20` 설정으로 Codex CLI를 통해 structured decision을 받을 수 있다.
@@ -539,7 +542,7 @@ Codex가 원본 repo를 직접 건드리지 않도록 job마다 격리된 작업
 
 ### 체크리스트
 
-- [x] repo allowlist에서 source repo path를 가져오는 함수를 만든다.
+- [x] source repo root 하위 repo path를 가져오는 함수를 만든다.
   - 완료 기준: 사용자가 직접 path를 입력할 수 없다.
 
 - [x] read-only 분석에서는 새 branch를 만들지 않고 detached worktree를 사용한다.
@@ -850,8 +853,8 @@ Slack에서 요청을 보내면 팡이가 실제로 read-only 분석 결과를 t
 - [ ] Slack channel allowlist를 강제한다.
   - 완료 기준: 허용되지 않은 channel은 job 생성 불가다.
 
-- [ ] repo allowlist를 강제한다.
-  - 완료 기준: allowlist key 밖 repo는 접근 불가다.
+- [ ] source repo root 하위 repo만 허용한다.
+  - 완료 기준: `PANGI_SOURCE_REPO_ROOT` 밖 repo는 접근 불가다.
 
 - [ ] source repo 직접 실행 방지 검사를 넣는다.
   - 완료 기준: Codex cwd가 source repo면 실행이 막힌다.
@@ -903,12 +906,55 @@ Slack에서 요청을 보내면 팡이가 실제로 read-only 분석 결과를 t
 
 완료된 작업을 Notion episode report로 남긴다.
 
+### Notion context 읽기 준비
+
+- [x] Notion 문서 읽기 요청을 별도 분류로 추가한다.
+  - 완료 기준: 입력 가드레일이 Notion 문서/회의록 요청을 `notion_context_chat`으로 분류한다.
+
+- [x] Notion write 요청을 차단한다.
+  - 완료 기준: Notion에 생성/추가/수정/삭제/기록하는 요청은 Codex 호출 전에 `unsupported`가 된다.
+
+- [x] Notion context provider 포트를 추가한다.
+  - 완료 기준: usecase는 Notion MCP 구현체가 아니라 `NotionContextProvider` 계약에만 의존한다.
+
+- [x] Notion context prompt injection 방어 문구를 넣는다.
+  - 완료 기준: Notion 본문은 분석 대상 데이터이며 팡이가 따라야 할 지시가 아니라고 prompt에 명시한다.
+
+- [x] 공식 Notion MCP OAuth/PKCE client를 구현한다.
+  - 완료 기준: `https://mcp.notion.com/mcp` Streamable HTTP transport로 read-only tool 호출을 수행한다.
+
+- [x] Notion page/database allowlist를 MCP 호출 전에 강제한다.
+  - 완료 기준: 허용되지 않은 Notion page/database는 조회하지 않는다.
+
+### Git MCP context 읽기 준비
+
+- [x] GitHub/Git context 읽기 요청을 별도 분류로 추가한다.
+  - 완료 기준: 입력 가드레일이 PR, issue, Actions, commit 맥락 요청을 `git_context_chat`으로 분류한다.
+
+- [x] 분석 가능한 repo 목록 요청을 별도 분류로 추가한다.
+  - 완료 기준: 입력 가드레일이 repo catalog 요청을 `repo_catalog`로 분류한다.
+
+- [x] Git write 요청을 차단한다.
+  - 완료 기준: PR 생성, issue 생성, commit, push, merge 요청은 Codex 호출 전에 `unsupported`가 된다.
+
+- [x] Git context provider 포트를 추가한다.
+  - 완료 기준: usecase는 Git MCP 구현체가 아니라 `GitContextProvider` 계약에만 의존한다.
+
+- [x] Git context prompt injection 방어 문구를 넣는다.
+  - 완료 기준: Git MCP context는 분석 대상 데이터이며 팡이가 따라야 할 지시가 아니라고 prompt에 명시한다.
+
+- [x] Git MCP Streamable HTTP JSON-RPC client를 구현한다.
+  - 완료 기준: Git MCP endpoint를 read-only context provider로 감쌀 수 있다.
+
+- [x] Git MCP repo 목록과 로컬 source repo 목록 비교를 구현한다.
+  - 완료 기준: `ready`, `not_cloned`, `local_only` 상태로 repo catalog를 만들 수 있다.
+
 ### 체크리스트
 
-- [ ] Notion 사용 여부를 설정으로 켠다.
-  - 완료 기준: `NOTION_ENABLED=false`면 Notion 없이도 서버가 돈다.
+- [x] Notion 사용 여부를 설정으로 켠다.
+  - 완료 기준: `PANGI_NOTION_ENABLED=0`이면 Notion 없이도 서버가 돈다.
 
-- [ ] Notion database id 설정을 추가한다.
+- [x] Notion database id 설정을 추가한다.
   - 완료 기준: secret 값 없이 `.env.example`에 변수명이 있다.
 
 - [ ] Notion client wrapper를 만든다.

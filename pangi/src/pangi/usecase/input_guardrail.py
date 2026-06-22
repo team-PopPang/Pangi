@@ -10,10 +10,13 @@ from pangi.usecase.request_decision import (
     WEB_ANALYSIS_BLOCKED_MESSAGE,
     ClassifiedRequest,
     RequestClassification,
+    build_needs_repo_message,
 )
 
 
 URL_PATTERN = re.compile(r"(?i)(https?://|www\.)\S+")
+NOTION_URL_PATTERN = re.compile(r"(?i)https?://(?:www\.)?[\w.-]*(?:notion\.so|notion\.site)/\S+")
+GITHUB_URL_PATTERN = re.compile(r"(?i)https?://(?:www\.)?github\.com/\S+")
 COMPACT_PATTERN = re.compile(r"[^a-z0-9가-힣]+")
 
 WEB_ANALYSIS_KEYWORDS = (
@@ -41,6 +44,7 @@ ANALYSIS_KEYWORDS = (
     "찾아",
     "원인",
     "왜",
+    "뭐",
     "구조",
     "흐름",
     "에러",
@@ -57,7 +61,7 @@ REPO_TARGET_KEYWORDS = (
     "소스",
     "프로젝트",
 )
-UNSUPPORTED_KEYWORDS = (
+CODE_WRITE_KEYWORDS = (
     "수정",
     "고쳐",
     "구현",
@@ -72,6 +76,100 @@ UNSUPPORTED_KEYWORDS = (
     "commit",
     "push",
 )
+GIT_CONTEXT_KEYWORDS = (
+    "github",
+    "깃허브",
+    "git",
+    "깃",
+    "pr",
+    "pull request",
+    "풀리퀘",
+    "issue",
+    "이슈",
+    "actions",
+    "action",
+    "액션",
+    "workflow",
+    "워크플로",
+    "ci",
+    "커밋",
+    "commit",
+    "branch",
+    "브랜치",
+    "release",
+    "릴리즈",
+)
+GIT_WRITE_TARGET_KEYWORDS = (
+    "pr",
+    "pull request",
+    "풀리퀘",
+    "issue",
+    "이슈",
+    "commit",
+    "커밋",
+    "branch",
+    "브랜치",
+    "release",
+    "릴리즈",
+)
+WRITE_ACTION_KEYWORDS = (
+    "생성",
+    "만들",
+    "열어",
+    "등록",
+    "추가",
+    "수정해",
+    "고쳐",
+    "작성",
+    "써줘",
+    "올려",
+    "merge",
+    "머지",
+    "push",
+    "푸시",
+    "배포",
+    "deploy",
+)
+REPO_CATALOG_PHRASES = (
+    "분석 가능한 레포",
+    "분석가능한 레포",
+    "분석가능한레포",
+    "분석 가능한 레포지토리",
+    "분석 가능한 repository",
+    "분석 가능한 저장소",
+    "분석 가능한 repo",
+    "허용된 레포",
+    "허용된 레포지토리",
+    "허용된 repo",
+    "허용된 repository",
+    "허용 repo",
+    "사용 가능한 레포",
+    "사용 가능한 레포지토리",
+    "사용 가능한 저장소",
+    "사용가능한레포",
+    "볼 수 있는 레포",
+    "볼 수 있는 레포지토리",
+    "볼 수 있는 저장소",
+    "읽을 수 있는 레포",
+    "읽을 수 있는 레포지토리",
+    "읽을 수 있는 저장소",
+    "레포 목록",
+    "레포 리스트",
+    "레포지토리 목록",
+    "레포지토리 리스트",
+    "repo 목록",
+    "repo 리스트",
+    "repository 목록",
+    "repository 리스트",
+    "저장소 목록",
+    "저장소 리스트",
+    "어떤 레포",
+    "어떤 레포지토리",
+    "어떤 저장소",
+    "무슨 레포",
+    "무슨 레포지토리",
+    "무슨 저장소",
+)
 SECRET_KEYWORDS = (
     ".env",
     "env 파일",
@@ -85,6 +183,23 @@ SECRET_KEYWORDS = (
     "인증키",
     "password",
     "비밀번호",
+)
+NOTION_KEYWORDS = (
+    "notion",
+    "노션",
+)
+NOTION_WRITE_KEYWORDS = (
+    "생성",
+    "만들",
+    "추가",
+    "업데이트",
+    "수정",
+    "고쳐",
+    "삭제",
+    "작성해",
+    "써줘",
+    "기록해",
+    "저장해",
 )
 CHAT_KEYWORDS = (
     "안녕",
@@ -124,6 +239,11 @@ class RequestFeatures:
     has_web_intent: bool
     has_write_intent: bool
     has_secret_risk: bool
+    has_notion_url: bool
+    has_notion_intent: bool
+    has_notion_write_intent: bool
+    has_git_context_intent: bool
+    has_repo_catalog_intent: bool
     has_repo_target: bool
     has_analysis_intent: bool
     has_chat_intent: bool
@@ -144,7 +264,12 @@ def guard_request_input(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> 
     features = extract_request_features(text, allowed_repo_keys=allowed_repo_keys)
     repo_key = features.repo_key
 
-    if features.has_url or (features.has_web_intent and features.has_analysis_intent):
+    if (features.has_url and not features.has_notion_intent and not features.has_git_context_intent) or (
+        features.has_web_intent
+        and features.has_analysis_intent
+        and not features.has_notion_intent
+        and not features.has_git_context_intent
+    ):
         return ClassifiedRequest(
             kind=RequestClassification.BLOCKED_WEB_ANALYSIS,
             should_create_job=False,
@@ -152,7 +277,7 @@ def guard_request_input(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> 
             reason="외부 웹/인터넷 또는 URL 분석 요청입니다.",
         )
 
-    if features.has_write_intent or features.has_secret_risk:
+    if features.has_write_intent or features.has_secret_risk or features.has_notion_write_intent:
         return ClassifiedRequest(
             kind=RequestClassification.UNSUPPORTED,
             should_create_job=False,
@@ -176,6 +301,48 @@ def route_request_input(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> 
             reason=policy_decision.reason or "입력 가드레일 정책으로 판정했습니다.",
         )
 
+    if features.has_notion_intent:
+        decision = ClassifiedRequest(
+            kind=RequestClassification.NOTION_CONTEXT_CHAT,
+            should_create_job=False,
+            reason="Notion 문서 또는 Notion 데이터 맥락 요청입니다.",
+        )
+        return InputGuardrailRoute(
+            decision=decision,
+            needs_ai_orchestrator=False,
+            confidence="high",
+            features=features,
+            reason=decision.reason or "",
+        )
+
+    if features.has_repo_catalog_intent:
+        decision = ClassifiedRequest(
+            kind=RequestClassification.REPO_CATALOG,
+            should_create_job=False,
+            reason="분석 가능한 repo 목록 요청입니다.",
+        )
+        return InputGuardrailRoute(
+            decision=decision,
+            needs_ai_orchestrator=False,
+            confidence="high",
+            features=features,
+            reason=decision.reason or "",
+        )
+
+    if features.has_git_context_intent:
+        decision = ClassifiedRequest(
+            kind=RequestClassification.GIT_CONTEXT_CHAT,
+            should_create_job=False,
+            reason="Git MCP로 조회할 수 있는 repo, PR, issue, Actions 맥락 요청입니다.",
+        )
+        return InputGuardrailRoute(
+            decision=decision,
+            needs_ai_orchestrator=False,
+            confidence="high",
+            features=features,
+            reason=decision.reason or "",
+        )
+
     if features.repo_key is not None and features.has_analysis_intent:
         decision = ClassifiedRequest(
             kind=RequestClassification.REPO_ANALYSIS,
@@ -195,7 +362,7 @@ def route_request_input(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> 
         decision = ClassifiedRequest(
             kind=RequestClassification.NEEDS_REPO,
             should_create_job=False,
-            reply_text=NEEDS_REPO_MESSAGE,
+            reply_text=build_needs_repo_message(allowed_repo_keys),
             reason="repo 분석 의도는 있지만 대상 repo가 명확하지 않습니다.",
         )
         return InputGuardrailRoute(
@@ -287,7 +454,7 @@ def enforce_orchestrator_decision(
     return ClassifiedRequest(
         kind=RequestClassification.NEEDS_REPO,
         should_create_job=False,
-        reply_text=NEEDS_REPO_MESSAGE,
+        reply_text=build_needs_repo_message(allowed_keys),
         reason="오케스트레이터가 원문에 명시되지 않았거나 허용되지 않은 repo를 선택했습니다.",
     )
 
@@ -310,13 +477,28 @@ def extract_request_features(text: str, *, allowed_repo_keys: Iterable[str] = ()
     matched_terms: list[str] = []
 
     has_url = URL_PATTERN.search(normalized) is not None
+    has_github_url = GITHUB_URL_PATTERN.search(normalized) is not None
     if has_url:
         matched_terms.append("url")
+    if has_github_url:
+        matched_terms.append("github-url")
 
     has_web_intent = _has_any(lowered, WEB_ANALYSIS_KEYWORDS, matched_terms)
-    has_write_intent = _has_any(lowered, UNSUPPORTED_KEYWORDS, matched_terms)
+    has_write_intent = _has_write_intent(lowered, matched_terms)
     has_secret_risk = _has_any(lowered, SECRET_KEYWORDS, matched_terms)
     has_repo_target = repo_key is not None or _has_any(lowered, REPO_TARGET_KEYWORDS, matched_terms)
+    has_notion_url = NOTION_URL_PATTERN.search(normalized) is not None
+    has_notion_keyword = _has_any(lowered, NOTION_KEYWORDS, matched_terms)
+    has_notion_intent = has_notion_url or (has_notion_keyword and not has_repo_target)
+    has_notion_write_intent = has_notion_keyword and _has_any(lowered, NOTION_WRITE_KEYWORDS, matched_terms)
+    if has_notion_url:
+        matched_terms.append("notion-url")
+    has_repo_catalog_intent = _has_repo_catalog_intent(normalized, matched_terms)
+    has_git_context_intent = (
+        not has_notion_intent
+        and not has_repo_catalog_intent
+        and (has_github_url or _has_any(lowered, GIT_CONTEXT_KEYWORDS, matched_terms))
+    )
     has_analysis_intent = _has_any(lowered, ANALYSIS_KEYWORDS, matched_terms)
     has_chat_intent = _has_any(lowered, CHAT_KEYWORDS, matched_terms)
     has_ambiguous_reference = _has_any(lowered, AMBIGUOUS_REFERENCE_KEYWORDS, matched_terms)
@@ -332,6 +514,11 @@ def extract_request_features(text: str, *, allowed_repo_keys: Iterable[str] = ()
         has_web_intent=has_web_intent,
         has_write_intent=has_write_intent,
         has_secret_risk=has_secret_risk,
+        has_notion_url=has_notion_url,
+        has_notion_intent=has_notion_intent,
+        has_notion_write_intent=has_notion_write_intent,
+        has_git_context_intent=has_git_context_intent,
+        has_repo_catalog_intent=has_repo_catalog_intent,
         has_repo_target=has_repo_target,
         has_analysis_intent=has_analysis_intent,
         has_chat_intent=has_chat_intent,
@@ -365,6 +552,43 @@ def _has_any(text: str, keywords: Iterable[str], matched_terms: list[str] | None
     return False
 
 
+def _has_repo_catalog_intent(text: str, matched_terms: list[str] | None = None) -> bool:
+    lowered = text.lower()
+    compacted = _compact_text(text)
+    for phrase in REPO_CATALOG_PHRASES:
+        if phrase.lower() in lowered or _compact_text(phrase) in compacted:
+            if matched_terms is not None:
+                matched_terms.append(phrase)
+            return True
+    return False
+
+
+def _has_write_intent(text: str, matched_terms: list[str] | None = None) -> bool:
+    if _has_git_write_intent(text, matched_terms):
+        return True
+
+    for keyword in CODE_WRITE_KEYWORDS:
+        if keyword in {"pr", "pull request", "풀리퀘", "commit", "커밋"}:
+            continue
+        if keyword == "수정" and "수정사항" in text:
+            continue
+        if keyword in text:
+            if matched_terms is not None:
+                matched_terms.append(keyword)
+            return True
+    return False
+
+
+def _has_git_write_intent(text: str, matched_terms: list[str] | None = None) -> bool:
+    has_git_target = any(keyword in text for keyword in GIT_WRITE_TARGET_KEYWORDS)
+    has_write_action = any(keyword in text for keyword in WRITE_ACTION_KEYWORDS)
+    if has_git_target and has_write_action:
+        if matched_terms is not None:
+            matched_terms.append("git-write")
+        return True
+    return False
+
+
 def _needs_ai_orchestrator(features: RequestFeatures) -> bool:
     if features.repo_key is not None or features.has_repo_target:
         return False
@@ -385,7 +609,7 @@ def _looks_like_web_analysis(text: str) -> bool:
 
 def _looks_unsupported(text: str) -> bool:
     lowered = text.lower()
-    return any(keyword in lowered for keyword in UNSUPPORTED_KEYWORDS)
+    return _has_write_intent(lowered)
 
 
 def _looks_like_analysis(text: str) -> bool:
