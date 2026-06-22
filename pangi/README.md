@@ -22,7 +22,7 @@
 - 입력 가드레일 기반 외부 웹/쓰기 요청 조기 차단
 - 입력 가드레일 1차 라우팅과 Codex CLI 기반 orchestrator 보조 분류
 - Notion 문서 읽기 요청 분류와 공식 MCP 기반 Notion context provider
-- Git MCP 기반 GitHub/Git context 요청 분류와 repo catalog 응답
+- Git MCP 기반 GitHub/Git context 요청 분류, repo catalog 응답, 조직 repo clone-on-demand
 - `SlackThread`, `AgentJob`, `CodexRun` 모델
 - SQLite 기반 job 저장소
 - Slack 요청을 `queued` 상태 job으로 저장

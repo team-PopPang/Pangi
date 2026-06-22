@@ -68,8 +68,17 @@ def _validate_access(*, user_id: str, channel_id: str) -> None:
         raise HTTPException(status_code=403, detail=str(error)) from error
 
 
-def _allowed_repo_keys() -> tuple[str, ...]:
-    return get_settings().available_repo_keys()
+async def _allowed_repo_keys() -> tuple[str, ...]:
+    local_repo_keys = get_settings().available_repo_keys()
+    provider = get_git_context_provider()
+    if provider is None:
+        return local_repo_keys
+    try:
+        catalog = await provider.fetch_repo_catalog(local_repo_keys=local_repo_keys)
+    except Exception as error:
+        logger.warning("Failed to fetch Git MCP repo keys: %s", error)
+        return local_repo_keys
+    return tuple(item.name for item in catalog.items)
 
 
 @router.post("/events")
@@ -134,12 +143,13 @@ async def slack_commands(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Invalid Slack command payload")
 
     _validate_access(user_id=command.user_id, channel_id=command.channel_id)
-    allowed_repo_keys = _allowed_repo_keys()
+    local_repo_keys = get_settings().available_repo_keys()
+    allowed_repo_keys = await _allowed_repo_keys()
     orchestrator = get_request_orchestrator()
     decision = await orchestrator.decide(text=command.text, allowed_repo_keys=allowed_repo_keys)
     if not decision.should_create_job:
         if decision.kind == RequestClassification.REPO_CATALOG:
-            text = await _repo_catalog_text(allowed_repo_keys=allowed_repo_keys)
+            text = await _repo_catalog_text(local_repo_keys=local_repo_keys)
         else:
             text = _reply_text_for_slash_decision(decision, allowed_repo_keys=allowed_repo_keys)
         return JSONResponse(
@@ -209,7 +219,8 @@ async def _process_app_mention(request_input: SubmitSlackRequestInput) -> None:
         chat_responder=get_chat_responder(),
         notion_context_provider=get_notion_context_provider(),
         git_context_provider=get_git_context_provider(),
-        allowed_repo_keys=_allowed_repo_keys(),
+        allowed_repo_keys=await _allowed_repo_keys(),
+        local_repo_keys=get_settings().available_repo_keys(),
     )
     try:
         await use_case.execute(request_input)
@@ -217,23 +228,23 @@ async def _process_app_mention(request_input: SubmitSlackRequestInput) -> None:
         logger.exception("Failed to process Slack app mention %s: %s", request_input.event_id, error)
 
 
-async def _repo_catalog_text(*, allowed_repo_keys: tuple[str, ...]) -> str:
+async def _repo_catalog_text(*, local_repo_keys: tuple[str, ...]) -> str:
     provider = get_git_context_provider()
     if provider is None:
-        return format_repo_catalog_response(_local_repo_catalog(allowed_repo_keys))
+        return format_repo_catalog_response(_local_repo_catalog(local_repo_keys))
     try:
-        catalog = await provider.fetch_repo_catalog(local_repo_keys=allowed_repo_keys)
+        catalog = await provider.fetch_repo_catalog(local_repo_keys=local_repo_keys)
     except GitContextDisabledError:
-        catalog = _local_repo_catalog(allowed_repo_keys)
+        catalog = _local_repo_catalog(local_repo_keys)
     except Exception as error:
         logger.warning("Failed to fetch repo catalog for slash command: %s", error)
-        catalog = _local_repo_catalog(allowed_repo_keys)
+        catalog = _local_repo_catalog(local_repo_keys)
     return format_repo_catalog_response(catalog)
 
 
-def _local_repo_catalog(allowed_repo_keys: tuple[str, ...]) -> GitRepoCatalog:
+def _local_repo_catalog(local_repo_keys: tuple[str, ...]) -> GitRepoCatalog:
     return GitRepoCatalog(
-        items=tuple(GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in allowed_repo_keys),
+        items=tuple(GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in local_repo_keys),
         git_mcp_enabled=False,
     )
 

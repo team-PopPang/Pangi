@@ -947,7 +947,7 @@ Slack에서 요청을 보내면 팡이가 실제로 read-only 분석 결과를 t
   - 완료 기준: Git MCP endpoint를 read-only context provider로 감쌀 수 있다.
 
 - [x] Git MCP repo 목록과 로컬 source repo 목록 비교를 구현한다.
-  - 완료 기준: `ready`, `not_cloned`, `local_only` 상태로 repo catalog를 만들 수 있다.
+  - 완료 기준: `ready`, `clone_on_demand`, `local_only` 상태로 repo catalog를 만들 수 있다.
 
 ### 체크리스트
 

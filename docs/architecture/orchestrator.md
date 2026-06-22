@@ -118,7 +118,7 @@ repo job을 만들지 않는다. 팡이 서버의 Git context provider가 Git MC
 @팡이 지금 볼 수 있는 repo 뭐야?
 ```
 
-repo job을 만들지 않는다. Git MCP가 연결되어 있으면 Git MCP의 조직 repo 목록과 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone 목록을 비교해 `분석 가능`, `로컬 clone 없음`, `로컬에만 있음` 상태로 답한다. Git MCP가 연결되어 있지 않으면 로컬 clone 기준으로만 답한다.
+repo job을 만들지 않는다. Git MCP가 연결되어 있으면 Git MCP의 조직 repo 목록과 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone 목록을 합쳐 `분석 가능`, `요청 시 clone`, `로컬에만 있음` 상태로 답한다. Git MCP가 연결되어 있지 않으면 로컬 clone 기준으로만 답한다.
 
 ### `blocked_web_analysis`
 

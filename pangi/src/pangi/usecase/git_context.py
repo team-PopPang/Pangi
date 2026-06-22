@@ -103,8 +103,8 @@ def _format_source_lines(sources: tuple[GitContextSource, ...]) -> str:
 def _catalog_status_text(status: str) -> str:
     if status == "ready":
         return "분석 가능, 로컬 clone 있음"
-    if status == "not_cloned":
-        return "Git MCP에는 있지만 서버 로컬 clone 없음"
+    if status == "clone_on_demand":
+        return "분석 가능, 요청 시 서버가 clone"
     if status == "local_only":
         return "서버 로컬 clone은 있지만 Git MCP 목록에서는 확인 안 됨"
     return status

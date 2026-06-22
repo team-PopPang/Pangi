@@ -52,6 +52,22 @@ def create_source_repo(tmp_path: Path, *, base_branch: str = "develop") -> Path:
     return source_repo
 
 
+def create_bare_remote_with_commit(tmp_path: Path, *, repo_name: str, base_branch: str = "develop") -> Path:
+    remote_repo = tmp_path / f"{repo_name}.git"
+    seed_repo = tmp_path / f"{repo_name}-seed"
+    subprocess.run(["git", "init", "--bare", str(remote_repo)], check=True, capture_output=True)
+    subprocess.run(["git", "init", str(seed_repo)], check=True, capture_output=True)
+    run_git(seed_repo, "checkout", "-b", base_branch)
+    run_git(seed_repo, "config", "user.email", "pangi@example.com")
+    run_git(seed_repo, "config", "user.name", "Pangi Test")
+    (seed_repo / "README.md").write_text(f"# {repo_name}\n", encoding="utf-8")
+    run_git(seed_repo, "add", "README.md")
+    run_git(seed_repo, "commit", "-m", "Initial commit")
+    run_git(seed_repo, "remote", "add", "origin", str(remote_repo))
+    run_git(seed_repo, "push", "-u", "origin", base_branch)
+    return remote_repo
+
+
 def test_worktree_manager_creates_detached_read_only_worktree(tmp_path):
     async def scenario():
         source_repo = create_source_repo(tmp_path)
@@ -84,6 +100,29 @@ def test_worktree_manager_falls_back_to_main_when_develop_is_missing(tmp_path):
 
         assert context.base_ref == "origin/main"
         assert (context.path / "README.md").is_file()
+
+    asyncio.run(scenario())
+
+
+def test_worktree_manager_clones_missing_org_repo_before_creating_worktree(tmp_path):
+    async def scenario():
+        create_bare_remote_with_commit(tmp_path, repo_name="PopPang-BE")
+        settings = settings_for(
+            tmp_path,
+            tmp_path / "sources" / "PopPang-BE",
+            PANGI_GIT_MCP_ENABLED="1",
+            PANGI_GIT_MCP_ORG="team-PopPang",
+            PANGI_GIT_CLONE_URL_TEMPLATE=f"file://{tmp_path}/{{repo}}.git",
+        )
+        manager = GitWorktreeManager(settings=settings, command_timeout_seconds=10)
+
+        context = await manager.prepare_read_only_worktree(
+            job_id="job_clone",
+            repo_key="PopPang-BE",
+        )
+
+        assert settings.repo_path_for_key("PopPang-BE").is_dir()
+        assert (context.path / "README.md").read_text(encoding="utf-8") == "# PopPang-BE\n"
 
     asyncio.run(scenario())
 

@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+from string import Formatter
 from types import MappingProxyType
 from typing import Mapping
 from urllib.parse import urlparse
@@ -30,6 +31,7 @@ DEFAULT_NOTION_TOKEN_STORE_NAME = "notion-oauth.json"
 DEFAULT_GIT_MCP_URL = "https://api.githubcopilot.com/mcp/"
 DEFAULT_GIT_MCP_CONTEXT_MAX_CHARS = 6000
 DEFAULT_GIT_MCP_TIMEOUT_SECONDS = 20
+DEFAULT_GIT_CLONE_URL_TEMPLATE = "https://github.com/{org}/{repo}.git"
 ALLOW_ALL_MARKER = "*"
 JOB_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 GIT_REF_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
@@ -38,6 +40,7 @@ ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 GIT_ORG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 NOTION_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 REASONING_EFFORT_VALUES = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+GIT_CLONE_URL_TEMPLATE_FIELDS = frozenset({"org", "repo"})
 
 
 class SettingsError(ValueError):
@@ -88,6 +91,7 @@ class Settings:
     git_mcp_context_max_chars: int = DEFAULT_GIT_MCP_CONTEXT_MAX_CHARS
     git_mcp_timeout_seconds: int = DEFAULT_GIT_MCP_TIMEOUT_SECONDS
     git_mcp_write_enabled: bool = False
+    git_clone_url_template: str | None = None
     enable_admin_pages: bool = False
     admin_password: str | None = field(default=None, repr=False)
 
@@ -247,6 +251,10 @@ class Settings:
                 values.get("PANGI_GIT_MCP_WRITE_ENABLED", "0"),
                 "PANGI_GIT_MCP_WRITE_ENABLED",
             ),
+            git_clone_url_template=_parse_git_clone_url_template(
+                values.get("PANGI_GIT_CLONE_URL_TEMPLATE"),
+                "PANGI_GIT_CLONE_URL_TEMPLATE",
+            ),
             enable_admin_pages=enable_admin_pages,
             admin_password=admin_password,
         )
@@ -267,18 +275,28 @@ class Settings:
         try:
             return self.allowed_repos[repo_key]
         except KeyError:
-            raise UnknownRepoError(repo_key) from None
+            if not self._is_known_or_cloneable_repo_key(repo_key):
+                raise UnknownRepoError(repo_key) from None
+            repo_path = (self.source_repo_root / repo_key).resolve(strict=False)
+            _ensure_path_under_root(repo_path, self.source_repo_root, f"repo path for {repo_key}")
+            return repo_path
+
+    def clone_url_for_key(self, repo_key: str) -> str:
+        if not self._is_known_or_cloneable_repo_key(repo_key) or not self.git_mcp_org:
+            raise UnknownRepoError(repo_key)
+        template = self.git_clone_url_template or DEFAULT_GIT_CLONE_URL_TEMPLATE
+        return template.format(org=self.git_mcp_org, repo=repo_key)
 
     def available_repo_keys(self) -> tuple[str, ...]:
         return tuple(sorted(self.allowed_repos))
 
     def base_branch_for_key(self, repo_key: str) -> str:
-        if repo_key not in self.allowed_repos:
+        if not self._is_known_or_cloneable_repo_key(repo_key):
             raise UnknownRepoError(repo_key)
         return self.default_base_branch
 
     def base_branch_candidates_for_key(self, repo_key: str) -> tuple[str, ...]:
-        if repo_key not in self.allowed_repos:
+        if not self._is_known_or_cloneable_repo_key(repo_key):
             raise UnknownRepoError(repo_key)
         if self.default_base_branch == FALLBACK_BASE_BRANCH:
             return (self.default_base_branch,)
@@ -296,6 +314,16 @@ class Settings:
 
     def is_notion_database_allowed(self, notion_id: str) -> bool:
         return normalize_notion_id(notion_id) in self.notion_allowed_database_ids
+
+    def _is_known_or_cloneable_repo_key(self, repo_key: str) -> bool:
+        if repo_key in self.allowed_repos:
+            return True
+        return bool(
+            self.git_mcp_enabled
+            and self.git_mcp_org
+            and GIT_ORG_PATTERN.fullmatch(repo_key)
+            and not repo_key.startswith("-")
+        )
 
 
 def _parse_csv_set(raw_value: str, name: str) -> frozenset[str]:
@@ -443,6 +471,35 @@ def _parse_optional_git_org(raw_value: str | None, name: str) -> str | None:
         return None
     if not GIT_ORG_PATTERN.fullmatch(value) or value.startswith("-"):
         raise SettingsError(f"{name} must be a safe GitHub organization name")
+    return value
+
+
+def _parse_git_clone_url_template(raw_value: str | None, name: str) -> str | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    if any(char.isspace() or ord(char) < 32 for char in value):
+        raise SettingsError(f"{name} must not contain whitespace or control characters")
+
+    fields: list[str] = []
+    try:
+        for _literal_text, field_name, format_spec, conversion in Formatter().parse(value):
+            if field_name is None:
+                continue
+            root_field = field_name.split(".", 1)[0].split("[", 1)[0]
+            if field_name != root_field or format_spec or conversion:
+                raise SettingsError(f"{name} may only use simple {{org}} and {{repo}} placeholders")
+            fields.append(field_name)
+    except ValueError as error:
+        raise SettingsError(f"{name} must be a valid format string") from error
+
+    if "repo" not in fields:
+        raise SettingsError(f"{name} must include {{repo}}")
+    invalid_fields = sorted(set(fields) - GIT_CLONE_URL_TEMPLATE_FIELDS)
+    if invalid_fields:
+        allowed = ", ".join(f"{{{field}}}" for field in sorted(GIT_CLONE_URL_TEMPLATE_FIELDS))
+        invalid = ", ".join(f"{{{field}}}" for field in invalid_fields)
+        raise SettingsError(f"{name} may only use {allowed}, not {invalid}")
     return value
 
 

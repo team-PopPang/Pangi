@@ -18,6 +18,7 @@ from pangi.usecase.git_context import (
 
 REPO_NAME_PATTERN = re.compile(r"(?im)^\s*[-*]?\s*(?:[\w.-]+/)?([A-Za-z0-9_.-]+)\s*$")
 FULL_NAME_PATTERN = re.compile(r"(?i)\b[A-Za-z0-9_.-]+/([A-Za-z0-9_.-]+)\b")
+INVALID_REPO_NAMES = frozenset({"null", "none", "true", "false"})
 WRITE_TOOL_KEYWORDS = (
     "create",
     "update",
@@ -240,7 +241,7 @@ def _extract_repo_names(raw_text: str, *, org: str) -> tuple[str, ...]:
         return ()
 
     names = _extract_repo_names_from_json(raw_text, org=org)
-    if names:
+    if names is not None and (names or _is_json_primitive_catalog(raw_text)):
         return names
 
     found: list[str] = []
@@ -248,18 +249,18 @@ def _extract_repo_names(raw_text: str, *, org: str) -> tuple[str, ...]:
         found.append(match.group(1))
     for match in REPO_NAME_PATTERN.finditer(raw_text):
         found.append(match.group(1))
-    return tuple(sorted(dict.fromkeys(name for name in found if name and name != org)))
+    return tuple(sorted(dict.fromkeys(name for name in found if _is_repo_name(name, org=org))))
 
 
-def _extract_repo_names_from_json(raw_text: str, *, org: str) -> tuple[str, ...]:
+def _extract_repo_names_from_json(raw_text: str, *, org: str) -> tuple[str, ...] | None:
     try:
         data = json.loads(raw_text)
     except json.JSONDecodeError:
-        return ()
+        return None
 
     names: list[str] = []
     _collect_repo_names(data, names=names, org=org)
-    return tuple(sorted(dict.fromkeys(names)))
+    return tuple(sorted(dict.fromkeys(name for name in names if _is_repo_name(name, org=org))))
 
 
 def _collect_repo_names(value: object, *, names: list[str], org: str) -> None:
@@ -274,6 +275,19 @@ def _collect_repo_names(value: object, *, names: list[str], org: str) -> None:
             _collect_repo_names(item, names=names, org=org)
     elif isinstance(value, str) and value.startswith(f"{org}/"):
         names.append(value.split("/", 1)[1])
+
+
+def _is_repo_name(value: str, *, org: str) -> bool:
+    name = value.strip()
+    return bool(name and name != org and name.lower() not in INVALID_REPO_NAMES and REPO_NAME_PATTERN.fullmatch(name))
+
+
+def _is_json_primitive_catalog(raw_text: str) -> bool:
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return False
+    return data is None or isinstance(data, (bool, int, float))
 
 
 def _merge_repo_catalog(
@@ -291,7 +305,7 @@ def _merge_repo_catalog(
         if name in local and (not remote or name in remote):
             status = "ready"
         elif name in remote:
-            status = "not_cloned"
+            status = "clone_on_demand"
         else:
             status = "local_only"
         items.append(GitRepoCatalogItem(name=name, status=status))

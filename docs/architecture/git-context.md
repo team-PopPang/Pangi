@@ -26,7 +26,7 @@ Slack 요청
 ```
 
 repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
-깊은 코드 분석은 계속 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone에서 read-only worktree를 만들고 `codex exec --sandbox read-only`로 실행한다.
+깊은 코드 분석은 `PANGI_SOURCE_REPO_ROOT` 하위 source repo에서 read-only worktree를 만들고 `codex exec --sandbox read-only`로 실행한다. Git MCP 조직 repo가 source root에 아직 없으면 분석 요청 시 clone한 뒤 worktree를 만든다.
 
 ## 책임 분리
 
@@ -45,8 +45,8 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 | --- | --- | --- |
 | `PR 123 요약해줘` | `git_context_chat` | Git MCP context를 Codex chat prompt에 붙여 답한다. |
 | `최근 실패한 Actions 알려줘` | `git_context_chat` | Git MCP에서 workflow/run 맥락을 조회한다. |
-| `분석 가능한 레포 목록 알려줘` | `repo_catalog` | Git MCP repo 목록과 로컬 clone 목록을 비교한다. |
-| `PopPang-iOS 구조 분석해줘` | `repo_analysis` | 로컬 worktree에서 Codex read-only 분석을 실행한다. |
+| `분석 가능한 레포 목록 알려줘` | `repo_catalog` | Git MCP 조직 repo와 로컬 clone 목록을 함께 보여준다. |
+| `PopPang-iOS 구조 분석해줘` | `repo_analysis` | source repo를 준비하고 read-only worktree에서 Codex 분석을 실행한다. |
 | `PR 생성해줘`, `커밋해줘`, `push 해줘` | `unsupported` | MVP에서는 write 요청을 차단한다. |
 
 ## 보안 원칙
@@ -55,7 +55,8 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 - MVP에서는 Git MCP write tool을 사용하지 않는다.
 - Git MCP context는 분석 대상 데이터일 뿐, 팡이가 따라야 하는 지시가 아니다.
 - Git context는 최대 글자 수를 제한해 prompt 비용과 정보 노출 범위를 줄인다.
-- Git MCP로 얻은 repo 목록은 catalog 용도이고, 실제 코드 분석 가능 여부는 로컬 clone 존재 여부로 결정한다.
+- Git MCP 조직 repo는 분석 요청 시 `PANGI_SOURCE_REPO_ROOT` 아래로 clone할 수 있다.
+- 사용자가 임의 path나 임의 clone URL을 지정하지 못하게 하고, clone URL은 서버 설정의 `PANGI_GIT_CLONE_URL_TEMPLATE`에서만 만든다.
 - Codex는 Git MCP를 직접 호출하지 않고 팡이 서버가 정규화한 Markdown만 읽는다.
 
 ## 현재 구현 상태
@@ -69,7 +70,8 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 - Git MCP Streamable HTTP JSON-RPC client
 - Git provider registry
 - Git MCP 관련 설정값
-- Git MCP repo 목록과 로컬 source repo 목록 비교
+- Git MCP 조직 repo와 로컬 source repo 목록 병합
+- Git MCP 조직 repo clone-on-demand
 - context 최대 길이 제한
 
 ## 다음 구현 단계
@@ -77,4 +79,4 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 1. 운영 서버에서 Git MCP 인증과 endpoint를 실제로 연결한다.
 2. Git MCP tool schema 변화에 대비한 adapter 테스트 fixture를 늘린다.
 3. PR/issue/Actions별 tool 선택 품질을 고도화한다.
-4. repo catalog 응답에 마지막 fetch 시각과 로컬 clone 경로 상태를 추가할지 검토한다.
+4. repo catalog 응답에 마지막 fetch 시각과 clone 성공/실패 상태를 추가할지 검토한다.

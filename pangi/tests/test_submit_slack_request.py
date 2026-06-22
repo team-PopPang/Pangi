@@ -131,12 +131,21 @@ class FakeGitContextProvider:
     async def fetch_repo_catalog(self, *, local_repo_keys: tuple[str, ...]) -> GitRepoCatalog:
         return GitRepoCatalog(
             items=(
-                GitRepoCatalogItem(name="PopPang-BE", status="not_cloned"),
+                GitRepoCatalogItem(name="PopPang-BE", status="clone_on_demand"),
                 GitRepoCatalogItem(name="PopPang-iOS", status="ready"),
             ),
             git_mcp_enabled=True,
             org="team-PopPang",
         )
+
+
+class CapturingGitContextProvider(FakeGitContextProvider):
+    def __init__(self):
+        self.local_repo_keys = None
+
+    async def fetch_repo_catalog(self, *, local_repo_keys: tuple[str, ...]) -> GitRepoCatalog:
+        self.local_repo_keys = local_repo_keys
+        return await super().fetch_repo_catalog(local_repo_keys=local_repo_keys)
 
 
 class AccessDeniedGitContextProvider:
@@ -668,8 +677,44 @@ def test_repo_catalog_uses_git_context_provider(tmp_path):
         assert result.classification == RequestClassification.REPO_CATALOG
         assert "Git MCP 조직: team-PopPang" in slack.messages[0]["text"]
         assert "PopPang-iOS: 분석 가능" in slack.messages[0]["text"]
-        assert "PopPang-BE: Git MCP에는 있지만 서버 로컬 clone 없음" in slack.messages[0]["text"]
+        assert "PopPang-BE: 분석 가능, 요청 시 서버가 clone" in slack.messages[0]["text"]
         assert slack.reactions[-1]["name"] == "white_check_mark"
+
+    asyncio.run(scenario())
+
+
+def test_repo_catalog_passes_local_repo_keys_to_git_context_provider(tmp_path):
+    async def scenario():
+        repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
+        queue = FakeQueue()
+        slack = FakeSlack()
+        tasks = []
+        provider = CapturingGitContextProvider()
+
+        def collect_task(task):
+            tasks.append(task)
+
+        use_case = SubmitSlackRequestUseCase(
+            repository=repository,
+            job_queue=queue,
+            slack_notifier=slack,
+            request_orchestrator=FakeOrchestrator(
+                ClassifiedRequest(
+                    kind=RequestClassification.REPO_CATALOG,
+                    should_create_job=False,
+                )
+            ),
+            chat_responder=FakeChatResponder(),
+            git_context_provider=provider,
+            allowed_repo_keys=("PopPang-BE", "PopPang-iOS"),
+            local_repo_keys=("PopPang-iOS",),
+            background_runner=collect_task,
+        )
+
+        await use_case.execute(make_request("분석 가능한 레포 목록 알려줘"))
+        await asyncio.gather(*tasks)
+
+        assert provider.local_repo_keys == ("PopPang-iOS",)
 
     asyncio.run(scenario())
 

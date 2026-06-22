@@ -71,6 +71,14 @@ class FakeGitMcpClientWithWriteTools:
         return ""
 
 
+class FakeGitMcpClientWithNullCatalog:
+    async def list_tools(self):
+        return (GitMcpTool(name="list_organization_repositories", description="List organization repositories"),)
+
+    async def call_tool(self, name, arguments):
+        return "null"
+
+
 def test_git_mcp_context_provider_fetches_git_context(tmp_path):
     async def scenario():
         settings = Settings.from_env(valid_env(tmp_path))
@@ -119,11 +127,28 @@ def test_git_mcp_context_provider_merges_repo_catalog(tmp_path):
         catalog = await provider.fetch_repo_catalog(local_repo_keys=("PopPang-iOS", "PopPang-FE"))
 
         assert [(item.name, item.status) for item in catalog.items] == [
-            ("PopPang-BE", "not_cloned"),
+            ("PopPang-BE", "clone_on_demand"),
             ("PopPang-FE", "local_only"),
             ("PopPang-iOS", "ready"),
         ]
         assert catalog.org == "team-PopPang"
+
+    asyncio.run(scenario())
+
+
+def test_git_mcp_context_provider_does_not_treat_json_null_as_repo(tmp_path):
+    async def scenario():
+        settings = Settings.from_env(valid_env(tmp_path))
+        provider = GitMcpContextProvider(
+            settings=settings,
+            mcp_client_factory=lambda: FakeGitMcpClientWithNullCatalog(),
+        )
+
+        catalog = await provider.fetch_repo_catalog(local_repo_keys=("PopPang-iOS",))
+
+        assert [(item.name, item.status) for item in catalog.items] == [
+            ("PopPang-iOS", "ready"),
+        ]
 
     asyncio.run(scenario())
 

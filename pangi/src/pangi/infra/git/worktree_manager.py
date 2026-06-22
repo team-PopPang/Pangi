@@ -45,7 +45,7 @@ class GitWorktreeManager:
             raise WorktreePathExistsError(f"Worktree path already exists: {worktree_path}")
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
-        await self._ensure_git_repo(source_repo_path)
+        await self._ensure_source_repo(repo_key=repo_key, source_repo_path=source_repo_path)
         context = await self._prepare_with_branch_fallback(
             source_repo_path=source_repo_path,
             worktree_path=worktree_path,
@@ -54,6 +54,22 @@ class GitWorktreeManager:
         await self._ensure_git_repo(context.path)
 
         return context
+
+    async def _ensure_source_repo(self, *, repo_key: str, source_repo_path: Path) -> None:
+        if source_repo_path.exists():
+            await self._ensure_git_repo(source_repo_path)
+            return
+
+        source_repo_path.parent.mkdir(parents=True, exist_ok=True)
+        clone_url = self.settings.clone_url_for_key(repo_key)
+        await self._run_git(
+            self.settings.source_repo_root,
+            "clone",
+            "--",
+            clone_url,
+            str(source_repo_path),
+        )
+        await self._ensure_git_repo(source_repo_path)
 
     async def _prepare_with_branch_fallback(
         self,

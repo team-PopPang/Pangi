@@ -18,7 +18,7 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 - 허용된 PopPang repo 이름이 명시된 분석 요청은 SQLite job으로 저장하고, 격리된 read-only worktree에서 `codex exec --sandbox read-only`로 코드를 읽은 뒤 Slack thread에 결과를 남깁니다.
 - Notion 문서/회의록 읽기 요청은 repo 분석과 분리된 `notion_context_chat` 흐름으로 분류합니다. 관리자 페이지에서 Notion OAuth 연결을 마치면 허용된 Notion context만 Codex chat prompt에 붙입니다.
 - GitHub/Git의 PR, issue, Actions, commit 맥락 요청은 repo 분석과 분리된 `git_context_chat` 흐름으로 분류합니다. Git MCP가 연결되면 read-only Git context만 Codex chat prompt에 붙입니다.
-- 분석 가능한 repo 목록 요청은 `repo_catalog` 흐름으로 분류하고, Git MCP repo 목록과 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone 목록을 비교해 답합니다.
+- 분석 가능한 repo 목록 요청은 `repo_catalog` 흐름으로 분류하고, Git MCP 조직 repo와 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone을 함께 보여줍니다. 로컬에 없는 조직 repo는 분석 요청 시 source root 아래로 clone합니다.
 - 외부 웹/URL 분석, 코드 수정, PR 생성, 배포, commit/push 요청은 입력 가드레일에서 차단하고 안내 응답만 보냅니다.
 - 요청을 받으면 원본 Slack 메시지에 `eyes` reaction을 달고, 일반 대화나 read-only 분석 응답에 성공하면 `white_check_mark`로 전환합니다. 실패나 timeout은 `x`로 전환합니다.
 - 관리자 DB 확인 페이지에서 Slack thread, job, Codex run 기록을 확인할 수 있습니다.
@@ -51,7 +51,7 @@ flowchart TD
     N --> YN["Codex chat + Notion context<br/>(gpt-5.4-mini / low)"]
     D -->|GitHub/PR/Issue/Actions 질문| GM["Git context provider<br/>Git MCP / read-only"]
     GM --> YG["Codex chat + Git context<br/>(gpt-5.4-mini / low)"]
-    D -->|분석 가능 repo 목록 질문| RL["Repo catalog<br/>Git MCP repo 목록 + 로컬 source repo 목록"]
+    D -->|분석 가능 repo 목록 질문| RL["Repo catalog<br/>Git MCP 조직 repo + 로컬 source repo"]
     RL --> RLA["분석 가능 여부 정리"]
     D -->|repo 불명확| Z["repo 확인 질문"]
     D -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
@@ -345,6 +345,7 @@ PANGI_GIT_MCP_ORG=team-PopPang
 PANGI_GIT_MCP_CONTEXT_MAX_CHARS=6000
 PANGI_GIT_MCP_TIMEOUT_SECONDS=20
 PANGI_GIT_MCP_WRITE_ENABLED=0
+PANGI_GIT_CLONE_URL_TEMPLATE=https://github.com/{org}/{repo}.git
 PANGI_ENABLE_ADMIN_PAGES=0
 PANGI_ADMIN_PASSWORD=
 ```
@@ -375,12 +376,13 @@ PANGI_ADMIN_PASSWORD=
 | `PANGI_GIT_MCP_CONTEXT_MAX_CHARS` | `6000` | Codex prompt에 붙일 Git context 최대 길이 |
 | `PANGI_GIT_MCP_TIMEOUT_SECONDS` | `20` | Git MCP context 조회 timeout |
 | `PANGI_GIT_MCP_WRITE_ENABLED` | `0` | 예약 설정값. MVP에서는 Git write 요청을 지원하지 않음 |
+| `PANGI_GIT_CLONE_URL_TEMPLATE` | `https://github.com/{org}/{repo}.git` | Git MCP 조직 repo가 source root에 없을 때 사용할 clone URL 템플릿 |
 
 입력 가드레일은 AI가 아니라 코드로 유지합니다. Orchestrator는 심층 repo 분석이 아니라 흐름을 정하는 단계이므로 기본 mini 모델과 `low` reasoning을 사용합니다. 팡이가 실행하는 `codex exec`는 `-c model_reasoning_effort="..."`를 명시해, 팡이를 개발하는 사람의 `.codex/config.toml` 설정이 런타임 호출에 섞이지 않게 합니다.
 
 Notion context는 공식 Notion MCP를 직접 Codex에 열지 않고, 팡이 서버가 허용된 page/database만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. Notion 연결은 관리자 페이지 `/pangi-admin/notion`에서 OAuth로 진행합니다. 자세한 기준은 [docs/architecture/notion-context.md](docs/architecture/notion-context.md)를 봅니다.
 
-Git context도 Codex에 Git MCP 권한을 직접 열지 않고, 팡이 서버가 Git MCP에서 필요한 repo/PR/issue/Actions context만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. 실제 코드 전체 분석은 계속 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone과 read-only worktree에서 수행합니다.
+Git context도 Codex에 Git MCP 권한을 직접 열지 않고, 팡이 서버가 Git MCP에서 필요한 repo/PR/issue/Actions context만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. 실제 코드 전체 분석은 `PANGI_SOURCE_REPO_ROOT` 하위 source repo와 read-only worktree에서 수행합니다. Git MCP 조직 repo가 아직 source root에 없으면, 분석 요청 시 `PANGI_GIT_CLONE_URL_TEMPLATE`으로 clone한 뒤 worktree를 만듭니다.
 
 임시 개발 환경에서 모든 Slack user/channel을 허용하려면 `*`를 사용할 수 있습니다.
 

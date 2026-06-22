@@ -33,7 +33,8 @@
 - Git MCP token은 Slack 응답, 로그, 테스트 fixture에 출력하지 않는다.
 - MVP에서는 Git MCP read-only context 조회만 허용하고 PR 생성, issue 생성, commit, push, merge 요청은 차단한다.
 - Codex에는 Git MCP 권한을 직접 주지 않고, 팡이 서버가 정규화한 Markdown context만 전달한다.
-- Git MCP repo 목록은 catalog 용도이며, 실제 코드 분석 가능 여부는 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone 존재 여부로 판단한다.
+- Git MCP 조직 repo는 분석 요청 시 `PANGI_SOURCE_REPO_ROOT` 아래로 clone할 수 있다.
+- 사용자가 Slack 메시지로 임의 clone URL이나 repo path를 지정할 수 없게 한다.
 
 ## Shell 실행 제한
 

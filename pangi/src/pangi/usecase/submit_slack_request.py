@@ -82,6 +82,7 @@ class SubmitSlackRequestUseCase:
         request_orchestrator: RequestOrchestrator,
         chat_responder: ChatResponder,
         allowed_repo_keys: tuple[str, ...],
+        local_repo_keys: tuple[str, ...] | None = None,
         notion_context_provider: NotionContextProvider | None = None,
         git_context_provider: GitContextProvider | None = None,
         background_runner: BackgroundRunner = _default_background_runner,
@@ -92,6 +93,7 @@ class SubmitSlackRequestUseCase:
         self._request_orchestrator = request_orchestrator
         self._chat_responder = chat_responder
         self._allowed_repo_keys = allowed_repo_keys
+        self._local_repo_keys = local_repo_keys or allowed_repo_keys
         self._notion_context_provider = notion_context_provider
         self._git_context_provider = git_context_provider
         self._background_runner = background_runner
@@ -375,29 +377,16 @@ class SubmitSlackRequestUseCase:
     async def _post_repo_catalog_response(self, request: SubmitSlackRequestInput) -> None:
         succeeded = True
         if self._git_context_provider is None:
-            catalog = GitRepoCatalog(
-                items=tuple(GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in self._allowed_repo_keys),
-                git_mcp_enabled=False,
-            )
+            catalog = self._local_repo_catalog()
         else:
             try:
-                catalog = await self._git_context_provider.fetch_repo_catalog(local_repo_keys=self._allowed_repo_keys)
+                catalog = await self._git_context_provider.fetch_repo_catalog(local_repo_keys=self._local_repo_keys)
             except GitContextDisabledError:
-                catalog = GitRepoCatalog(
-                    items=tuple(
-                        GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in self._allowed_repo_keys
-                    ),
-                    git_mcp_enabled=False,
-                )
+                catalog = self._local_repo_catalog()
             except Exception as error:
                 logger.warning("Failed to fetch repo catalog: %s", error)
                 succeeded = False
-                catalog = GitRepoCatalog(
-                    items=tuple(
-                        GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in self._allowed_repo_keys
-                    ),
-                    git_mcp_enabled=False,
-                )
+                catalog = self._local_repo_catalog()
 
         safe_text = prepare_output_markdown(format_repo_catalog_response(catalog), max_chars=CHAT_REPLY_MAX_CHARS)
         try:
@@ -413,3 +402,9 @@ class SubmitSlackRequestUseCase:
         except Exception as error:
             logger.warning("Failed to post Slack repo catalog response: %s", error)
             await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
+
+    def _local_repo_catalog(self) -> GitRepoCatalog:
+        return GitRepoCatalog(
+            items=tuple(GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in self._local_repo_keys),
+            git_mcp_enabled=False,
+        )

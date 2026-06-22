@@ -73,6 +73,7 @@ def test_settings_parses_allowlists_repo_paths_and_default_timeout():
     assert settings.git_mcp_context_max_chars == 6000
     assert settings.git_mcp_timeout_seconds == 20
     assert settings.git_mcp_write_enabled is False
+    assert settings.git_clone_url_template is None
     assert settings.enable_admin_pages is False
     assert settings.admin_password is None
 
@@ -188,6 +189,7 @@ def test_settings_uses_configured_git_mcp_options():
             PANGI_GIT_MCP_CONTEXT_MAX_CHARS="3000",
             PANGI_GIT_MCP_TIMEOUT_SECONDS="10",
             PANGI_GIT_MCP_WRITE_ENABLED="0",
+            PANGI_GIT_CLONE_URL_TEMPLATE="git@github.com:{org}/{repo}.git",
         )
     )
 
@@ -198,6 +200,13 @@ def test_settings_uses_configured_git_mcp_options():
     assert settings.git_mcp_context_max_chars == 3000
     assert settings.git_mcp_timeout_seconds == 10
     assert settings.git_mcp_write_enabled is False
+    assert settings.git_clone_url_template == "git@github.com:{org}/{repo}.git"
+    assert settings.repo_path_for_key("PopPang-BE") == Path(
+        "/tmp/pangi/sources/PopPang-BE"
+    ).resolve(strict=False)
+    assert settings.base_branch_for_key("PopPang-BE") == "develop"
+    assert settings.base_branch_candidates_for_key("PopPang-BE") == ("develop", "main")
+    assert settings.clone_url_for_key("PopPang-BE") == "git@github.com:team-PopPang/PopPang-BE.git"
 
 
 def test_settings_rejects_invalid_git_mcp_options():
@@ -209,6 +218,9 @@ def test_settings_rejects_invalid_git_mcp_options():
 
     with pytest.raises(SettingsError, match="PANGI_GIT_MCP_CONTEXT_MAX_CHARS"):
         Settings.from_env(valid_env(PANGI_GIT_MCP_CONTEXT_MAX_CHARS="0"))
+
+    with pytest.raises(SettingsError, match="PANGI_GIT_CLONE_URL_TEMPLATE"):
+        Settings.from_env(valid_env(PANGI_GIT_CLONE_URL_TEMPLATE="https://github.com/{org}/repo.git"))
 
 
 def test_normalize_notion_id_accepts_dash_or_plain_uuid():
@@ -352,6 +364,7 @@ def test_settings_loads_env_file_from_pangi_folder(tmp_path, monkeypatch):
         "PANGI_GIT_MCP_CONTEXT_MAX_CHARS",
         "PANGI_GIT_MCP_TIMEOUT_SECONDS",
         "PANGI_GIT_MCP_WRITE_ENABLED",
+        "PANGI_GIT_CLONE_URL_TEMPLATE",
         "PANGI_PUBLIC_BASE_URL",
         "PANGI_ENABLE_ADMIN_PAGES",
         "PANGI_ADMIN_PASSWORD",
@@ -423,6 +436,7 @@ def test_settings_uses_env_example_for_empty_local_values(tmp_path, monkeypatch)
         "PANGI_GIT_MCP_CONTEXT_MAX_CHARS",
         "PANGI_GIT_MCP_TIMEOUT_SECONDS",
         "PANGI_GIT_MCP_WRITE_ENABLED",
+        "PANGI_GIT_CLONE_URL_TEMPLATE",
         "PANGI_PUBLIC_BASE_URL",
         "PANGI_ENABLE_ADMIN_PAGES",
         "PANGI_ADMIN_PASSWORD",
