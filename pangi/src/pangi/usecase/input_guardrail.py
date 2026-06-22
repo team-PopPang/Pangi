@@ -285,118 +285,151 @@ class InputGuardrailRoute:
     reason: str
 
 
+@dataclass(frozen=True)
+class RepoAliasResolver:
+    """Resolve only stable team aliases, not arbitrary natural language intent."""
+
+    def resolve(self, text: str, allowed_repo_keys: Iterable[str]) -> str | None:
+        lowered = text.lower()
+        compacted = _compact_text(text)
+        repo_keys = tuple(key for key in allowed_repo_keys if key)
+        for repo_key in sorted(repo_keys, key=len, reverse=True):
+            lowered_repo_key = repo_key.lower()
+            compacted_repo_key = _compact_text(repo_key)
+            if lowered_repo_key in lowered or compacted_repo_key in compacted:
+                return repo_key
+        return self._resolve_stable_alias(lowered, repo_keys)
+
+    def _resolve_stable_alias(self, lowered_text: str, allowed_repo_keys: tuple[str, ...]) -> str | None:
+        matched_keys: list[str] = []
+        for repo_key in allowed_repo_keys:
+            for alias in _repo_aliases_for_key(repo_key):
+                if _contains_repo_alias(lowered_text, alias):
+                    matched_keys.append(repo_key)
+                    break
+        unique_matches = tuple(dict.fromkeys(matched_keys))
+        if len(unique_matches) == 1:
+            return unique_matches[0]
+        return None
+
+
+@dataclass(frozen=True)
+class PolicyGuard:
+    """Block unsafe requests before any AI or expensive runtime path."""
+
+    def decide(self, features: RequestFeatures) -> ClassifiedRequest | None:
+        repo_key = features.repo_key
+
+        if self._is_blocked_web_request(features):
+            return ClassifiedRequest(
+                kind=RequestClassification.BLOCKED_WEB_ANALYSIS,
+                should_create_job=False,
+                reply_text=WEB_ANALYSIS_BLOCKED_MESSAGE,
+                reason="외부 웹/인터넷 또는 URL 분석 요청입니다.",
+            )
+
+        if features.has_write_intent or features.has_secret_risk or features.has_notion_write_intent:
+            return ClassifiedRequest(
+                kind=RequestClassification.UNSUPPORTED,
+                should_create_job=False,
+                repo_key=repo_key,
+                reply_text=UNSUPPORTED_MESSAGE,
+                reason="MVP 범위 밖의 쓰기/배포/민감 정보 요청입니다.",
+            )
+
+        return None
+
+    def _is_blocked_web_request(self, features: RequestFeatures) -> bool:
+        if features.has_url and not features.has_notion_intent and not features.has_git_context_intent:
+            return True
+        return (
+            features.has_web_intent
+            and features.has_analysis_intent
+            and not features.has_notion_intent
+            and not features.has_git_context_intent
+        )
+
+
+@dataclass(frozen=True)
+class FastPathRouter:
+    """Route only high-confidence, cheap decisions; leave fuzzy intent to the orchestrator."""
+
+    def route(self, features: RequestFeatures, *, allowed_repo_keys: Iterable[str]) -> InputGuardrailRoute | None:
+        if features.has_notion_intent:
+            return self._route(
+                features,
+                RequestClassification.NOTION_CONTEXT_CHAT,
+                reason="Notion 문서 또는 Notion 데이터 맥락 요청입니다.",
+            )
+
+        if features.has_repo_catalog_intent:
+            return self._route(
+                features,
+                RequestClassification.REPO_CATALOG,
+                reason="분석 가능한 repo 목록 요청입니다.",
+            )
+
+        if features.has_git_context_intent:
+            return self._route(
+                features,
+                RequestClassification.GIT_CONTEXT_CHAT,
+                reason="Git MCP로 조회할 수 있는 repo, PR, issue, Actions 맥락 요청입니다.",
+            )
+
+        if features.repo_key is not None and features.has_analysis_intent:
+            decision = ClassifiedRequest(
+                kind=RequestClassification.REPO_ANALYSIS,
+                should_create_job=True,
+                repo_key=features.repo_key,
+                reason="허용된 repo와 분석 의도가 모두 명확합니다.",
+            )
+            return _route_from_decision(features, decision, confidence="high")
+
+        if features.repo_key is None and features.has_repo_target and features.has_analysis_intent:
+            decision = ClassifiedRequest(
+                kind=RequestClassification.NEEDS_REPO,
+                should_create_job=False,
+                reply_text=build_needs_repo_message(allowed_repo_keys),
+                reason="repo 분석 의도는 있지만 대상 repo가 명확하지 않습니다.",
+            )
+            return _route_from_decision(features, decision, confidence="high")
+
+        return None
+
+    def _route(
+        self,
+        features: RequestFeatures,
+        kind: RequestClassification,
+        *,
+        reason: str,
+    ) -> InputGuardrailRoute:
+        decision = ClassifiedRequest(
+            kind=kind,
+            should_create_job=False,
+            reason=reason,
+        )
+        return _route_from_decision(features, decision, confidence="high")
+
+
+REPO_ALIAS_RESOLVER = RepoAliasResolver()
+POLICY_GUARD = PolicyGuard()
+FAST_PATH_ROUTER = FastPathRouter()
+
+
 def guard_request_input(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> ClassifiedRequest | None:
     features = extract_request_features(text, allowed_repo_keys=allowed_repo_keys)
-    repo_key = features.repo_key
-
-    if (features.has_url and not features.has_notion_intent and not features.has_git_context_intent) or (
-        features.has_web_intent
-        and features.has_analysis_intent
-        and not features.has_notion_intent
-        and not features.has_git_context_intent
-    ):
-        return ClassifiedRequest(
-            kind=RequestClassification.BLOCKED_WEB_ANALYSIS,
-            should_create_job=False,
-            reply_text=WEB_ANALYSIS_BLOCKED_MESSAGE,
-            reason="외부 웹/인터넷 또는 URL 분석 요청입니다.",
-        )
-
-    if features.has_write_intent or features.has_secret_risk or features.has_notion_write_intent:
-        return ClassifiedRequest(
-            kind=RequestClassification.UNSUPPORTED,
-            should_create_job=False,
-            repo_key=repo_key,
-            reply_text=UNSUPPORTED_MESSAGE,
-            reason="MVP 범위 밖의 쓰기/배포/민감 정보 요청입니다.",
-        )
-
-    return None
+    return POLICY_GUARD.decide(features)
 
 
 def route_request_input(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> InputGuardrailRoute:
     features = extract_request_features(text, allowed_repo_keys=allowed_repo_keys)
     policy_decision = guard_request_input(text, allowed_repo_keys=allowed_repo_keys)
     if policy_decision is not None:
-        return InputGuardrailRoute(
-            decision=policy_decision,
-            needs_ai_orchestrator=False,
-            confidence="high",
-            features=features,
-            reason=policy_decision.reason or "입력 가드레일 정책으로 판정했습니다.",
-        )
+        return _route_from_decision(features, policy_decision, confidence="high")
 
-    if features.has_notion_intent:
-        decision = ClassifiedRequest(
-            kind=RequestClassification.NOTION_CONTEXT_CHAT,
-            should_create_job=False,
-            reason="Notion 문서 또는 Notion 데이터 맥락 요청입니다.",
-        )
-        return InputGuardrailRoute(
-            decision=decision,
-            needs_ai_orchestrator=False,
-            confidence="high",
-            features=features,
-            reason=decision.reason or "",
-        )
-
-    if features.has_repo_catalog_intent:
-        decision = ClassifiedRequest(
-            kind=RequestClassification.REPO_CATALOG,
-            should_create_job=False,
-            reason="분석 가능한 repo 목록 요청입니다.",
-        )
-        return InputGuardrailRoute(
-            decision=decision,
-            needs_ai_orchestrator=False,
-            confidence="high",
-            features=features,
-            reason=decision.reason or "",
-        )
-
-    if features.has_git_context_intent:
-        decision = ClassifiedRequest(
-            kind=RequestClassification.GIT_CONTEXT_CHAT,
-            should_create_job=False,
-            reason="Git MCP로 조회할 수 있는 repo, PR, issue, Actions 맥락 요청입니다.",
-        )
-        return InputGuardrailRoute(
-            decision=decision,
-            needs_ai_orchestrator=False,
-            confidence="high",
-            features=features,
-            reason=decision.reason or "",
-        )
-
-    if features.repo_key is not None and features.has_analysis_intent:
-        decision = ClassifiedRequest(
-            kind=RequestClassification.REPO_ANALYSIS,
-            should_create_job=True,
-            repo_key=features.repo_key,
-            reason="허용된 repo와 분석 의도가 모두 명확합니다.",
-        )
-        return InputGuardrailRoute(
-            decision=decision,
-            needs_ai_orchestrator=False,
-            confidence="high",
-            features=features,
-            reason=decision.reason or "",
-        )
-
-    if features.repo_key is None and features.has_repo_target and features.has_analysis_intent:
-        decision = ClassifiedRequest(
-            kind=RequestClassification.NEEDS_REPO,
-            should_create_job=False,
-            reply_text=build_needs_repo_message(allowed_repo_keys),
-            reason="repo 분석 의도는 있지만 대상 repo가 명확하지 않습니다.",
-        )
-        return InputGuardrailRoute(
-            decision=decision,
-            needs_ai_orchestrator=False,
-            confidence="high",
-            features=features,
-            reason=decision.reason or "",
-        )
+    fast_path_route = FAST_PATH_ROUTER.route(features, allowed_repo_keys=allowed_repo_keys)
+    if fast_path_route is not None:
+        return fast_path_route
 
     if _needs_ai_orchestrator(features):
         return InputGuardrailRoute(
@@ -485,28 +518,7 @@ def enforce_orchestrator_decision(
 
 
 def find_repo_key(text: str, allowed_repo_keys: Iterable[str]) -> str | None:
-    lowered = text.lower()
-    compacted = _compact_text(text)
-    repo_keys = tuple(key for key in allowed_repo_keys if key)
-    for repo_key in sorted(repo_keys, key=len, reverse=True):
-        lowered_repo_key = repo_key.lower()
-        compacted_repo_key = _compact_text(repo_key)
-        if lowered_repo_key in lowered or compacted_repo_key in compacted:
-            return repo_key
-    return _find_repo_key_by_alias(lowered, repo_keys)
-
-
-def _find_repo_key_by_alias(lowered_text: str, allowed_repo_keys: tuple[str, ...]) -> str | None:
-    matched_keys: list[str] = []
-    for repo_key in allowed_repo_keys:
-        for alias in _repo_aliases_for_key(repo_key):
-            if _contains_repo_alias(lowered_text, alias):
-                matched_keys.append(repo_key)
-                break
-    unique_matches = tuple(dict.fromkeys(matched_keys))
-    if len(unique_matches) == 1:
-        return unique_matches[0]
-    return None
+    return REPO_ALIAS_RESOLVER.resolve(text, allowed_repo_keys)
 
 
 def extract_request_features(text: str, *, allowed_repo_keys: Iterable[str] = ()) -> RequestFeatures:
@@ -572,6 +584,21 @@ def _reply_text_for_non_job_decision(decision: ClassifiedRequest) -> str | None:
     if decision.kind == RequestClassification.NEEDS_REPO:
         return NEEDS_REPO_MESSAGE
     return None
+
+
+def _route_from_decision(
+    features: RequestFeatures,
+    decision: ClassifiedRequest,
+    *,
+    confidence: str,
+) -> InputGuardrailRoute:
+    return InputGuardrailRoute(
+        decision=decision,
+        needs_ai_orchestrator=False,
+        confidence=confidence,
+        features=features,
+        reason=decision.reason or "",
+    )
 
 
 def _normalize_text(text: str) -> str:

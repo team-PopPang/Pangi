@@ -2,29 +2,34 @@
 
 ## 역할
 
-입력 가드레일은 Slack에서 들어온 요청을 AI에 보내기 전에 코드로 먼저 판정하는 1차 관문이다.
+입력 가드레일은 Slack에서 들어온 요청을 AI에 보내기 전에 통과시키는 얇은 1차 관문이다.
+자연어를 전부 이해하는 분류기가 아니라, 안전 정책과 고신뢰 fast-path만 코드로 처리한다.
 
-단순 차단기가 아니라 아래 책임을 함께 가진다.
+책임은 아래 범위로 제한한다.
 
 - 외부 웹/URL 분석 요청 차단
 - 코드 수정, PR 생성, 배포, commit/push 같은 MVP 범위 밖 요청 차단
-- 허용 repo key가 명확한 read-only 분석 요청 판정
-- repo 분석 의도는 있지만 repo가 불명확한 요청 판정
+- 허용 repo key나 안정적인 팀 별칭이 명확한 read-only 분석 요청 판정
+- repo 분석 의도는 확실하지만 repo가 불명확한 요청 판정
 - Notion 문서/페이지/회의록 읽기 요청 판정
 - GitHub/Git PR, issue, Actions, commit 맥락 읽기 요청 판정
 - 분석 가능한 repo 목록 요청 판정
-- 일반 대화 요청 판정
 - 코드로 확신하기 어려운 요청만 AI Orchestrator에 위임
+
+하지 않는 일:
+
+- 모든 자연어 표현 변형을 keyword로 계속 추가하지 않는다.
+- `앱쪽`, `모바일쪽`, `지난번 그거`처럼 애매한 의도는 직접 해석하지 않는다.
+- Git MCP 조회, clone, Codex 실행 같은 실제 실행 전략을 결정하지 않는다.
 
 ## 처리 순서
 
 ```text
 SlackCommand text
 -> Text Normalizer
--> Feature Extractor
--> Policy Guard
--> Intent Classifier
--> Confidence Scorer
+-> Feature Extractor + RepoAliasResolver
+-> PolicyGuard
+-> FastPathRouter
 -> ClassifiedRequest 또는 AI Orchestrator 위임
 ```
 
@@ -36,24 +41,22 @@ AI Orchestrator는 입력 가드레일이 `ambiguous`로 남긴 요청만 보조
 ```mermaid
 flowchart TD
     A["정규화된 Slack text"] --> B["Text Normalizer"]
-    B --> C["Feature Extractor"]
-    C --> D["Policy Guard"]
+    B --> C["Feature Extractor<br/>RepoAliasResolver 포함"]
+    C --> D["PolicyGuard"]
     D -->|외부 웹/URL| WEB["blocked_web_analysis"]
     D -->|쓰기/배포/PR| UNSUP["unsupported"]
-    D -->|통과| E["Intent Classifier"]
+    D -->|통과| E["FastPathRouter"]
     E -->|Notion 문서 읽기| NOTION["notion_context_chat"]
     E -->|GitHub/PR/Issue/Actions 읽기| GIT["git_context_chat"]
     E -->|분석 가능 repo 목록| CATALOG["repo_catalog"]
-    E -->|일반 대화 확실| CHAT["codex_chat"]
     E -->|repo 불명확 확실| ASK["needs_repo"]
     E -->|허용 repo 분석 확실| JOB["repo_analysis"]
-    E -->|애매함| AI["AI Orchestrator<br/>gpt-5.4-mini / low"]
+    E -->|fast-path 아님| AI["AI Orchestrator<br/>gpt-5.4-mini / low"]
     AI --> P["Policy Enforcement"]
     P --> OUT["ClassifiedRequest"]
     NOTION --> OUT
     GIT --> OUT
     CATALOG --> OUT
-    CHAT --> OUT
     ASK --> OUT
     JOB --> OUT
     WEB --> OUT
@@ -66,7 +69,7 @@ flowchart TD
 
 | Feature | 의미 |
 | --- | --- |
-| `repo_key` | 원문에서 찾은 허용 repo key. `ios`, `aos`, `android` 같은 팀 내 별칭도 허용 repo가 하나로 좁혀질 때만 매핑한다. |
+| `repo_key` | 원문에서 찾은 허용 repo key. `ios`, `aos`, `android` 같은 안정적인 팀 별칭도 허용 repo가 하나로 좁혀질 때만 매핑한다. |
 | `has_url` | URL 또는 Slack link 포함 |
 | `has_web_intent` | 웹, 검색, 뉴스, 기사, 블로그 등 외부 정보 요청 |
 | `has_write_intent` | 수정, 구현, 리팩터링, PR, commit, push, 배포 요청 |
@@ -125,7 +128,8 @@ PopPang-iOS 수정해줘
 ## 안전 원칙
 
 - AI Orchestrator가 repo를 고르더라도 원문에 명시된 허용 repo key가 아니면 `repo_analysis`로 보내지 않는다.
-- `ios`, `aos` 같은 repo 별칭은 허용 repo 목록에서 단일 후보로 해석될 때만 원문에 명시된 repo로 인정한다.
+- `ios`, `aos` 같은 repo 별칭은 `RepoAliasResolver`가 허용 repo 목록에서 단일 후보로 해석할 때만 원문에 명시된 repo로 인정한다.
+- 새 자연어 표현을 추가해야 할 때는 먼저 Orchestrator로 넘겨도 되는지 확인하고, 팀에서 안정적으로 쓰는 엔티티 별칭만 resolver에 추가한다.
 - `should_create_job`은 `repo_analysis`일 때만 true가 될 수 있다.
 - Notion 요청은 외부 URL 차단 예외가 될 수 있지만, page/database allowlist와 read-only 조회 원칙을 따라야 한다.
 - Notion에 생성/수정/삭제/기록하는 요청은 MCP write 기능이 있더라도 MVP에서는 `unsupported`로 처리한다.

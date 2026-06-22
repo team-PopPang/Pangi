@@ -194,6 +194,19 @@ def test_input_guardrail_resolves_android_repo_for_aos_alias():
     assert route.decision.repo_key == "PopPang-Android"
 
 
+def test_input_guardrail_does_not_resolve_ambiguous_repo_alias():
+    route = route_request_input(
+        "ios 로그인 흐름 봐줘",
+        allowed_repo_keys=("PopPang-iOS", "Admin-iOS"),
+    )
+
+    assert route.needs_ai_orchestrator is False
+    assert route.decision is not None
+    assert route.decision.kind == RequestClassification.CODEX_CHAT
+    assert route.decision.should_create_job is False
+    assert route.features.repo_key is None
+
+
 def test_input_guardrail_blocks_git_write_request_without_ai():
     route = route_request_input("PopPang-iOS PR 생성해줘", allowed_repo_keys=("PopPang-iOS",))
 

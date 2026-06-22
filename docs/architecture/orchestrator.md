@@ -19,6 +19,7 @@ SlackCommand
 ```
 
 입력 가드레일은 코드로 실행되는 deterministic 단계다. 외부 웹/URL 분석, 코드 수정, PR 생성, 배포, commit/push 같은 MVP 범위 밖 요청은 Orchestrator로 보내기 전에 차단한다. 일반 대화, Notion context, Git context, repo catalog, repo 불명확, 허용 repo 분석처럼 코드로 확실히 판단 가능한 요청도 Orchestrator로 보내지 않는다.
+다만 입력 가드레일은 모든 자연어 표현을 이해하려고 하지 않는다. 안정적인 팀 별칭과 고신뢰 fast-path만 처리하고, 애매한 의도 해석은 Orchestrator가 맡는다.
 
 Orchestrator는 입력 가드레일이 `ambiguous`로 남긴 요청만 받아 `codex_chat`, `notion_context_chat`, `git_context_chat`, `repo_catalog`, `needs_repo`, `repo_analysis` 중 어느 흐름으로 보낼지 결정한다. Codex CLI 기반 orchestrator가 비정상 decision을 반환해도 정책 보정 단계에서 `PANGI_SOURCE_REPO_ROOT` 하위 repo 목록, 원문 repo 명시 여부, `should_create_job` 조건을 다시 강제한다.
 
