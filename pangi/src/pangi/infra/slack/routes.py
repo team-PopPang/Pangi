@@ -10,13 +10,26 @@ from starlette.background import BackgroundTask
 
 from pangi.config import AccessDeniedError, get_settings
 from pangi.infra.codex import get_chat_responder
+from pangi.infra.git_mcp import get_git_context_provider
+from pangi.infra.notion import get_notion_context_provider
 from pangi.infra.orchestrator import get_request_orchestrator
 from pangi.infra.queue import get_job_queue
 from pangi.infra.slack.client import get_slack_client
 from pangi.infra.slack.command import command_from_app_mention, command_from_slash_payload
 from pangi.infra.slack.signature import verify_slack_signature
 from pangi.repository import DuplicateEventError, get_job_repository
-from pangi.usecase.request_decision import NEEDS_REPO_MESSAGE, RequestClassification
+from pangi.usecase.git_context import (
+    GitContextDisabledError,
+    GitRepoCatalog,
+    GitRepoCatalogItem,
+    format_repo_catalog_response,
+)
+from pangi.usecase.request_decision import (
+    GIT_CONTEXT_DISABLED_MESSAGE,
+    NOTION_CONTEXT_DISABLED_MESSAGE,
+    RequestClassification,
+    build_needs_repo_message,
+)
 from pangi.usecase.submit_slack_request import SubmitSlackRequestInput, SubmitSlackRequestUseCase
 
 
@@ -56,7 +69,7 @@ def _validate_access(*, user_id: str, channel_id: str) -> None:
 
 
 def _allowed_repo_keys() -> tuple[str, ...]:
-    return tuple(get_settings().allowed_repos.keys())
+    return get_settings().available_repo_keys()
 
 
 @router.post("/events")
@@ -121,14 +134,19 @@ async def slack_commands(request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Invalid Slack command payload")
 
     _validate_access(user_id=command.user_id, channel_id=command.channel_id)
+    allowed_repo_keys = _allowed_repo_keys()
     orchestrator = get_request_orchestrator()
-    decision = await orchestrator.decide(text=command.text, allowed_repo_keys=_allowed_repo_keys())
+    decision = await orchestrator.decide(text=command.text, allowed_repo_keys=allowed_repo_keys)
     if not decision.should_create_job:
+        if decision.kind == RequestClassification.REPO_CATALOG:
+            text = await _repo_catalog_text(allowed_repo_keys=allowed_repo_keys)
+        else:
+            text = _reply_text_for_slash_decision(decision, allowed_repo_keys=allowed_repo_keys)
         return JSONResponse(
             {
                 "ok": True,
                 "response_type": "ephemeral",
-                "text": decision.reply_text or "팡이는 이 요청을 repo 분석 job으로 실행하지 않았습니다.",
+                "text": text,
                 "command": command.to_dict(),
                 "classification": decision.kind.value,
             }
@@ -138,7 +156,7 @@ async def slack_commands(request: Request) -> JSONResponse:
             {
                 "ok": True,
                 "response_type": "ephemeral",
-                "text": NEEDS_REPO_MESSAGE,
+                "text": build_needs_repo_message(allowed_repo_keys),
                 "command": command.to_dict(),
                 "classification": RequestClassification.NEEDS_REPO.value,
             }
@@ -189,9 +207,44 @@ async def _process_app_mention(request_input: SubmitSlackRequestInput) -> None:
         slack_notifier=get_slack_client(),
         request_orchestrator=get_request_orchestrator(),
         chat_responder=get_chat_responder(),
+        notion_context_provider=get_notion_context_provider(),
+        git_context_provider=get_git_context_provider(),
         allowed_repo_keys=_allowed_repo_keys(),
     )
     try:
         await use_case.execute(request_input)
     except Exception as error:
         logger.exception("Failed to process Slack app mention %s: %s", request_input.event_id, error)
+
+
+async def _repo_catalog_text(*, allowed_repo_keys: tuple[str, ...]) -> str:
+    provider = get_git_context_provider()
+    if provider is None:
+        return format_repo_catalog_response(_local_repo_catalog(allowed_repo_keys))
+    try:
+        catalog = await provider.fetch_repo_catalog(local_repo_keys=allowed_repo_keys)
+    except GitContextDisabledError:
+        catalog = _local_repo_catalog(allowed_repo_keys)
+    except Exception as error:
+        logger.warning("Failed to fetch repo catalog for slash command: %s", error)
+        catalog = _local_repo_catalog(allowed_repo_keys)
+    return format_repo_catalog_response(catalog)
+
+
+def _local_repo_catalog(allowed_repo_keys: tuple[str, ...]) -> GitRepoCatalog:
+    return GitRepoCatalog(
+        items=tuple(GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in allowed_repo_keys),
+        git_mcp_enabled=False,
+    )
+
+
+def _reply_text_for_slash_decision(decision, *, allowed_repo_keys: tuple[str, ...]) -> str:
+    if decision.reply_text:
+        return decision.reply_text
+    if decision.kind == RequestClassification.NEEDS_REPO:
+        return build_needs_repo_message(allowed_repo_keys)
+    if decision.kind == RequestClassification.NOTION_CONTEXT_CHAT:
+        return NOTION_CONTEXT_DISABLED_MESSAGE
+    if decision.kind in {RequestClassification.GIT_CONTEXT_CHAT, RequestClassification.REPO_CATALOG}:
+        return GIT_CONTEXT_DISABLED_MESSAGE
+    return "팡이는 이 요청을 repo 분석 job으로 실행하지 않았습니다."

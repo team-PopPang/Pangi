@@ -13,6 +13,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from pangi.config import get_settings
 from pangi.domain.models import AgentJob, CodexRun, SlackThread
+from pangi.infra.notion.oauth import NotionOAuthClient, NotionOAuthError
+from pangi.infra.notion.token_store import JsonNotionTokenStore
 from pangi.repository import get_job_repository
 
 
@@ -20,6 +22,10 @@ ADMIN_PATH_PREFIX = "/pangi-admin"
 ADMIN_LOGIN_PATH = f"{ADMIN_PATH_PREFIX}/login"
 ADMIN_DB_PATH = f"{ADMIN_PATH_PREFIX}/db"
 ADMIN_LOGOUT_PATH = f"{ADMIN_PATH_PREFIX}/logout"
+ADMIN_NOTION_PATH = f"{ADMIN_PATH_PREFIX}/notion"
+ADMIN_NOTION_CONNECT_PATH = f"{ADMIN_PATH_PREFIX}/notion/connect"
+ADMIN_NOTION_CALLBACK_PATH = f"{ADMIN_PATH_PREFIX}/notion/callback"
+ADMIN_NOTION_DISCONNECT_PATH = f"{ADMIN_PATH_PREFIX}/notion/disconnect"
 
 router = APIRouter(prefix=ADMIN_PATH_PREFIX, tags=["admin"])
 ADMIN_USERNAME = "pangi"
@@ -78,6 +84,62 @@ async def admin_db(request: Request) -> Response:
     return HTMLResponse(html)
 
 
+@router.get("/notion", response_class=HTMLResponse)
+async def admin_notion(request: Request) -> Response:
+    _require_admin_enabled()
+    if not _has_valid_session(request):
+        return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    token_store = _notion_token_store()
+    connection = token_store.load() if token_store else None
+    return HTMLResponse(_render_notion_page(connection_status="connected" if connection and connection.tokens else "disconnected"))
+
+
+@router.post("/notion/connect")
+async def admin_notion_connect(request: Request) -> Response:
+    settings = _require_admin_enabled()
+    if not _has_valid_session(request):
+        return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    token_store = _notion_token_store()
+    if token_store is None:
+        return HTMLResponse(_render_notion_page(error="Notion token store path가 설정되지 않았습니다."), status_code=400)
+    oauth_client = NotionOAuthClient(mcp_url=settings.notion_mcp_url, token_store=token_store)
+    try:
+        authorize_url = await oauth_client.begin_authorization(redirect_uri=_notion_callback_url(request))
+    except NotionOAuthError as error:
+        return HTMLResponse(_render_notion_page(error=f"Notion OAuth 시작에 실패했습니다: {error}"), status_code=502)
+    return RedirectResponse(authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/notion/callback", response_class=HTMLResponse)
+async def admin_notion_callback(request: Request) -> Response:
+    settings = _require_admin_enabled()
+    token_store = _notion_token_store()
+    if token_store is None:
+        return HTMLResponse(_render_notion_page(error="Notion token store path가 설정되지 않았습니다."), status_code=400)
+    error = request.query_params.get("error")
+    if error:
+        return HTMLResponse(_render_notion_page(error=f"Notion OAuth error: {error}"), status_code=400)
+    code = request.query_params.get("code") or ""
+    state_param = request.query_params.get("state") or ""
+    oauth_client = NotionOAuthClient(mcp_url=settings.notion_mcp_url, token_store=token_store)
+    try:
+        await oauth_client.complete_authorization(code=code, state=state_param)
+    except NotionOAuthError as oauth_error:
+        return HTMLResponse(_render_notion_page(error=f"Notion OAuth 완료에 실패했습니다: {oauth_error}"), status_code=400)
+    return RedirectResponse(ADMIN_NOTION_PATH, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/notion/disconnect")
+async def admin_notion_disconnect(request: Request) -> Response:
+    _require_admin_enabled()
+    if not _has_valid_session(request):
+        return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    token_store = _notion_token_store()
+    if token_store:
+        token_store.clear()
+    return RedirectResponse(ADMIN_NOTION_PATH, status_code=status.HTTP_303_SEE_OTHER)
+
+
 def _require_admin_enabled():
     settings = get_settings()
     if not settings.enable_admin_pages:
@@ -85,6 +147,20 @@ def _require_admin_enabled():
     if settings.admin_password is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     return settings
+
+
+def _notion_token_store() -> JsonNotionTokenStore | None:
+    settings = get_settings()
+    if settings.notion_token_store_path is None:
+        return None
+    return JsonNotionTokenStore(settings.notion_token_store_path)
+
+
+def _notion_callback_url(request: Request) -> str:
+    settings = get_settings()
+    if settings.public_base_url:
+        return settings.public_base_url + ADMIN_NOTION_CALLBACK_PATH
+    return str(request.url_for("admin_notion_callback"))
 
 
 def _has_valid_session(request: Request) -> bool:
@@ -262,6 +338,18 @@ def _render_page(
       font: inherit;
       cursor: pointer;
     }}
+    .nav {{
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+    }}
+    .nav a {{
+      color: #0f766e;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 650;
+    }}
   </style>
 </head>
 <body>
@@ -270,9 +358,12 @@ def _render_page(
       <h1>Pangi DB</h1>
       <p>최근 SQLite job 기록을 확인합니다. 최대 50개씩 표시합니다.</p>
     </div>
-    <form method="post" action="{ADMIN_LOGOUT_PATH}">
-      <button class="logout" type="submit">로그아웃</button>
-    </form>
+    <div class="nav">
+      <a href="{ADMIN_NOTION_PATH}">Notion 연결</a>
+      <form method="post" action="{ADMIN_LOGOUT_PATH}">
+        <button class="logout" type="submit">로그아웃</button>
+      </form>
+    </div>
   </header>
   <main>
     <h2>agent_jobs</h2>
@@ -281,6 +372,111 @@ def _render_page(
     {_threads_table(threads)}
     <h2>codex_runs</h2>
     {_codex_runs_table(codex_runs)}
+  </main>
+</body>
+</html>"""
+
+
+def _render_notion_page(*, connection_status: str = "disconnected", error: str | None = None) -> str:
+    settings = get_settings()
+    enabled_text = "켜짐" if settings.notion_enabled else "꺼짐"
+    connected_text = "연결됨" if connection_status == "connected" else "연결 안 됨"
+    error_html = f'<p class="error">{escape(error)}</p>' if error else ""
+    page_count = len(settings.notion_allowed_page_ids)
+    database_count = len(settings.notion_allowed_database_ids)
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pangi Notion</title>
+  <style>
+    :root {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f6f7f8;
+      color: #172026;
+    }}
+    body {{ margin: 0; }}
+    header {{
+      padding: 24px 28px 16px;
+      background: #ffffff;
+      border-bottom: 1px solid #d9dee3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }}
+    main {{ padding: 20px 28px 36px; max-width: 760px; }}
+    h1 {{ margin: 0 0 6px; font-size: 24px; letter-spacing: 0; }}
+    h2 {{ margin: 24px 0 10px; font-size: 18px; letter-spacing: 0; }}
+    p {{ color: #5b6670; }}
+    .panel {{
+      background: #ffffff;
+      border: 1px solid #d9dee3;
+      border-radius: 8px;
+      padding: 18px;
+    }}
+    dl {{
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 10px 14px;
+      margin: 0;
+      font-size: 14px;
+    }}
+    dt {{ color: #5b6670; }}
+    dd {{ margin: 0; color: #172026; font-weight: 650; }}
+    button, .link {{
+      display: inline-block;
+      border: 0;
+      border-radius: 6px;
+      background: #0f766e;
+      color: #ffffff;
+      padding: 9px 12px;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+      text-decoration: none;
+    }}
+    .secondary {{ background: #ffffff; color: #172026; border: 1px solid #c8d0d7; }}
+    .danger {{ background: #b42318; }}
+    .actions {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }}
+    .error {{
+      margin: 0 0 12px;
+      padding: 9px 10px;
+      border-radius: 6px;
+      background: #fff1f0;
+      color: #b42318;
+      font-size: 13px;
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Pangi Notion</h1>
+      <p>Notion MCP OAuth 연결 상태를 관리합니다. 토큰 값은 화면에 표시하지 않습니다.</p>
+    </div>
+    <a class="link secondary" href="{ADMIN_DB_PATH}">DB 보기</a>
+  </header>
+  <main>
+    {error_html}
+    <section class="panel">
+      <dl>
+        <dt>Notion 기능</dt><dd>{enabled_text}</dd>
+        <dt>OAuth 연결</dt><dd>{connected_text}</dd>
+        <dt>MCP URL</dt><dd>{escape(settings.notion_mcp_url)}</dd>
+        <dt>허용 page</dt><dd>{page_count}개</dd>
+        <dt>허용 database</dt><dd>{database_count}개</dd>
+      </dl>
+      <div class="actions">
+        <form method="post" action="{ADMIN_NOTION_CONNECT_PATH}">
+          <button type="submit">Notion 연결</button>
+        </form>
+        <form method="post" action="{ADMIN_NOTION_DISCONNECT_PATH}">
+          <button class="danger" type="submit">연결 해제</button>
+        </form>
+      </div>
+    </section>
   </main>
 </body>
 </html>"""

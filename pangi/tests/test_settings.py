@@ -8,6 +8,7 @@ from pangi.config import (
     SettingsError,
     UnknownRepoError,
     clear_settings_cache,
+    normalize_notion_id,
 )
 
 
@@ -17,11 +18,15 @@ def valid_env(**overrides: str) -> dict[str, str]:
         "SLACK_BOT_TOKEN": "placeholder-bot-token",
         "SLACK_ALLOWED_USER_IDS": "U123,U456",
         "SLACK_ALLOWED_CHANNEL_IDS": "C123,C456",
-        "PANGI_ALLOWED_REPOS": "PopPang-iOS=/tmp/pangi/sources/PopPang-iOS",
         "PANGI_WORKTREE_ROOT": "/tmp/pangi/worktrees",
         "PANGI_SOURCE_REPO_ROOT": "/tmp/pangi/sources",
     }
     values.update(overrides)
+    worktree_root = Path(values["PANGI_WORKTREE_ROOT"])
+    source_root = Path(values["PANGI_SOURCE_REPO_ROOT"])
+    worktree_root.mkdir(parents=True, exist_ok=True)
+    source_root.mkdir(parents=True, exist_ok=True)
+    (source_root / "PopPang-iOS").mkdir(parents=True, exist_ok=True)
     return values
 
 
@@ -33,6 +38,7 @@ def test_settings_parses_allowlists_repo_paths_and_default_timeout():
     assert settings.repo_path_for_key("PopPang-iOS") == Path(
         "/tmp/pangi/sources/PopPang-iOS"
     ).resolve(strict=False)
+    assert settings.available_repo_keys() == ("PopPang-iOS",)
     assert settings.base_branch_for_key("PopPang-iOS") == "develop"
     assert settings.base_branch_candidates_for_key("PopPang-iOS") == ("develop", "main")
     assert settings.worktree_path_for_job("job_123") == Path(
@@ -43,12 +49,30 @@ def test_settings_parses_allowlists_repo_paths_and_default_timeout():
     assert settings.chat_timeout_seconds == 120
     assert settings.orchestrator_timeout_seconds == 20
     assert settings.chat_workspace_root == Path("/tmp/pangi/worktrees/_chat").resolve(strict=False)
+    assert settings.public_base_url is None
     assert settings.chat_model == "gpt-5.4-mini"
     assert settings.chat_reasoning_effort == "low"
     assert settings.orchestrator_model == "gpt-5.4-mini"
     assert settings.orchestrator_reasoning_effort == "low"
     assert settings.analysis_model == "gpt-5.5"
     assert settings.analysis_reasoning_effort == "high"
+    assert settings.notion_enabled is False
+    assert settings.notion_mcp_url == "https://mcp.notion.com/mcp"
+    assert settings.notion_allowed_page_ids == frozenset()
+    assert settings.notion_allowed_database_ids == frozenset()
+    assert settings.notion_context_max_chars == 6000
+    assert settings.notion_timeout_seconds == 20
+    assert settings.notion_token_store_path == Path(
+        "/tmp/pangi/worktrees/_notion/notion-oauth.json"
+    ).resolve(strict=False)
+    assert settings.notion_write_enabled is False
+    assert settings.git_mcp_enabled is False
+    assert settings.git_mcp_url == "https://api.githubcopilot.com/mcp/"
+    assert settings.git_mcp_token is None
+    assert settings.git_mcp_org is None
+    assert settings.git_mcp_context_max_chars == 6000
+    assert settings.git_mcp_timeout_seconds == 20
+    assert settings.git_mcp_write_enabled is False
     assert settings.enable_admin_pages is False
     assert settings.admin_password is None
 
@@ -103,6 +127,97 @@ def test_settings_rejects_unsafe_model_name():
 def test_settings_rejects_invalid_reasoning_effort():
     with pytest.raises(SettingsError, match="PANGI_CHAT_REASONING_EFFORT"):
         Settings.from_env(valid_env(PANGI_CHAT_REASONING_EFFORT="fast"))
+
+
+def test_settings_uses_configured_notion_options():
+    settings = Settings.from_env(
+        valid_env(
+            PANGI_NOTION_ENABLED="1",
+            PANGI_NOTION_MCP_URL="https://mcp.notion.com/mcp",
+            PANGI_NOTION_ALLOWED_PAGE_IDS=(
+                "01234567-89ab-cdef-0123-456789abcdef,"
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ),
+            PANGI_NOTION_ALLOWED_DATABASE_IDS="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            PANGI_NOTION_CONTEXT_MAX_CHARS="3000",
+            PANGI_NOTION_TIMEOUT_SECONDS="10",
+            PANGI_NOTION_TOKEN_STORE_PATH="/tmp/pangi/worktrees/notion/token.json",
+            PANGI_NOTION_WRITE_ENABLED="0",
+            PANGI_PUBLIC_BASE_URL="https://pangi.example.com",
+        )
+    )
+
+    assert settings.public_base_url == "https://pangi.example.com"
+    assert settings.notion_enabled is True
+    assert settings.notion_allowed_page_ids == frozenset(
+        {
+            "0123456789abcdef0123456789abcdef",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }
+    )
+    assert settings.notion_allowed_database_ids == frozenset({"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"})
+    assert settings.is_notion_page_allowed("01234567-89ab-cdef-0123-456789abcdef") is True
+    assert settings.is_notion_database_allowed("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") is True
+    assert settings.notion_context_max_chars == 3000
+    assert settings.notion_timeout_seconds == 10
+    assert settings.notion_token_store_path == Path("/tmp/pangi/worktrees/notion/token.json").resolve(strict=False)
+    assert settings.notion_write_enabled is False
+
+
+def test_settings_rejects_invalid_notion_options():
+    with pytest.raises(SettingsError, match="PANGI_NOTION_ALLOWED_PAGE_IDS"):
+        Settings.from_env(valid_env(PANGI_NOTION_ALLOWED_PAGE_IDS="not-a-notion-id"))
+
+    with pytest.raises(SettingsError, match="PANGI_NOTION_MCP_URL"):
+        Settings.from_env(valid_env(PANGI_NOTION_MCP_URL="ftp://mcp.notion.com/mcp"))
+
+    with pytest.raises(SettingsError, match="PANGI_PUBLIC_BASE_URL"):
+        Settings.from_env(valid_env(PANGI_PUBLIC_BASE_URL="http://pangi.example.com"))
+
+    with pytest.raises(SettingsError, match="Notion token store path"):
+        Settings.from_env(valid_env(PANGI_NOTION_TOKEN_STORE_PATH="/tmp/outside/notion.json"))
+
+
+def test_settings_uses_configured_git_mcp_options():
+    settings = Settings.from_env(
+        valid_env(
+            PANGI_GIT_MCP_ENABLED="1",
+            PANGI_GIT_MCP_URL="https://api.githubcopilot.com/mcp/",
+            PANGI_GIT_MCP_TOKEN="placeholder-git-token",
+            PANGI_GIT_MCP_ORG="team-PopPang",
+            PANGI_GIT_MCP_CONTEXT_MAX_CHARS="3000",
+            PANGI_GIT_MCP_TIMEOUT_SECONDS="10",
+            PANGI_GIT_MCP_WRITE_ENABLED="0",
+        )
+    )
+
+    assert settings.git_mcp_enabled is True
+    assert settings.git_mcp_url == "https://api.githubcopilot.com/mcp/"
+    assert settings.git_mcp_token == "placeholder-git-token"
+    assert settings.git_mcp_org == "team-PopPang"
+    assert settings.git_mcp_context_max_chars == 3000
+    assert settings.git_mcp_timeout_seconds == 10
+    assert settings.git_mcp_write_enabled is False
+
+
+def test_settings_rejects_invalid_git_mcp_options():
+    with pytest.raises(SettingsError, match="PANGI_GIT_MCP_URL"):
+        Settings.from_env(valid_env(PANGI_GIT_MCP_URL="ftp://api.githubcopilot.com/mcp/"))
+
+    with pytest.raises(SettingsError, match="PANGI_GIT_MCP_ORG"):
+        Settings.from_env(valid_env(PANGI_GIT_MCP_ORG="../team-PopPang"))
+
+    with pytest.raises(SettingsError, match="PANGI_GIT_MCP_CONTEXT_MAX_CHARS"):
+        Settings.from_env(valid_env(PANGI_GIT_MCP_CONTEXT_MAX_CHARS="0"))
+
+
+def test_normalize_notion_id_accepts_dash_or_plain_uuid():
+    assert normalize_notion_id("01234567-89ab-cdef-0123-456789abcdef") == (
+        "0123456789abcdef0123456789abcdef"
+    )
+    assert normalize_notion_id("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") == (
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )
 
 
 def test_settings_uses_configured_default_base_branch():
@@ -168,11 +283,25 @@ def test_settings_allows_wildcard_slack_access():
     settings.validate_slack_access(user_id="U999", channel_id="C999")
 
 
-def test_settings_rejects_repo_path_outside_source_root():
-    values = valid_env(PANGI_ALLOWED_REPOS="Other=/tmp/outside/Other")
+def test_settings_discovers_direct_child_repos_from_source_root(tmp_path):
+    source_root = tmp_path / "sources"
+    (source_root / ".hidden").mkdir(parents=True)
+    (source_root / "PopPang-iOS").mkdir(parents=True)
+    (source_root / "PopPang-BE").mkdir(parents=True)
+    (source_root / "README.txt").write_text("ignore me", encoding="utf-8")
 
-    with pytest.raises(SettingsError, match="repo path"):
-        Settings.from_env(values)
+    settings = Settings.from_env(
+        {
+            "SLACK_SIGNING_SECRET": "placeholder-signing-secret",
+            "SLACK_BOT_TOKEN": "placeholder-bot-token",
+            "SLACK_ALLOWED_USER_IDS": "U123,U456",
+            "SLACK_ALLOWED_CHANNEL_IDS": "C123,C456",
+            "PANGI_WORKTREE_ROOT": str(tmp_path / "worktrees"),
+            "PANGI_SOURCE_REPO_ROOT": str(source_root),
+        }
+    )
+
+    assert settings.available_repo_keys() == ("PopPang-BE", "PopPang-iOS")
 
 
 def test_settings_rejects_unknown_repo_key():
@@ -195,7 +324,6 @@ def test_settings_loads_env_file_from_pangi_folder(tmp_path, monkeypatch):
         "SLACK_BOT_TOKEN",
         "SLACK_ALLOWED_USER_IDS",
         "SLACK_ALLOWED_CHANNEL_IDS",
-        "PANGI_ALLOWED_REPOS",
         "PANGI_WORKTREE_ROOT",
         "PANGI_SOURCE_REPO_ROOT",
         "PANGI_DEFAULT_BASE_BRANCH",
@@ -209,6 +337,22 @@ def test_settings_loads_env_file_from_pangi_folder(tmp_path, monkeypatch):
         "PANGI_ORCHESTRATOR_TIMEOUT_SECONDS",
         "PANGI_ANALYSIS_MODEL",
         "PANGI_ANALYSIS_REASONING_EFFORT",
+        "PANGI_NOTION_ENABLED",
+        "PANGI_NOTION_MCP_URL",
+        "PANGI_NOTION_ALLOWED_PAGE_IDS",
+        "PANGI_NOTION_ALLOWED_DATABASE_IDS",
+        "PANGI_NOTION_CONTEXT_MAX_CHARS",
+        "PANGI_NOTION_TIMEOUT_SECONDS",
+        "PANGI_NOTION_TOKEN_STORE_PATH",
+        "PANGI_NOTION_WRITE_ENABLED",
+        "PANGI_GIT_MCP_ENABLED",
+        "PANGI_GIT_MCP_URL",
+        "PANGI_GIT_MCP_TOKEN",
+        "PANGI_GIT_MCP_ORG",
+        "PANGI_GIT_MCP_CONTEXT_MAX_CHARS",
+        "PANGI_GIT_MCP_TIMEOUT_SECONDS",
+        "PANGI_GIT_MCP_WRITE_ENABLED",
+        "PANGI_PUBLIC_BASE_URL",
         "PANGI_ENABLE_ADMIN_PAGES",
         "PANGI_ADMIN_PASSWORD",
     ):
@@ -218,18 +362,19 @@ def test_settings_loads_env_file_from_pangi_folder(tmp_path, monkeypatch):
     pangi_dir.mkdir()
     source_root = tmp_path / "sources"
     worktree_root = tmp_path / "worktrees"
+    (source_root / "PopPang-iOS").mkdir(parents=True)
     env_file = pangi_dir / ".env"
     env_file.write_text(
         "\n".join(
             [
-                "SLACK_SIGNING_SECRET=placeholder-signing-secret",
-                "SLACK_BOT_TOKEN=placeholder-bot-token",
-                "SLACK_ALLOWED_USER_IDS=U123",
-                "SLACK_ALLOWED_CHANNEL_IDS=C123",
-                f"PANGI_ALLOWED_REPOS=PopPang-iOS={source_root}/PopPang-iOS",
+                "SLACK_SIGNING_SECRET=placeholder-signing-secret  # Slack signature",
+                'SLACK_BOT_TOKEN="placeholder#bot-token"  # Slack bot token',
+                "SLACK_ALLOWED_USER_IDS=U123  # allowed user",
+                "SLACK_ALLOWED_CHANNEL_IDS=C123  # allowed channel",
                 f"PANGI_WORKTREE_ROOT={worktree_root}",
                 f"PANGI_SOURCE_REPO_ROOT={source_root}",
-                "PANGI_JOB_TIMEOUT_SECONDS=700",
+                "PANGI_JOB_TIMEOUT_SECONDS=700  # seconds",
+                "PANGI_ENABLE_ADMIN_PAGES=0  # disabled",
             ]
         ),
         encoding="utf-8",
@@ -240,6 +385,7 @@ def test_settings_loads_env_file_from_pangi_folder(tmp_path, monkeypatch):
     settings = Settings.from_env()
 
     assert settings.slack_allowed_user_ids == frozenset({"U123"})
+    assert settings.slack_bot_token == "placeholder#bot-token"
     assert settings.job_timeout_seconds == 700
 
 
@@ -249,7 +395,6 @@ def test_settings_uses_env_example_for_empty_local_values(tmp_path, monkeypatch)
         "SLACK_BOT_TOKEN",
         "SLACK_ALLOWED_USER_IDS",
         "SLACK_ALLOWED_CHANNEL_IDS",
-        "PANGI_ALLOWED_REPOS",
         "PANGI_WORKTREE_ROOT",
         "PANGI_SOURCE_REPO_ROOT",
         "PANGI_DEFAULT_BASE_BRANCH",
@@ -263,11 +408,29 @@ def test_settings_uses_env_example_for_empty_local_values(tmp_path, monkeypatch)
         "PANGI_ORCHESTRATOR_TIMEOUT_SECONDS",
         "PANGI_ANALYSIS_MODEL",
         "PANGI_ANALYSIS_REASONING_EFFORT",
+        "PANGI_NOTION_ENABLED",
+        "PANGI_NOTION_MCP_URL",
+        "PANGI_NOTION_ALLOWED_PAGE_IDS",
+        "PANGI_NOTION_ALLOWED_DATABASE_IDS",
+        "PANGI_NOTION_CONTEXT_MAX_CHARS",
+        "PANGI_NOTION_TIMEOUT_SECONDS",
+        "PANGI_NOTION_TOKEN_STORE_PATH",
+        "PANGI_NOTION_WRITE_ENABLED",
+        "PANGI_GIT_MCP_ENABLED",
+        "PANGI_GIT_MCP_URL",
+        "PANGI_GIT_MCP_TOKEN",
+        "PANGI_GIT_MCP_ORG",
+        "PANGI_GIT_MCP_CONTEXT_MAX_CHARS",
+        "PANGI_GIT_MCP_TIMEOUT_SECONDS",
+        "PANGI_GIT_MCP_WRITE_ENABLED",
+        "PANGI_PUBLIC_BASE_URL",
         "PANGI_ENABLE_ADMIN_PAGES",
         "PANGI_ADMIN_PASSWORD",
     ):
         monkeypatch.delenv(name, raising=False)
 
+    source_root = Path("/tmp/pangi/sources")
+    (source_root / "PopPang-iOS").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".env").write_text(
         "\n".join(
             [
@@ -275,7 +438,6 @@ def test_settings_uses_env_example_for_empty_local_values(tmp_path, monkeypatch)
                 "SLACK_BOT_TOKEN=",
                 "SLACK_ALLOWED_USER_IDS=",
                 "SLACK_ALLOWED_CHANNEL_IDS=",
-                "PANGI_ALLOWED_REPOS=PopPang-iOS=/tmp/pangi/sources/PopPang-iOS",
                 "PANGI_WORKTREE_ROOT=/tmp/pangi/worktrees",
                 "PANGI_SOURCE_REPO_ROOT=/tmp/pangi/sources",
             ]

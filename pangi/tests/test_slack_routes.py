@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from pangi.app import app  # noqa: E402
 from pangi.config import clear_settings_cache  # noqa: E402
 from pangi.infra.codex import set_chat_responder  # noqa: E402
+from pangi.infra.git_mcp import set_git_context_provider  # noqa: E402
+from pangi.infra.notion import set_notion_context_provider  # noqa: E402
 from pangi.infra.orchestrator import (  # noqa: E402
     DeterministicRequestOrchestrator,
     GuardedRequestOrchestrator,
@@ -69,6 +71,8 @@ def setup_function():
     set_job_queue(None)
     set_slack_client(None)
     set_chat_responder(None)
+    set_notion_context_provider(None)
+    set_git_context_provider(None)
     set_request_orchestrator(None)
     reset_processed_event_ids()
 
@@ -140,11 +144,13 @@ def request(
 
 
 def configure_settings(monkeypatch, tmp_path):
+    source_root = Path("/tmp/pangi/sources")
+    source_root.mkdir(parents=True, exist_ok=True)
+    (source_root / "PopPang-iOS").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("SLACK_SIGNING_SECRET", TEST_SECRET)
     monkeypatch.setenv("SLACK_BOT_TOKEN", "placeholder-bot-token")
     monkeypatch.setenv("SLACK_ALLOWED_USER_IDS", "U123")
     monkeypatch.setenv("SLACK_ALLOWED_CHANNEL_IDS", "C123")
-    monkeypatch.setenv("PANGI_ALLOWED_REPOS", "PopPang-iOS=/tmp/pangi/sources/PopPang-iOS")
     monkeypatch.setenv("PANGI_WORKTREE_ROOT", "/tmp/pangi/worktrees")
     monkeypatch.setenv("PANGI_SOURCE_REPO_ROOT", "/tmp/pangi/sources")
     clear_settings_cache()
@@ -250,6 +256,41 @@ def test_slack_events_normalizes_app_mention(monkeypatch, tmp_path):
         }
     ]
     assert job.slack_message_ts == "1710000000.000002"
+
+
+def test_slack_events_accepts_lowercase_repo_name_in_message(monkeypatch, tmp_path):
+    fake_slack = configure_settings(monkeypatch, tmp_path)
+
+    status, body = post_slack_event(
+        {
+            "type": "event_callback",
+            "team_id": "T123",
+            "event_id": "EvLowercaseRepo123",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "user": "U123",
+                "text": (
+                    "<@U999> 나는 디자이너야. `poppang-ios` 이름의 레포지토리에서 "
+                    "iOS 팀원이 어떤 UI를 개편하고 있는지 분석해줄래?"
+                ),
+                "thread_ts": "1710000000.000001",
+                "ts": "1710000000.000002",
+            },
+        }
+    )
+
+    assert status == 200
+    assert body["ok"] is True
+    job = get_job_repository().list_jobs()[0]
+    assert job.repo_key == "PopPang-iOS"
+    assert fake_slack.messages == [
+        {
+            "channel_id": "C123",
+            "thread_ts": "1710000000.000001",
+            "text": f"팡이가 요청을 접수했습니다. job_id: {job.id}",
+        }
+    ]
 
 
 def test_slack_events_uses_event_ts_when_thread_ts_is_missing(monkeypatch, tmp_path):
@@ -468,6 +509,59 @@ def test_slack_commands_blocks_web_analysis_without_job(monkeypatch, tmp_path):
     assert response_body["classification"] == "blocked_web_analysis"
     assert "job_id" not in response_body
     assert "외부 웹/인터넷 URL 분석은 서버 부하와 보안 이유로 지원하지 않습니다." in response_body["text"]
+    assert get_job_repository().list_jobs() == []
+
+
+def test_slack_commands_routes_repository_catalog(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path)
+    form = {
+        "team_id": "T123",
+        "channel_id": "C123",
+        "user_id": "U123",
+        "text": "허용된 레포지토리 리스트 출력해줘",
+        "trigger_id": "trigger-catalog-123",
+    }
+    body = urlencode(form).encode("utf-8")
+    timestamp = int(time.time())
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Slack-Request-Timestamp": str(timestamp),
+        "X-Slack-Signature": build_signature(TEST_SECRET, timestamp, body),
+    }
+
+    status, response_body = request("POST", "/slack/commands", body=body, headers=headers)
+
+    assert status == 200
+    assert response_body["response_type"] == "ephemeral"
+    assert response_body["classification"] == "repo_catalog"
+    assert "현재 팡이가 볼 수 있는 repo 상태예요." in response_body["text"]
+    assert "PopPang-iOS: 분석 가능" in response_body["text"]
+    assert get_job_repository().list_jobs() == []
+
+
+def test_slack_commands_routes_notion_context_without_repo_job(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path)
+    form = {
+        "team_id": "T123",
+        "channel_id": "C123",
+        "user_id": "U123",
+        "text": "노션 회의록 결정사항 알려줘",
+        "trigger_id": "trigger-notion-123",
+    }
+    body = urlencode(form).encode("utf-8")
+    timestamp = int(time.time())
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Slack-Request-Timestamp": str(timestamp),
+        "X-Slack-Signature": build_signature(TEST_SECRET, timestamp, body),
+    }
+
+    status, response_body = request("POST", "/slack/commands", body=body, headers=headers)
+
+    assert status == 200
+    assert response_body["response_type"] == "ephemeral"
+    assert response_body["classification"] == "notion_context_chat"
+    assert "Notion 문서 읽기는 아직 팡이 서버에 연결되어 있지 않습니다." in response_body["text"]
     assert get_job_repository().list_jobs() == []
 
 
