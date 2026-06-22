@@ -116,6 +116,7 @@ repo job을 만들지 않는다. 팡이 서버의 Git context provider가 Git MC
 ```text
 @팡이 분석 가능한 레포 목록 알려줘
 @팡이 지금 볼 수 있는 repo 뭐야?
+@팡이 팝팡팀 레포 출력해라
 ```
 
 repo job을 만들지 않는다. Git MCP가 연결되어 있으면 Git MCP의 조직 repo 목록과 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone 목록을 합쳐 `분석 가능`, `요청 시 clone`, `로컬에만 있음` 상태로 답한다. Git MCP가 연결되어 있지 않으면 로컬 clone 기준으로만 답한다.
@@ -150,9 +151,11 @@ job을 만들지 않고 어느 repo를 볼지 질문한다.
 ```text
 @팡이 PopPang-iOS 구조 분석해줘
 @팡이 Admin 로그인 흐름 봐줘
+@팡이 ios 로그인 흐름 봐줘
 ```
 
 이 경우에만 AgentJob을 만들고 job별 read-only worktree에서 Codex를 실행한다.
+`ios`, `aos`, `android` 같은 팀 내 별칭은 허용 repo 목록에서 단일 후보로 해석될 때만 명시적인 repo 대상으로 인정한다.
 
 ### `unsupported`
 

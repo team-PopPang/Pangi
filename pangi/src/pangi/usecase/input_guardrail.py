@@ -18,6 +18,7 @@ URL_PATTERN = re.compile(r"(?i)(https?://|www\.)\S+")
 NOTION_URL_PATTERN = re.compile(r"(?i)https?://(?:www\.)?[\w.-]*(?:notion\.so|notion\.site)/\S+")
 GITHUB_URL_PATTERN = re.compile(r"(?i)https?://(?:www\.)?github\.com/\S+")
 COMPACT_PATTERN = re.compile(r"[^a-z0-9가-힣]+")
+ASCII_ALIAS_PATTERN = re.compile(r"^[a-z0-9]+$")
 
 WEB_ANALYSIS_KEYWORDS = (
     "인터넷",
@@ -170,6 +171,30 @@ REPO_CATALOG_PHRASES = (
     "무슨 레포지토리",
     "무슨 저장소",
 )
+REPO_CATALOG_SCOPE_KEYWORDS = (
+    "팝팡",
+    "poppang",
+    "팀",
+    "조직",
+    "org",
+    "organization",
+)
+REPO_CATALOG_ACTION_KEYWORDS = (
+    "목록",
+    "리스트",
+    "나열",
+    "출력",
+    "보여",
+    "알려",
+    "전부",
+    "전체",
+    "catalog",
+    "list",
+)
+REPO_PLATFORM_ALIASES = {
+    "ios": ("ios", "아이오에스", "아이폰", "iphone"),
+    "aos": ("aos", "android", "안드로이드", "안드"),
+}
 SECRET_KEYWORDS = (
     ".env",
     "env 파일",
@@ -462,11 +487,25 @@ def enforce_orchestrator_decision(
 def find_repo_key(text: str, allowed_repo_keys: Iterable[str]) -> str | None:
     lowered = text.lower()
     compacted = _compact_text(text)
-    for repo_key in sorted((key for key in allowed_repo_keys if key), key=len, reverse=True):
+    repo_keys = tuple(key for key in allowed_repo_keys if key)
+    for repo_key in sorted(repo_keys, key=len, reverse=True):
         lowered_repo_key = repo_key.lower()
         compacted_repo_key = _compact_text(repo_key)
         if lowered_repo_key in lowered or compacted_repo_key in compacted:
             return repo_key
+    return _find_repo_key_by_alias(lowered, repo_keys)
+
+
+def _find_repo_key_by_alias(lowered_text: str, allowed_repo_keys: tuple[str, ...]) -> str | None:
+    matched_keys: list[str] = []
+    for repo_key in allowed_repo_keys:
+        for alias in _repo_aliases_for_key(repo_key):
+            if _contains_repo_alias(lowered_text, alias):
+                matched_keys.append(repo_key)
+                break
+    unique_matches = tuple(dict.fromkeys(matched_keys))
+    if len(unique_matches) == 1:
+        return unique_matches[0]
     return None
 
 
@@ -560,7 +599,36 @@ def _has_repo_catalog_intent(text: str, matched_terms: list[str] | None = None) 
             if matched_terms is not None:
                 matched_terms.append(phrase)
             return True
+    if (
+        _has_compact_any(compacted, REPO_CATALOG_SCOPE_KEYWORDS)
+        and _has_compact_any(compacted, REPO_TARGET_KEYWORDS)
+        and _has_compact_any(compacted, REPO_CATALOG_ACTION_KEYWORDS)
+    ):
+        if matched_terms is not None:
+            matched_terms.append("team-repo-catalog")
+        return True
     return False
+
+
+def _repo_aliases_for_key(repo_key: str) -> tuple[str, ...]:
+    compacted_repo_key = _compact_text(repo_key)
+    aliases: list[str] = []
+    if "ios" in compacted_repo_key:
+        aliases.extend(REPO_PLATFORM_ALIASES["ios"])
+    if "aos" in compacted_repo_key or "android" in compacted_repo_key:
+        aliases.extend(REPO_PLATFORM_ALIASES["aos"])
+    return tuple(dict.fromkeys(aliases))
+
+
+def _contains_repo_alias(text: str, alias: str) -> bool:
+    normalized_alias = alias.lower()
+    if ASCII_ALIAS_PATTERN.fullmatch(normalized_alias):
+        return re.search(rf"(?<![a-z0-9]){re.escape(normalized_alias)}(?![a-z0-9])", text) is not None
+    return normalized_alias in text
+
+
+def _has_compact_any(compacted_text: str, keywords: Iterable[str]) -> bool:
+    return any(_compact_text(keyword) in compacted_text for keyword in keywords)
 
 
 def _has_write_intent(text: str, matched_terms: list[str] | None = None) -> bool:

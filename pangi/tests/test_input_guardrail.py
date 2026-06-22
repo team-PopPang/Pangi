@@ -144,6 +144,56 @@ def test_input_guardrail_routes_allowed_repository_list_as_catalog():
     assert route.features.has_repo_catalog_intent is True
 
 
+def test_input_guardrail_routes_poppang_team_repo_output_as_catalog():
+    route = route_request_input("팝팡팀 레포 출력해라", allowed_repo_keys=("PopPang-iOS",))
+
+    assert route.needs_ai_orchestrator is False
+    assert route.decision is not None
+    assert route.decision.kind == RequestClassification.REPO_CATALOG
+    assert route.decision.should_create_job is False
+    assert route.features.has_repo_catalog_intent is True
+
+
+def test_input_guardrail_resolves_ios_alias_to_repo_analysis():
+    route = route_request_input(
+        "ios 팀원이 어떤 UI를 개편하고 있는지 분석해줄래?",
+        allowed_repo_keys=("PopPang-iOS", "PopPang-BE"),
+    )
+
+    assert route.needs_ai_orchestrator is False
+    assert route.decision is not None
+    assert route.decision.kind == RequestClassification.REPO_ANALYSIS
+    assert route.decision.should_create_job is True
+    assert route.decision.repo_key == "PopPang-iOS"
+    assert route.features.repo_key == "PopPang-iOS"
+
+
+def test_input_guardrail_resolves_aos_alias_to_repo_analysis():
+    route = route_request_input(
+        "aos 로그인 흐름 봐줘",
+        allowed_repo_keys=("PopPang-AOS", "PopPang-iOS"),
+    )
+
+    assert route.needs_ai_orchestrator is False
+    assert route.decision is not None
+    assert route.decision.kind == RequestClassification.REPO_ANALYSIS
+    assert route.decision.should_create_job is True
+    assert route.decision.repo_key == "PopPang-AOS"
+    assert route.features.repo_key == "PopPang-AOS"
+
+
+def test_input_guardrail_resolves_android_repo_for_aos_alias():
+    route = route_request_input(
+        "aos 코드 구조 분석해줘",
+        allowed_repo_keys=("PopPang-Android", "PopPang-iOS"),
+    )
+
+    assert route.needs_ai_orchestrator is False
+    assert route.decision is not None
+    assert route.decision.kind == RequestClassification.REPO_ANALYSIS
+    assert route.decision.repo_key == "PopPang-Android"
+
+
 def test_input_guardrail_blocks_git_write_request_without_ai():
     route = route_request_input("PopPang-iOS PR 생성해줘", allowed_repo_keys=("PopPang-iOS",))
 
@@ -233,6 +283,24 @@ def test_guardrail_enforcement_allows_repo_explicitly_present_in_original_text()
     result = enforce_orchestrator_decision(
         decision,
         text="PopPang-iOS 구조 분석해줘",
+        allowed_repo_keys=("PopPang-iOS",),
+    )
+
+    assert result.kind == RequestClassification.REPO_ANALYSIS
+    assert result.should_create_job is True
+    assert result.repo_key == "PopPang-iOS"
+
+
+def test_guardrail_enforcement_allows_repo_alias_in_original_text():
+    decision = ClassifiedRequest(
+        kind=RequestClassification.REPO_ANALYSIS,
+        should_create_job=True,
+        repo_key="PopPang-iOS",
+    )
+
+    result = enforce_orchestrator_decision(
+        decision,
+        text="ios 코드 구조 분석해줘",
         allowed_repo_keys=("PopPang-iOS",),
     )
 

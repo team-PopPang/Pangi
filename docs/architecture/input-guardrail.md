@@ -66,7 +66,7 @@ flowchart TD
 
 | Feature | 의미 |
 | --- | --- |
-| `repo_key` | 원문에서 찾은 허용 repo key |
+| `repo_key` | 원문에서 찾은 허용 repo key. `ios`, `aos`, `android` 같은 팀 내 별칭도 허용 repo가 하나로 좁혀질 때만 매핑한다. |
 | `has_url` | URL 또는 Slack link 포함 |
 | `has_web_intent` | 웹, 검색, 뉴스, 기사, 블로그 등 외부 정보 요청 |
 | `has_write_intent` | 수정, 구현, 리팩터링, PR, commit, push, 배포 요청 |
@@ -114,7 +114,9 @@ AI Orchestrator는 기본 경로가 아니다.
 노션 회의록 결정사항 알려줘
 PR 123 요약해줘
 분석 가능한 레포 목록 알려줘
+팝팡팀 레포 출력해라
 PopPang-iOS 구조 분석해줘
+ios 로그인 흐름 봐줘
 레포 분석해줘
 https://example.com 분석해줘
 PopPang-iOS 수정해줘
@@ -123,6 +125,7 @@ PopPang-iOS 수정해줘
 ## 안전 원칙
 
 - AI Orchestrator가 repo를 고르더라도 원문에 명시된 허용 repo key가 아니면 `repo_analysis`로 보내지 않는다.
+- `ios`, `aos` 같은 repo 별칭은 허용 repo 목록에서 단일 후보로 해석될 때만 원문에 명시된 repo로 인정한다.
 - `should_create_job`은 `repo_analysis`일 때만 true가 될 수 있다.
 - Notion 요청은 외부 URL 차단 예외가 될 수 있지만, page/database allowlist와 read-only 조회 원칙을 따라야 한다.
 - Notion에 생성/수정/삭제/기록하는 요청은 MCP write 기능이 있더라도 MVP에서는 `unsupported`로 처리한다.

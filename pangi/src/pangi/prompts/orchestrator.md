@@ -12,6 +12,7 @@
 - GitHub/Git의 PR, issue, commit, Actions, workflow, branch, release 맥락을 읽어야 하는 요청은 `git_context_chat`으로 분류합니다.
 - 분석 가능한 repo 목록, 볼 수 있는 repo 목록, PopPang repo catalog를 묻는 요청은 `repo_catalog`로 분류합니다.
 - 명시적인 허용 repo key가 포함된 repo/code 분석 요청은 `repo_analysis`로 분류합니다.
+- 사용자가 `ios`, `aos`, `android`처럼 팀 내 별칭을 썼고 허용 repo key 하나로 명확히 좁혀지면 해당 repo가 원문에 명시된 것으로 봅니다.
 - repo/code 분석 의도는 있지만 repo key가 명확하지 않은 요청은 `needs_repo`로 분류합니다.
 - 외부 웹, 인터넷 검색, URL, 뉴스, 기사, 블로그, 임의 링크 분석 요청이 남아 있으면 `blocked_web_analysis`로 분류합니다.
 - 코드 수정, PR 생성, issue 생성, 배포, commit 실행, push, merge 같은 쓰기 작업 요청이 남아 있으면 `unsupported`로 분류합니다.
