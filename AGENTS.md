@@ -6,7 +6,7 @@
 
 팡이는 PopPang 팀 전용 Slack 기반 개발 에이전트다.
 
-1차 MVP의 목표는 Slack에서 팡이에게 분석 요청을 보내면, 서버가 격리된 worktree에서 `codex exec --sandbox read-only`로 코드를 분석하고 결과를 Slack thread에 반환하는 것이다.
+1차 MVP의 목표는 Slack에서 팡이에게 분석 요청을 보내면, 서버가 Slack thread와 1:1로 대응되는 Codex session과 thread workspace에서 `codex exec --sandbox read-only`로 코드를 분석하고 결과를 Slack thread에 반환하는 것이다.
 
 처음부터 큰 사내 플랫폼을 만들지 않는다. PopPang 규모에 맞게 작고 안전한 MVP부터 만든다.
 
@@ -43,9 +43,28 @@ team_id TEXT NOT NULL
 channel_id TEXT NOT NULL
 thread_ts TEXT NOT NULL
 last_job_id TEXT
+active_codex_session_id TEXT
 created_at TEXT NOT NULL
 updated_at TEXT NOT NULL
 UNIQUE(team_id, channel_id, thread_ts)
+```
+
+### `codex_sessions`
+
+Slack thread와 1:1로 대응되는 active Codex session을 저장한다.
+
+```text
+id TEXT PRIMARY KEY
+slack_thread_id TEXT NOT NULL
+codex_thread_id TEXT NOT NULL UNIQUE
+workspace_path TEXT NOT NULL
+status TEXT NOT NULL
+last_used_at TEXT NOT NULL
+expires_at TEXT NOT NULL
+archived_at TEXT
+created_at TEXT NOT NULL
+updated_at TEXT NOT NULL
+FOREIGN KEY(slack_thread_id) REFERENCES slack_threads(id)
 ```
 
 ### `agent_jobs`
@@ -56,6 +75,7 @@ Slack 요청 하나를 팡이 job 하나로 저장한다.
 id TEXT PRIMARY KEY
 event_id TEXT NOT NULL UNIQUE
 slack_thread_id TEXT NOT NULL
+codex_session_id TEXT
 slack_team_id TEXT NOT NULL
 slack_channel_id TEXT NOT NULL
 slack_thread_ts TEXT NOT NULL
@@ -72,6 +92,7 @@ error_message TEXT
 created_at TEXT NOT NULL
 updated_at TEXT NOT NULL
 FOREIGN KEY(slack_thread_id) REFERENCES slack_threads(id)
+FOREIGN KEY(codex_session_id) REFERENCES codex_sessions(id)
 ```
 
 `slack_message_ts`는 Slack app mention 원본 메시지의 `ts`다. 원본 메시지에 단 `eyes` reaction을 완료 reaction으로 교체할 때 사용하며, slash command나 legacy job에서는 비어 있을 수 있다.
@@ -86,6 +107,7 @@ job 안에서 실행된 Codex 실행 기록을 저장한다.
 ```text
 id TEXT PRIMARY KEY
 job_id TEXT NOT NULL
+codex_session_id TEXT
 mode TEXT NOT NULL
 command TEXT NOT NULL
 prompt TEXT NOT NULL
@@ -93,9 +115,11 @@ stdout TEXT
 stderr TEXT
 exit_code INTEGER
 timed_out INTEGER NOT NULL
+workspace_path TEXT
 started_at TEXT NOT NULL
 finished_at TEXT
 FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
+FOREIGN KEY(codex_session_id) REFERENCES codex_sessions(id)
 ```
 
 ## 구현 원칙
@@ -105,7 +129,7 @@ FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
 - 1차 MVP에서는 코드 수정 기능을 만들지 않는다.
 - 1차 MVP에서는 PR 생성 기능을 만들지 않는다.
 - 1차 MVP에서는 Notion 연동을 필수로 만들지 않는다.
-- 먼저 Slack 수신 -> background job -> worktree -> Codex read-only -> Slack thread 응답 흐름을 완성한다.
+- 먼저 Slack 수신 -> background job -> thread workspace -> Codex read-only -> Slack thread 응답 흐름을 완성한다.
 - 기능을 만들 때는 [docs/implementation-checklist.md](docs/implementation-checklist.md)의 순서를 따른다.
 - 구현이 끝난 항목은 체크리스트를 `[x]`로 갱신한다.
 
@@ -128,7 +152,7 @@ FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
 - background job 작업: [docs/architecture/jobs.md](docs/architecture/jobs.md)
 - Codex 실행 작업: [docs/architecture/codex-runner.md](docs/architecture/codex-runner.md)
 - 출력 가드레일/Slack 응답 포맷 작업: [docs/architecture/output-pipeline.md](docs/architecture/output-pipeline.md)
-- git worktree 작업: [docs/architecture/git-worktree.md](docs/architecture/git-worktree.md)
+- git worktree / thread workspace 작업: [docs/architecture/git-worktree.md](docs/architecture/git-worktree.md)
 - 저장소/job 모델 작업: [docs/architecture/storage.md](docs/architecture/storage.md)
 - 승인 흐름 작업: [docs/architecture/approvals.md](docs/architecture/approvals.md)
 - 보안/권한/secret 작업: [docs/security/safety-rules.md](docs/security/safety-rules.md)
@@ -153,7 +177,7 @@ FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
 - `codex exec`는 반드시 argv list로 실행한다.
 - 분석 작업은 `--sandbox read-only`를 사용한다.
 - 수정 작업은 Slack 승인 이후에만 `--sandbox workspace-write`를 사용한다.
-- Codex 실행 위치는 항상 서버가 만든 worktree여야 한다.
+- Codex 실행 위치는 항상 서버가 만든 thread workspace여야 한다.
 - 원본 source repo에서 Codex를 직접 실행하지 않는다.
 - main/develop 같은 기본 브랜치를 직접 수정하지 않는다.
 - Codex가 직접 commit/push/PR 생성을 하게 두지 않는다. git 상태와 PR 생성은 서버가 통제한다.

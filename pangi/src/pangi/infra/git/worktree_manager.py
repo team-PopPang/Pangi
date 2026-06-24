@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
 
 from pangi.config import Settings, get_settings
-from pangi.usecase.ports import WorktreeContext
+from pangi.usecase.ports import ThreadWorkspaceContext
 
 
 DEFAULT_GIT_TIMEOUT_SECONDS = 60
@@ -36,24 +37,37 @@ class GitWorktreeManager:
     git_binary: str = "git"
     command_timeout_seconds: float = DEFAULT_GIT_TIMEOUT_SECONDS
 
-    async def prepare_read_only_worktree(self, *, job_id: str, repo_key: str) -> WorktreeContext:
+    async def prepare_thread_repo_workspace(
+        self,
+        *,
+        slack_thread_id: str,
+        repo_key: str,
+    ) -> ThreadWorkspaceContext:
         source_repo_path = self.settings.repo_path_for_key(repo_key)
-        worktree_path = self.settings.worktree_path_for_job(job_id)
-        self._validate_worktree_path(worktree_path, source_repo_path)
-
-        if worktree_path.exists():
-            raise WorktreePathExistsError(f"Worktree path already exists: {worktree_path}")
-        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        workspace_path = self.settings.thread_workspace_path(slack_thread_id)
+        repo_path = self.settings.repo_workspace_path(slack_thread_id, repo_key)
+        self._validate_worktree_path(repo_path, source_repo_path)
+        workspace_path.mkdir(parents=True, exist_ok=True)
 
         await self._ensure_source_repo(repo_key=repo_key, source_repo_path=source_repo_path)
-        context = await self._prepare_with_branch_fallback(
+        base_ref = await self._resolve_base_ref(
             source_repo_path=source_repo_path,
-            worktree_path=worktree_path,
             repo_key=repo_key,
         )
-        await self._ensure_git_repo(context.path)
+        context = await self._prepare_repo_workspace(
+            source_repo_path=source_repo_path,
+            workspace_path=workspace_path,
+            repo_path=repo_path,
+            base_ref=base_ref,
+        )
+        await self._ensure_git_repo(context.repo_path)
 
         return context
+
+    async def cleanup_thread_workspace(self, *, slack_thread_id: str) -> None:
+        workspace_path = self.settings.thread_workspace_path(slack_thread_id)
+        if workspace_path.exists():
+            shutil.rmtree(workspace_path)
 
     async def _ensure_source_repo(self, *, repo_key: str, source_repo_path: Path) -> None:
         if source_repo_path.exists():
@@ -71,13 +85,12 @@ class GitWorktreeManager:
         )
         await self._ensure_git_repo(source_repo_path)
 
-    async def _prepare_with_branch_fallback(
+    async def _resolve_base_ref(
         self,
         *,
         source_repo_path: Path,
-        worktree_path: Path,
         repo_key: str,
-    ) -> WorktreeContext:
+    ) -> str:
         last_error: GitCommandError | None = None
         for base_branch in self.settings.base_branch_candidates_for_key(repo_key):
             try:
@@ -86,24 +99,39 @@ class GitWorktreeManager:
                 last_error = error
                 continue
 
-            base_ref = f"origin/{base_branch}"
+            return f"origin/{base_branch}"
+
+        if last_error is not None:
+            raise last_error
+        raise GitWorktreeError("No base branch candidates configured")
+
+    async def _prepare_repo_workspace(
+        self,
+        *,
+        source_repo_path: Path,
+        workspace_path: Path,
+        repo_path: Path,
+        base_ref: str,
+    ) -> ThreadWorkspaceContext:
+        if repo_path.exists():
+            if not repo_path.is_dir():
+                raise WorktreePathExistsError(f"Repo workspace path already exists and is not a directory: {repo_path}")
+        else:
+            repo_path.parent.mkdir(parents=True, exist_ok=True)
             await self._run_git(
                 source_repo_path,
                 "worktree",
                 "add",
                 "--detach",
-                str(worktree_path),
+                str(repo_path),
                 base_ref,
             )
-            return WorktreeContext(
-                path=worktree_path,
-                source_repo_path=source_repo_path,
-                base_ref=base_ref,
-            )
-
-        if last_error is not None:
-            raise last_error
-        raise GitWorktreeError("No base branch candidates configured")
+        return ThreadWorkspaceContext(
+            workspace_path=workspace_path,
+            repo_path=repo_path,
+            source_repo_path=source_repo_path,
+            base_ref=base_ref,
+        )
 
     def _validate_worktree_path(self, worktree_path: Path, source_repo_path: Path) -> None:
         resolved_worktree = worktree_path.resolve(strict=False)

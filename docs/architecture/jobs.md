@@ -4,7 +4,8 @@
 
 Job Worker는 Slack 3초 응답 제한과 긴 작업 실행을 분리한다.
 
-Slack route는 요청을 접수하고 빠르게 200 OK를 반환한다. 실제 Codex 실행, worktree 생성, 결과 수집은 worker가 담당한다.
+Slack route는 요청을 접수하고 빠르게 200 OK를 반환한다.
+실제 Codex 실행, thread workspace 준비, repo checkout 준비, 결과 수집은 worker가 담당한다.
 
 ## MVP 구조
 
@@ -18,7 +19,9 @@ FastAPI route
 
 worker
 -> dequeue job_id
--> create worktree
+-> ensure active thread session
+-> ensure thread workspace
+-> ensure repo workspace
 -> run codex
 -> collect result
 -> reply slack
@@ -46,16 +49,27 @@ MVP 기본값:
 
 PopPang-iOS 같은 하나의 큰 repo를 대상으로 하면 repo별 1개가 안전하다.
 
+## session과 cleanup
+
+worker는 repo 분석 job을 실행하기 전에 thread의 active Codex session을 확인한다.
+
+- idle timeout 전이면 `resume`
+- idle timeout 후면 archive 후 새 session 생성
+
+별도 sweeper task는 1시간 이상 idle인 session을 archive하고 thread workspace cleanup을 시도한다.
+
 ## 실패 처리
 
-- worktree 생성 실패: `failed`
+- thread workspace 준비 실패: `failed`
+- repo workspace 준비 실패: `failed`
 - Codex non-zero exit: `failed`
 - Codex timeout: `timed_out`
 - Slack 응답 실패: job 결과는 저장하고 Slack error를 기록
 
 ## 중간 상태 메시지
 
-너무 자주 보내지 않는다. 상태 전환 기준으로만 보낸다.
+너무 자주 보내지 않는다.
+상태 전환 기준으로만 보낸다.
 
 ```text
 팡이가 요청을 접수했습니다.

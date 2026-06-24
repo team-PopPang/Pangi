@@ -26,7 +26,7 @@ Slack 요청
 ```
 
 repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
-깊은 코드 분석은 `PANGI_SOURCE_REPO_ROOT` 하위 source repo에서 read-only worktree를 만들고 `codex exec --sandbox read-only`로 실행한다. Git MCP 조직 repo가 source root에 아직 없으면 분석 요청 시 clone한 뒤 worktree를 만든다.
+깊은 코드 분석은 `PANGI_SOURCE_REPO_ROOT` 하위 source repo를 기준으로 thread workspace 내부 repo checkout을 만들고 `codex exec --sandbox read-only`로 실행한다. Git MCP 조직 repo가 source root에 아직 없으면 분석 요청 시 clone한 뒤 thread workspace 아래 detached checkout을 만든다.
 
 ## 책임 분리
 
@@ -46,7 +46,7 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 | `PR 123 요약해줘` | `git_context_chat` | Git MCP context를 Codex chat prompt에 붙여 답한다. |
 | `최근 실패한 Actions 알려줘` | `git_context_chat` | Git MCP에서 workflow/run 맥락을 조회한다. |
 | `분석 가능한 레포 목록 알려줘` | `repo_catalog` | Git MCP 조직 repo와 로컬 clone 목록을 함께 보여준다. |
-| `PopPang-iOS 구조 분석해줘` | `repo_analysis` | source repo를 준비하고 read-only worktree에서 Codex 분석을 실행한다. |
+| `PopPang-iOS 구조 분석해줘` | `repo_analysis` | source repo를 준비하고 thread workspace 내부 repo checkout에서 Codex 분석을 실행한다. |
 | `PR 생성해줘`, `커밋해줘`, `push 해줘` | `unsupported` | MVP에서는 write 요청을 차단한다. |
 
 ## 보안 원칙

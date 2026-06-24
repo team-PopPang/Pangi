@@ -22,6 +22,7 @@ from pangi.infra.orchestrator import (  # noqa: E402
 from pangi.infra.queue import set_job_queue  # noqa: E402
 from pangi.infra.slack import reset_processed_event_ids, set_slack_client  # noqa: E402
 from pangi.repository import SQLiteJobRepository, get_job_repository, set_job_repository  # noqa: E402
+from pangi.usecase.git_context import GitContext, GitRepoCatalog, GitRepoCatalogItem  # noqa: E402
 
 
 TEST_SECRET = "test-signing-secret"
@@ -62,8 +63,37 @@ class FakeSlackClient:
 
 
 class FakeChatResponder:
-    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+    async def respond(
+        self,
+        *,
+        slack_thread,
+        text: str,
+        user_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> str:
         return f"chat: {text}"
+
+
+class CapturingGitContextProvider:
+    def __init__(self):
+        self.repo_catalog_calls = 0
+        self.context_calls = 0
+
+    async def fetch_context(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> GitContext:
+        self.context_calls += 1
+        return GitContext(markdown="## Git context")
+
+    async def fetch_repo_catalog(self, *, local_repo_keys: tuple[str, ...]) -> GitRepoCatalog:
+        self.repo_catalog_calls += 1
+        return GitRepoCatalog(
+            items=(
+                GitRepoCatalogItem(name="PopPang-iOS", status="ready"),
+                GitRepoCatalogItem(name="PopPang-AOS", status="clone_on_demand"),
+            ),
+            git_mcp_enabled=True,
+            org="team-PopPang",
+        )
 
 
 def setup_function():
@@ -376,6 +406,85 @@ def test_slack_events_blocks_web_analysis_without_job(monkeypatch, tmp_path):
         }
     ]
     assert get_job_repository().list_jobs() == []
+
+
+def test_slack_events_skips_git_repo_catalog_for_plain_chat(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path)
+    git_provider = CapturingGitContextProvider()
+    set_git_context_provider(git_provider)
+
+    status, body = post_slack_event(
+        {
+            "type": "event_callback",
+            "team_id": "T123",
+            "event_id": "EvPlainChat123",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "user": "U123",
+                "text": "<@U999> 안녕",
+                "thread_ts": "1710000000.000001",
+                "ts": "1710000000.000002",
+            },
+        }
+    )
+
+    assert status == 200
+    assert body["accepted"] is True
+    assert git_provider.repo_catalog_calls == 0
+
+
+def test_slack_events_skips_git_repo_catalog_for_notion_context(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path)
+    git_provider = CapturingGitContextProvider()
+    set_git_context_provider(git_provider)
+
+    status, body = post_slack_event(
+        {
+            "type": "event_callback",
+            "team_id": "T123",
+            "event_id": "EvNotion123",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "user": "U123",
+                "text": "<@U999> 노션 회의록 요약해줘",
+                "thread_ts": "1710000000.000001",
+                "ts": "1710000000.000002",
+            },
+        }
+    )
+
+    assert status == 200
+    assert body["accepted"] is True
+    assert git_provider.repo_catalog_calls == 0
+
+
+def test_slack_events_uses_git_repo_catalog_for_repo_catalog_request(monkeypatch, tmp_path):
+    fake_slack = configure_settings(monkeypatch, tmp_path)
+    git_provider = CapturingGitContextProvider()
+    set_git_context_provider(git_provider)
+
+    status, body = post_slack_event(
+        {
+            "type": "event_callback",
+            "team_id": "T123",
+            "event_id": "EvRepoCatalog123",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "user": "U123",
+                "text": "<@U999> 분석 가능한 repo 리스트 나열해",
+                "thread_ts": "1710000000.000001",
+                "ts": "1710000000.000002",
+            },
+        }
+    )
+
+    assert status == 200
+    assert body["accepted"] is True
+    assert git_provider.repo_catalog_calls >= 1
+    assert "PopPang-AOS" in fake_slack.messages[-1]["text"]
 
 
 def test_slack_events_ignores_bot_message(monkeypatch, tmp_path):

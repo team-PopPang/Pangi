@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-import asyncio
-from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
+import shutil
 
 from pangi.config import get_settings
-from pangi.infra.codex.options import append_model_reasoning_effort
+from pangi.domain.models import SlackThread
+from pangi.infra.codex.runner import CodexExecRunner
 from pangi.prompts.loader import load_prompt
+from pangi.repository import JobRepository, get_job_repository
+from pangi.usecase.codex_session import CodexSessionService
 from pangi.usecase.ports import ChatResponder
 
 
-DEFAULT_CODEX_COMMAND = ("codex",)
+DEFAULT_CODEX_COMMAND = ("codex", "exec")
 
 
 class CodexChatError(RuntimeError):
@@ -23,62 +24,58 @@ class CodexChatResponder:
     command_prefix: tuple[str, ...] = DEFAULT_CODEX_COMMAND
     model: str | None = None
     reasoning_effort: str | None = None
+    repository: JobRepository | None = None
 
-    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+    async def respond(
+        self,
+        *,
+        slack_thread: SlackThread,
+        text: str,
+        user_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> str:
         settings = get_settings()
-        workspace = settings.chat_workspace_root
-        if workspace is None:
-            raise CodexChatError("PANGI_CHAT_WORKSPACE_ROOT is not configured")
+        workspace = settings.thread_workspace_path(slack_thread.id)
+        repository = self.repository or get_job_repository()
+        runner = CodexExecRunner(
+            command_prefix=self.command_prefix,
+            model=self.model or settings.chat_model,
+            reasoning_effort=self.reasoning_effort or settings.chat_reasoning_effort,
+        )
+        session_service = CodexSessionService(
+            repository=repository,
+            codex_runner=runner,
+            idle_timeout_seconds=settings.codex_session_idle_timeout_seconds,
+        )
+        prepared = await session_service.prepare_for_turn(slack_thread.id)
+        if prepared.expired_previous_session and workspace.exists():
+            shutil.rmtree(workspace)
         workspace.mkdir(parents=True, exist_ok=True)
 
         prompt = _build_chat_prompt(text)
-        model = self.model or settings.chat_model
-        reasoning_effort = self.reasoning_effort or settings.chat_reasoning_effort
-        command = [
-            *self.command_prefix,
-            "exec",
-            "-C",
-            str(workspace),
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-        ]
-        append_model_reasoning_effort(command, reasoning_effort)
-        if model:
-            command.extend(("--model", model))
-        command.append(prompt)
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=str(workspace),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError as error:
-            raise CodexChatError("Codex command not found") from error
-
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(),
-                timeout=settings.chat_timeout_seconds,
-            )
-        except TimeoutError as error:
-            with suppress(ProcessLookupError):
-                process.terminate()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=2)
-            except TimeoutError:
-                with suppress(ProcessLookupError):
-                    process.kill()
-                await process.wait()
-            raise CodexChatError("Codex chat timed out") from error
-
-        stdout = stdout_bytes.decode("utf-8", errors="replace")
-        stderr = stderr_bytes.decode("utf-8", errors="replace")
-        if process.returncode != 0:
-            detail = stderr.strip() or stdout.strip() or f"exit code {process.returncode}"
+        result = await runner.run_read_only(
+            workspace_path=workspace,
+            prompt=prompt,
+            timeout_seconds=settings.chat_timeout_seconds,
+            resume_session_id=prepared.active_session.codex_thread_id if prepared.active_session else None,
+        )
+        if result.timed_out:
+            raise CodexChatError("Codex chat timed out")
+        if result.exit_code != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or f"exit code {result.exit_code}"
             raise CodexChatError(f"Codex chat failed: {detail}")
-        return stdout.strip()
+        session_service.record_turn_result(
+            slack_thread_id=slack_thread.id,
+            workspace_path=workspace,
+            existing_session=prepared.active_session,
+            result=result,
+        )
+        response = result.stdout.strip()
+        if prepared.expired_previous_session:
+            notice = "이전 Codex session이 1시간 이상 비활성이라 새 session으로 다시 시작했습니다."
+            return f"{notice}\n\n{response}".strip()
+        return response
 
 
 def _build_chat_prompt(text: str) -> str:
@@ -88,7 +85,6 @@ def _build_chat_prompt(text: str) -> str:
 {agent_prompt}
 
 {chat_prompt}
-
 사용자 메시지:
 {text}
 """

@@ -3,7 +3,7 @@
 팡이는 PopPang 팀 전용 Slack 기반 개발 에이전트입니다.
 
 Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합니다.
-허용된 PopPang repo를 명확히 분석해달라고 요청하면, 안전한 read-only worktree를 만든 뒤 Codex CLI로 코드를 읽고 결과를 Slack thread에 답합니다.
+허용된 PopPang repo를 명확히 분석해달라고 요청하면, Slack thread와 1:1로 대응되는 Codex session과 thread workspace를 사용해 코드를 읽고 결과를 Slack thread에 답합니다.
 
 ```text
 팡이가 먼저 읽고, 팀이 더 빠르게 판단합니다.
@@ -15,7 +15,7 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 - 허용된 user/channel과 `PANGI_SOURCE_REPO_ROOT` 하위 repo만 처리합니다.
 - 인사나 자기소개 요청에는 팡이가 누구이고 무엇을 할 수 있는지 짧게 소개합니다.
 - 일반 대화, 문장 정리, repo를 직접 읽지 않는 간단한 판단은 Codex chat으로 답합니다.
-- 허용된 PopPang repo 이름이 명시된 분석 요청은 SQLite job으로 저장하고, 격리된 read-only worktree에서 `codex exec --sandbox read-only`로 코드를 읽은 뒤 Slack thread에 결과를 남깁니다.
+- 허용된 PopPang repo 이름이 명시된 분석 요청은 SQLite job으로 저장하고, 같은 Slack thread의 active Codex session과 thread workspace를 사용해 `codex exec --sandbox read-only`로 코드를 읽은 뒤 Slack thread에 결과를 남깁니다.
 - Notion 문서/회의록 읽기 요청은 repo 분석과 분리된 `notion_context_chat` 흐름으로 분류합니다. 관리자 페이지에서 Notion OAuth 연결을 마치면 허용된 Notion context만 Codex chat prompt에 붙입니다.
 - GitHub/Git의 PR, issue, Actions, commit 맥락 요청은 repo 분석과 분리된 `git_context_chat` 흐름으로 분류합니다. Git MCP가 연결되면 read-only Git context만 Codex chat prompt에 붙입니다.
 - 분석 가능한 repo 목록 요청은 `repo_catalog` 흐름으로 분류하고, Git MCP 조직 repo와 `PANGI_SOURCE_REPO_ROOT` 하위 로컬 clone을 함께 보여줍니다. 로컬에 없는 조직 repo는 분석 요청 시 source root 아래로 clone합니다.
@@ -40,45 +40,44 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 
 ```mermaid
 flowchart TD
-    A["Slack에서 @팡이 호출"] --> B["FastAPI Slack webhook 수신"]
-    B --> C["Slack signature와 allowlist 검증"]
-    C --> ACK["Slack에 200 OK 즉시 반환"]
-    C --> BG["Background task 시작<br/>eyes reaction 추가"]
-    BG --> D["입력 가드레일<br/>코드 기반 1차 판정"]
-    D -->|외부 웹/쓰기 요청| X["안내 응답"]
-    D -->|일반 대화| Y["Codex chat 응답<br/>(gpt-5.4-mini / low)"]
-    D -->|Notion 문서 읽기| N["Notion context provider<br/>공식 Notion MCP / allowlist"]
-    N --> YN["Codex chat + Notion context<br/>(gpt-5.4-mini / low)"]
-    D -->|GitHub/PR/Issue/Actions 질문| GM["Git context provider<br/>Git MCP / read-only"]
-    GM --> YG["Codex chat + Git context<br/>(gpt-5.4-mini / low)"]
-    D -->|분석 가능 repo 목록 질문| RL["Repo catalog<br/>Git MCP 조직 repo + 로컬 source repo"]
-    RL --> RLA["분석 가능 여부 정리"]
-    D -->|repo 불명확| Z["repo 확인 질문"]
-    D -->|허용 repo 분석| F["SQLite에 AgentJob 저장"]
-    D -->|애매한 요청만| E["Codex CLI Orchestrator<br/>보조 판정<br/>(gpt-5.4-mini / low)"]
-    E -->|일반 대화| Y
-    E -->|Notion 문서 읽기| N
-    E -->|GitHub/PR/Issue/Actions 질문| GM
-    E -->|분석 가능 repo 목록 질문| RL
-    E -->|repo 불명확| Z
-    E -->|허용 repo 분석| F
-    E -->|지원 안 함| X
-    F --> G["Background worker 실행"]
-    G --> H["허용된 source repo 확인"]
-    H --> I["Read-only git worktree 생성"]
-    I --> J["Codex exec --sandbox read-only 실행<br/>(gpt-5.5 / high)"]
-    J --> K["stdout, stderr, exit code, timeout 저장"]
-    K --> L["분석 결과 Markdown"]
-    X --> O["출력 가드레일"]
-    Y --> O
-    YN --> O
-    YG --> O
-    RLA --> O
-    Z --> O
-    L --> O
-    O --> M["Markdown to Slack<br/>Slack bot 전용"]
-    M --> R["Slack thread 응답"]
-    R --> DONE["완료 reaction<br/>white_check_mark 또는 x"]
+    U["사용자<br/>Slack thread T1"] --> S["Slack webhook"]
+    S --> G["입력 가드레일<br/>코드 기반 빠른 차단/빠른 분류"]
+
+    G -->|외부 웹/쓰기/secret 위험| X["정책 안내 응답"]
+    G -->|명확한 Notion/Git/repo 목록/repo 분석| R["요청 종류 확정"]
+    G -->|아까/그거/이전 내용처럼 애매함| O["Orchestrator helper<br/>별도 짧은 Codex 호출<br/>gpt-5.4-mini / low"]
+    O --> R
+
+    R -->|일반 대화| C["본 Codex session S1"]
+    R -->|Notion context| N["Notion context 조회"] --> C
+    R -->|Git context| M["Git context 조회"] --> C
+    R -->|repo 목록| L["Repo catalog 응답"]
+    R -->|repo 분석| J["AgentJob 생성"] --> W["Job worker"] --> P["repo checkout 준비"] --> C
+    R -->|repo 불명확| Q["repo 확인 질문"]
+
+    C --> T["Slack thread T1에 연결된<br/>active thread workspace W1"]
+    T --> I["첫 turn이면<br/>codex exec"]
+    T --> K["후속 turn이면<br/>codex exec resume"]
+
+    I --> A["active Codex session 저장<br/>slack_thread_id -> codex_session_id"]
+    K --> A
+
+    A --> CHAT["일반/Notion/Git turn<br/>gpt-5.4-mini / low"]
+    A --> ANALYZE["repo 분석 turn<br/>gpt-5.5 / high"]
+
+    CHAT --> OUT["출력 가드레일<br/>Markdown to Slack"]
+    ANALYZE --> OUT
+    L --> OUT
+    Q --> OUT
+    X --> OUT
+
+    OUT --> H["Slack thread T1에 응답"]
+
+    A --> TIME["last_used_at 갱신"]
+    TIME --> Z["1시간 idle?"]
+    Z -->|예| AR["codex archive"]
+    AR --> CL["thread workspace cleanup"]
+    Z -->|아니오| KEEP["session 유지"]
 ```
 
 현재 단계에서 팡이는 코드를 수정하지 않습니다. 일반 대화는 repo job 없이 답하고, repo 분석 요청은 코드를 읽고 확인한 사실과 근거를 정리하는 역할에 집중합니다.
@@ -97,16 +96,19 @@ flowchart TD
 - Notion 문서 읽기 요청의 별도 분류와 공식 MCP 기반 Notion context provider
 - Git MCP context 요청과 repo catalog 요청의 별도 분류
 - 애매한 요청만 처리하는 Codex CLI 기반 orchestrator adapter
+- Slack thread별 active Codex session 생성/재사용
+- Slack thread별 active thread workspace 생성/재사용
+- thread workspace 내부 repo checkout 생성
 - Codex chat 응답 경로
 - 외부 웹/인터넷 분석 요청 차단
-- SQLite 기반 `SlackThread`, `AgentJob`, `CodexRun` 저장소
+- SQLite 기반 `SlackThread`, `CodexSession`, `AgentJob`, `CodexRun` 저장소
 - in-process background worker
 - job 상태 전환: `queued`, `running`, `succeeded`, `failed`, `timed_out`, `cancelled`
 - repo별/전체 동시 실행 제한
-- read-only 분석용 git worktree 생성
+- 1시간 idle session archive와 thread workspace cleanup sweeper
 - `develop` branch 우선, 없으면 `main` branch fallback
-- `codex exec --sandbox read-only` 실행
-- Codex stdout/stderr/exit code/timeout 저장
+- `codex exec` / `codex exec resume` / `codex archive` 실행
+- Codex stdout/stderr/exit code/timeout/session id 저장
 - Slack thread에 성공/실패/timeout 결과 응답
 - Slack 원본 메시지에 `eyes` reaction 추가, 일반 대화와 read-only 분석 응답 성공 시 `white_check_mark`로 전환
 - Slack/외부 출력 전 secret redaction과 길이 제한
@@ -117,7 +119,7 @@ flowchart TD
 ## 아직 남은 것
 
 - 실제 Slack 환경 end-to-end 검증
-- worktree cleanup 정책
+- session archive / workspace cleanup 운영 정책 고도화
 - PR 승인 전 diff 수집/검토 흐름
 - Notion DB context 선별 품질 고도화
 - Notion episode report 기록
@@ -126,42 +128,50 @@ flowchart TD
 
 ## AgentJob과 thread 관리
 
-팡이는 Slack thread를 독립된 대화 단위로 보고, repo 분석 요청 하나를 `AgentJob` 하나로 저장합니다.
+팡이는 Slack thread를 독립된 대화 단위로 보고, user/assistant turn을 `thread_messages`에 저장합니다. 다만 실행 연속성의 기본축은 `최근 대화 재주입`이 아니라 `Slack thread 1개 = active Codex session 1개`입니다.
 
 ```mermaid
 flowchart TD
     A["Slack app mention 또는 slash command"] --> B["SlackCommand 정규화"]
     B --> C["thread key 계산<br/>team_id + channel_id + thread_ts"]
     C --> D["slack_threads 조회 또는 생성"]
-    D --> E["agent_jobs 생성"]
-    E --> F["slack_threads.last_job_id 갱신"]
-    E --> G["background worker에 job_id enqueue"]
-    G --> H["CodexRun 기록 저장"]
-    H --> I["같은 Slack thread에 결과 응답"]
+    D --> E["thread_messages에 user turn 저장"]
+    E --> F["active Codex session 조회 또는 생성"]
+    F --> G["thread workspace 조회 또는 생성"]
+    G --> H["일반 대화 또는 agent_jobs 생성"]
+    H --> I["응답 후 assistant turn 저장"]
+    H --> J["repo 분석이면 background worker에 job_id enqueue"]
+    J --> K["CodexRun 기록 저장"]
+    K --> I
 ```
 
-### thread를 나누는 기준
+같은 Slack thread 안의 일반 대화와 repo 분석은 같은 Codex session과 thread workspace를 공유합니다. 1시간 이상 idle이면 session을 archive한 뒤 다음 요청에서 새 session으로 다시 시작합니다.
 
-`slack_threads`는 `team_id`, `channel_id`, `thread_ts` 조합을 unique key로 사용합니다.
+### ThreadMessage가 저장하는 것
 
-| 기준 | 의미 |
+`thread_messages`는 같은 Slack thread 안의 user/assistant turn을 저장합니다.
+
+| 정보 | 설명 |
 | --- | --- |
-| `team_id` | Slack workspace 단위 |
-| `channel_id` | Slack channel 단위 |
-| `thread_ts` | Slack thread 단위 |
+| 대화 위치 | `slack_thread_id` |
+| 발화자 | `role` (`user`, `assistant`) |
+| 본문 | `text` |
+| Slack 원본 | `message_ts`, `event_id` |
+| 연결 job | `source_job_id` |
 
-같은 channel 안에서도 `thread_ts`가 다르면 서로 다른 대화로 저장됩니다. 그래서 A thread에서 진행한 분석 job과 B thread에서 진행한 분석 job은 같은 repo를 보더라도 별도의 `slack_threads` row와 `agent_jobs` row로 관리됩니다.
+`thread_messages`는 주로 관리자 확인과 감사 로그 역할을 맡습니다. 일반 대화와 repo 분석은 Codex session을 이어가므로, 최근 대화 전체를 매 turn마다 prompt에 다시 넣지 않습니다.
 
-### app mention의 thread 계산
+### CodexSession이 저장하는 것
 
-app mention 이벤트는 아래 규칙으로 `thread_ts`를 정합니다.
+`codex_sessions`는 같은 Slack thread에 연결된 active Codex session을 추적합니다.
 
-| 상황 | 사용하는 값 |
+| 정보 | 설명 |
 | --- | --- |
-| 기존 Slack thread 안에서 팡이를 부른 경우 | event의 `thread_ts` |
-| 새 메시지에서 팡이를 부른 경우 | 원본 event의 `ts` |
-
-이렇게 하면 새 메시지에서 시작된 요청도 그 메시지 자체를 thread root로 삼아 이후 답변이 같은 Slack thread에 달립니다.
+| 대화 위치 | `slack_thread_id` |
+| 실제 Codex session | `codex_thread_id` |
+| thread workspace | `workspace_path` |
+| 상태 | `status` (`active`, `expired`, `archived`, `archive_failed`) |
+| 만료 정보 | `last_used_at`, `expires_at`, `archived_at` |
 
 ### AgentJob이 저장하는 것
 
@@ -170,21 +180,16 @@ app mention 이벤트는 아래 규칙으로 `thread_ts`를 정합니다.
 | 정보 | 설명 |
 | --- | --- |
 | Slack 위치 | `slack_thread_id`, `slack_team_id`, `slack_channel_id`, `slack_thread_ts` |
+| 연결 session | `codex_session_id` |
 | 원본 메시지 | `slack_message_ts`, `requester_user_id`, `prompt` |
 | 실행 대상 | `repo_key`, `job_type` |
 | 실행 상태 | `status`, `worktree_path`, `stdout`, `stderr`, `error_message` |
-
-`slack_thread_id`로 `slack_threads`에 연결되기 때문에 job 결과는 항상 요청이 들어온 thread로 돌아갑니다. `event_id`는 unique하게 저장해서 Slack retry가 와도 같은 요청으로 job이 중복 생성되지 않게 막습니다.
-
-`slack_message_ts`는 thread 구분용이 아니라 원본 메시지 reaction 교체용입니다. app mention 요청에서는 원본 메시지의 `eyes` reaction을 완료 후 `white_check_mark` 또는 `x`로 바꿀 때 사용하고, slash command처럼 원본 메시지 reaction을 관리하지 않는 요청에서는 비어 있을 수 있습니다.
 
 ## SQLite 테이블 구조
 
 현재 SQLite 구현 기준은 `pangi/src/pangi/repository/job_repository_sqlite_impl.py`입니다.
 
 ### `slack_threads`
-
-Slack thread 단위 대화 컨텍스트를 저장합니다.
 
 | 컬럼 | 타입 | 제약 | 설명 |
 | --- | --- | --- | --- |
@@ -193,24 +198,46 @@ Slack thread 단위 대화 컨텍스트를 저장합니다.
 | `channel_id` | `TEXT` | `NOT NULL` | Slack channel id |
 | `thread_ts` | `TEXT` | `NOT NULL` | Slack thread timestamp |
 | `last_job_id` | `TEXT` |  | 마지막으로 연결된 job id |
+| `active_codex_session_id` | `TEXT` |  | 현재 thread에 연결된 active Codex session id |
 | `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
 | `updated_at` | `TEXT` | `NOT NULL` | 수정 시각 |
 
-추가 제약:
+### `codex_sessions`
 
-| 제약 | 컬럼 |
-| --- | --- |
-| `UNIQUE` | `team_id`, `channel_id`, `thread_ts` |
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 session id |
+| `slack_thread_id` | `TEXT` | `NOT NULL`, `FOREIGN KEY` | `slack_threads.id` 참조 |
+| `codex_thread_id` | `TEXT` | `NOT NULL`, `UNIQUE` | Codex CLI가 돌려준 실제 session id |
+| `workspace_path` | `TEXT` | `NOT NULL` | thread workspace root 경로 |
+| `status` | `TEXT` | `NOT NULL` | session 상태 |
+| `last_used_at` | `TEXT` | `NOT NULL` | 마지막 사용 시각 |
+| `expires_at` | `TEXT` | `NOT NULL` | idle timeout 만료 시각 |
+| `archived_at` | `TEXT` |  | archive 완료 시각 |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
+| `updated_at` | `TEXT` | `NOT NULL` | 수정 시각 |
+
+### `thread_messages`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 message id |
+| `slack_thread_id` | `TEXT` | `NOT NULL`, `FOREIGN KEY` | `slack_threads.id` 참조 |
+| `role` | `TEXT` | `NOT NULL` | `user` 또는 `assistant` |
+| `text` | `TEXT` | `NOT NULL` | 대화 본문 |
+| `message_ts` | `TEXT` |  | Slack message timestamp |
+| `event_id` | `TEXT` | `UNIQUE` | Slack retry 중복 방지용 event id |
+| `source_job_id` | `TEXT` | `FOREIGN KEY` | 연결된 `agent_jobs.id` |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
 
 ### `agent_jobs`
-
-Slack 요청 하나를 팡이 job 하나로 저장합니다.
 
 | 컬럼 | 타입 | 제약 | 설명 |
 | --- | --- | --- | --- |
 | `id` | `TEXT` | `PRIMARY KEY` | 내부 job id |
 | `event_id` | `TEXT` | `NOT NULL`, `UNIQUE` | Slack event id 또는 slash command trigger id |
 | `slack_thread_id` | `TEXT` | `NOT NULL`, `FOREIGN KEY` | `slack_threads.id` 참조 |
+| `codex_session_id` | `TEXT` | `FOREIGN KEY` | `codex_sessions.id` 참조 |
 | `slack_team_id` | `TEXT` | `NOT NULL` | Slack team id |
 | `slack_channel_id` | `TEXT` | `NOT NULL` | Slack channel id |
 | `slack_thread_ts` | `TEXT` | `NOT NULL` | Slack thread timestamp |
@@ -220,46 +247,20 @@ Slack 요청 하나를 팡이 job 하나로 저장합니다.
 | `status` | `TEXT` | `NOT NULL` | job 상태 |
 | `repo_key` | `TEXT` | `NOT NULL` | allowlist에 등록된 repo key |
 | `prompt` | `TEXT` | `NOT NULL` | 사용자 요청 원문 |
-| `worktree_path` | `TEXT` |  | job별 read-only worktree 경로 |
+| `worktree_path` | `TEXT` |  | thread workspace 안에서 실제로 분석한 repo checkout 경로 |
 | `stdout` | `TEXT` |  | Codex 실행 stdout |
 | `stderr` | `TEXT` |  | Codex 실행 stderr |
 | `error_message` | `TEXT` |  | 실패 요약 메시지 |
 | `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
 | `updated_at` | `TEXT` | `NOT NULL` | 수정 시각 |
 
-`slack_message_ts`는 원본 메시지의 `eyes` reaction을 `white_check_mark` 또는 `x`로 바꿀 때 사용합니다. slash command나 legacy job에서는 비어 있을 수 있습니다.
-
-현재 `status` 값:
-
-| 값 |
-| --- |
-| `queued` |
-| `running` |
-| `succeeded` |
-| `failed` |
-| `timed_out` |
-| `cancelled` |
-| `waiting_approval` |
-| `rejected` |
-
-현재 `job_type` 값:
-
-| 값 |
-| --- |
-| `analyze` |
-| `edit_requested` |
-| `pr_summary` |
-| `troubleshooting` |
-| `xcodebuild_failure` |
-
 ### `codex_runs`
-
-job 안에서 실행된 Codex 실행 기록을 저장합니다.
 
 | 컬럼 | 타입 | 제약 | 설명 |
 | --- | --- | --- | --- |
 | `id` | `TEXT` | `PRIMARY KEY` | 내부 Codex run id |
 | `job_id` | `TEXT` | `NOT NULL`, `FOREIGN KEY` | `agent_jobs.id` 참조 |
+| `codex_session_id` | `TEXT` | `FOREIGN KEY` | `codex_sessions.id` 참조 |
 | `mode` | `TEXT` | `NOT NULL` | Codex 실행 모드 |
 | `command` | `TEXT` | `NOT NULL` | 실행한 argv list의 JSON 문자열 |
 | `prompt` | `TEXT` | `NOT NULL` | Codex에 전달한 prompt |
@@ -267,6 +268,7 @@ job 안에서 실행된 Codex 실행 기록을 저장합니다.
 | `stderr` | `TEXT` |  | Codex stderr |
 | `exit_code` | `INTEGER` |  | 프로세스 종료 코드 |
 | `timed_out` | `INTEGER` | `NOT NULL` | timeout 여부, `0` 또는 `1` |
+| `workspace_path` | `TEXT` |  | 실제 Codex 실행 workspace root 경로 |
 | `started_at` | `TEXT` | `NOT NULL` | 시작 시각 |
 | `finished_at` | `TEXT` |  | 종료 시각 |
 
@@ -358,7 +360,7 @@ PANGI_ADMIN_PASSWORD=
 | `PANGI_ORCHESTRATOR_REASONING_EFFORT` | `low` | orchestrator용 Codex 호출의 추론 난이도 |
 | `PANGI_CHAT_MODEL` | `gpt-5.4-mini` | repo를 읽지 않는 일반 대화 응답 |
 | `PANGI_CHAT_REASONING_EFFORT` | `low` | 일반 대화용 Codex 호출의 추론 난이도 |
-| `PANGI_ANALYSIS_MODEL` | `gpt-5.5` | read-only worktree에서 실제 repo 코드를 읽는 분석 |
+| `PANGI_ANALYSIS_MODEL` | `gpt-5.5` | thread workspace 내부 repo checkout에서 실제 repo 코드를 읽는 분석 |
 | `PANGI_ANALYSIS_REASONING_EFFORT` | `high` | repo 분석용 Codex 호출의 추론 난이도 |
 | `PANGI_PUBLIC_BASE_URL` | 빈 값 | Notion OAuth callback을 받을 공개 서버 URL. 비우면 요청 host 기준으로 callback URL을 만듦 |
 | `PANGI_NOTION_ENABLED` | `0` | Notion context provider 사용 여부 |
@@ -377,12 +379,13 @@ PANGI_ADMIN_PASSWORD=
 | `PANGI_GIT_MCP_TIMEOUT_SECONDS` | `20` | Git MCP context 조회 timeout |
 | `PANGI_GIT_MCP_WRITE_ENABLED` | `0` | 예약 설정값. MVP에서는 Git write 요청을 지원하지 않음 |
 | `PANGI_GIT_CLONE_URL_TEMPLATE` | `https://github.com/{org}/{repo}.git` | Git MCP 조직 repo가 source root에 없을 때 사용할 clone URL 템플릿 |
+| `PANGI_CODEX_SESSION_IDLE_TIMEOUT_SECONDS` | `3600` | Slack thread의 active Codex session idle timeout |
 
 입력 가드레일은 AI가 아니라 코드로 유지합니다. Orchestrator는 심층 repo 분석이 아니라 흐름을 정하는 단계이므로 기본 mini 모델과 `low` reasoning을 사용합니다. 팡이가 실행하는 `codex exec`는 `-c model_reasoning_effort="..."`를 명시해, 팡이를 개발하는 사람의 `.codex/config.toml` 설정이 런타임 호출에 섞이지 않게 합니다.
 
 Notion context는 공식 Notion MCP를 직접 Codex에 열지 않고, 팡이 서버가 허용된 page/database만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. Notion 연결은 관리자 페이지 `/pangi-admin/notion`에서 OAuth로 진행합니다. 자세한 기준은 [docs/architecture/notion-context.md](docs/architecture/notion-context.md)를 봅니다.
 
-Git context도 Codex에 Git MCP 권한을 직접 열지 않고, 팡이 서버가 Git MCP에서 필요한 repo/PR/issue/Actions context만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. 실제 코드 전체 분석은 `PANGI_SOURCE_REPO_ROOT` 하위 source repo와 read-only worktree에서 수행합니다. Git MCP 조직 repo가 아직 source root에 없으면, 분석 요청 시 `PANGI_GIT_CLONE_URL_TEMPLATE`으로 clone한 뒤 worktree를 만듭니다.
+Git context도 Codex에 Git MCP 권한을 직접 열지 않고, 팡이 서버가 Git MCP에서 필요한 repo/PR/issue/Actions context만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. 실제 코드 전체 분석은 `PANGI_SOURCE_REPO_ROOT` 하위 source repo와 thread workspace 내부 repo checkout에서 수행합니다. Git MCP 조직 repo가 아직 source root에 없으면, 분석 요청 시 `PANGI_GIT_CLONE_URL_TEMPLATE`으로 clone한 뒤 thread workspace 아래 detached checkout을 만듭니다.
 
 임시 개발 환경에서 모든 Slack user/channel을 허용하려면 `*`를 사용할 수 있습니다.
 
@@ -439,8 +442,7 @@ cd /path/to/git/repo
 codex exec --sandbox read-only "이 저장소 구조를 한 문단으로 요약해줘"
 ```
 
-Codex는 git repo 안에서 실행되어야 합니다. 팡이는 job마다 git worktree를 만들고 그 안에서 Codex를 실행합니다.
-일반 대화 응답은 repo worktree가 아니라 `PANGI_CHAT_WORKSPACE_ROOT`에서 `codex exec --skip-git-repo-check --sandbox read-only`로 실행합니다.
+팡이는 Slack thread마다 thread workspace를 만들고, 첫 turn은 `codex exec`, 후속 turn은 `codex exec resume`으로 이어갑니다. repo 분석은 thread workspace 내부 repo checkout을 대상으로 읽고, 일반 대화도 같은 thread workspace를 공유합니다.
 
 ## 관리자 페이지
 
@@ -480,7 +482,7 @@ pytest
 - 사용자의 Slack 메시지를 shell command로 직접 실행하지 않습니다.
 - 외부 명령은 argv list로 실행하고 `shell=True`를 사용하지 않습니다.
 - Codex 분석은 `--sandbox read-only`로 실행합니다.
-- Codex는 원본 source repo가 아니라 job별 worktree에서 실행합니다.
+- Codex는 원본 source repo가 아니라 thread workspace에서 실행합니다.
 - 코드 수정과 PR 생성은 Slack 승인 흐름이 붙은 뒤에만 구현합니다.
 
 ## 문서

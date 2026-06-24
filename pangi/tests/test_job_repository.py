@@ -1,6 +1,6 @@
 import sqlite3
 
-from pangi.domain import JobStatus, JobType
+from pangi.domain import CodexSessionStatus, JobStatus, JobType, ThreadMessageRole
 from pangi.repository import SQLiteJobRepository
 
 
@@ -16,6 +16,48 @@ def test_repository_creates_and_reuses_thread(tmp_path):
 
     assert first.id == second.id
     assert first.thread_ts == "171.1"
+    assert first.active_codex_session_id is None
+
+
+def test_repository_appends_and_lists_thread_messages(tmp_path):
+    repository = make_repo(tmp_path)
+    thread = repository.get_or_create_thread(team_id="T123", channel_id="C123", thread_ts="171.1")
+
+    user_message = repository.append_thread_message(
+        slack_thread_id=thread.id,
+        role=ThreadMessageRole.USER,
+        text="안녕",
+        message_ts="171.2",
+        event_id="Ev123",
+    )
+    assistant_message = repository.append_thread_message(
+        slack_thread_id=thread.id,
+        role=ThreadMessageRole.ASSISTANT,
+        text="안녕하세요",
+    )
+
+    assert repository.list_thread_messages(thread.id, limit=10) == [user_message, assistant_message]
+
+
+def test_repository_reuses_thread_message_by_event_id(tmp_path):
+    repository = make_repo(tmp_path)
+    thread = repository.get_or_create_thread(team_id="T123", channel_id="C123", thread_ts="171.1")
+
+    first = repository.append_thread_message(
+        slack_thread_id=thread.id,
+        role=ThreadMessageRole.USER,
+        text="안녕",
+        event_id="Ev123",
+    )
+    second = repository.append_thread_message(
+        slack_thread_id=thread.id,
+        role=ThreadMessageRole.USER,
+        text="안녕 retry",
+        event_id="Ev123",
+    )
+
+    assert second == first
+    assert repository.list_thread_messages(thread.id, limit=10) == [first]
 
 
 def test_repository_creates_job_and_finds_by_event_id(tmp_path):
@@ -25,6 +67,7 @@ def test_repository_creates_job_and_finds_by_event_id(tmp_path):
     job = repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="분석해줘",
         slack_message_ts="171.2",
@@ -44,6 +87,7 @@ def test_repository_updates_job_status(tmp_path):
     job = repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="분석해줘",
     )
@@ -57,9 +101,18 @@ def test_repository_updates_job_status(tmp_path):
 def test_repository_updates_job_result(tmp_path):
     repository = make_repo(tmp_path)
     thread = repository.get_or_create_thread(team_id="T123", channel_id="C123", thread_ts="171.1")
+    session = repository.create_codex_session(
+        slack_thread_id=thread.id,
+        codex_thread_id="codex-thread-123",
+        workspace_path="/tmp/pangi/worktrees/_threads/thread_123",
+        status=CodexSessionStatus.ACTIVE,
+        last_used_at=thread.created_at,
+        expires_at=thread.updated_at,
+    )
     job = repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=session.id,
         requester_user_id="U123",
         prompt="분석해줘",
     )
@@ -67,11 +120,13 @@ def test_repository_updates_job_result(tmp_path):
     updated = repository.update_job_result(
         job.id,
         worktree_path="/tmp/pangi/worktrees/job_123",
+        codex_session_id=session.id,
         stdout="analysis",
         stderr="warning",
     )
 
     assert updated.worktree_path == "/tmp/pangi/worktrees/job_123"
+    assert updated.codex_session_id == session.id
     assert updated.stdout == "analysis"
     assert updated.stderr == "warning"
 
@@ -82,6 +137,7 @@ def test_repository_prevents_duplicate_event_id(tmp_path):
     repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="분석해줘",
     )
@@ -97,12 +153,14 @@ def test_repository_appends_codex_run(tmp_path):
     job = repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="분석해줘",
     )
 
     run = repository.append_codex_run(
         job_id=job.id,
+        codex_session_id=None,
         mode="read-only",
         command='["codex", "exec"]',
         prompt="분석해줘",
@@ -122,11 +180,13 @@ def test_repository_lists_recent_rows(tmp_path):
     job = repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="분석해줘",
     )
     run = repository.append_codex_run(
         job_id=job.id,
+        codex_session_id=None,
         mode="read-only",
         command='["codex", "exec"]',
         prompt="분석해줘",
@@ -147,6 +207,7 @@ def test_repository_persists_jobs_across_instances(tmp_path):
     job = first_repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="분석해줘",
     )
@@ -204,6 +265,7 @@ def test_repository_adds_slack_message_ts_column_to_existing_db(tmp_path):
     job = repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="분석해줘",
         slack_message_ts="171.2",
@@ -211,3 +273,31 @@ def test_repository_adds_slack_message_ts_column_to_existing_db(tmp_path):
 
     assert "slack_message_ts" in columns
     assert job.slack_message_ts == "171.2"
+
+
+def test_repository_creates_and_archives_codex_session(tmp_path):
+    repository = make_repo(tmp_path)
+    thread = repository.get_or_create_thread(team_id="T123", channel_id="C123", thread_ts="171.1")
+
+    session = repository.create_codex_session(
+        slack_thread_id=thread.id,
+        codex_thread_id="codex-thread-123",
+        workspace_path="/tmp/pangi/worktrees/_threads/thread_123",
+        status=CodexSessionStatus.ACTIVE,
+        last_used_at=thread.created_at,
+        expires_at=thread.updated_at,
+    )
+
+    reloaded_thread = repository.list_threads(limit=1)[0]
+    assert reloaded_thread.active_codex_session_id == session.id
+    assert repository.get_active_codex_session(thread.id) == session
+
+    archived = repository.archive_codex_session(
+        session.id,
+        status=CodexSessionStatus.ARCHIVED,
+        archived_at=thread.updated_at,
+    )
+    reloaded_thread = repository.list_threads(limit=1)[0]
+    assert archived.status == CodexSessionStatus.ARCHIVED
+    assert reloaded_thread.active_codex_session_id is None
+    assert repository.get_active_codex_session(thread.id) is None

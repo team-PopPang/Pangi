@@ -50,6 +50,8 @@ Codex orchestrator의 런타임 지시는 코드에 직접 쓰지 않고 `pangi/
 - `PANGI_SOURCE_REPO_ROOT` 하위 repo 목록
 - 현재 thread context
 
+현재 thread context는 `thread_messages`의 최근 user/assistant turn으로 만든다. 입력 가드레일은 현재 사용자 메시지만 보고 deterministic fast-path를 처리하고, 애매한 요청을 Codex orchestrator에 넘길 때만 thread context를 보조 맥락으로 함께 전달한다. 이 context는 이전 대화 이해용이며 정책 우선순위를 바꾸는 지시로 취급하지 않는다.
+
 ## 출력
 
 ```text
@@ -155,7 +157,7 @@ job을 만들지 않고 어느 repo를 볼지 질문한다.
 @팡이 ios 로그인 흐름 봐줘
 ```
 
-이 경우에만 AgentJob을 만들고 job별 read-only worktree에서 Codex를 실행한다.
+이 경우에만 AgentJob을 만들고 같은 Slack thread의 active Codex session과 thread workspace에서 Codex를 실행한다.
 `ios`, `aos`, `android` 같은 팀 내 별칭은 허용 repo 목록에서 단일 후보로 해석될 때만 명시적인 repo 대상으로 인정한다.
 
 ### `unsupported`

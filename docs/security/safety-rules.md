@@ -20,7 +20,8 @@
 - `PANGI_SOURCE_REPO_ROOT` 하위 repo만 접근 가능하게 제한한다.
 - 사용자가 Slack 메시지로 임의 repo path를 지정할 수 없게 한다.
 - 원본 source repo에서 Codex를 직접 실행하지 않는다.
-- Codex 실행 경로는 서버가 만든 worktree여야 한다.
+- Codex 실행 경로는 서버가 만든 thread workspace여야 한다.
+- repo checkout은 thread workspace 하위에서만 만든다.
 
 ## Notion 접근 제한
 
@@ -53,7 +54,9 @@
 ## Git 안전 규칙
 
 - main/develop 같은 기본 브랜치를 직접 수정하지 않는다.
-- job마다 별도 worktree와 branch를 만든다.
+- repo checkout은 thread workspace 하위 detached worktree로 만든다.
+- 같은 Slack thread에는 active Codex session을 최대 1개만 둔다.
+- idle timeout을 지난 session은 archive하고 active 연결을 끊는다.
 - PR 생성 전 diff와 changed files를 확인한다.
 - 허용 범위 밖 파일 변경이 있으면 PR 생성을 막는다.
 

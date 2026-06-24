@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -13,11 +14,13 @@ from pangi.infra.queue import InProcessJobQueue, set_job_queue
 from pangi.infra.slack import router as slack_router
 from pangi.infra.slack.client import get_slack_client
 from pangi.repository import get_job_repository
+from pangi.usecase.codex_session import CodexSessionService
 from pangi.usecase.output_guardrail import prepare_output_markdown
 from pangi.usecase.run_analysis_job import RunAnalysisJobUseCase
 
 
 logger = logging.getLogger(__name__)
+SESSION_SWEEP_INTERVAL_SECONDS = 300
 
 
 async def slack_progress_hook(job: AgentJob, _status: JobStatus, message: str) -> None:
@@ -34,20 +37,43 @@ async def slack_progress_hook(job: AgentJob, _status: JobStatus, message: str) -
         return
 
 
+async def _session_sweeper(
+    *,
+    session_service: CodexSessionService,
+    worktree_manager,
+) -> None:
+    while True:
+        try:
+            await session_service.expire_due_sessions(
+                cleanup_thread_workspace=worktree_manager.cleanup_thread_workspace,
+            )
+        except Exception:
+            logger.exception("Failed to sweep expired Codex sessions")
+        await asyncio.sleep(SESSION_SWEEP_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     repository = get_job_repository()
     slack_client = get_slack_client()
+    worktree_manager = get_worktree_manager()
+    codex_runner = CodexExecRunner(
+        model=settings.analysis_model,
+        reasoning_effort=settings.analysis_reasoning_effort,
+    )
     analysis_use_case = RunAnalysisJobUseCase(
         repository=repository,
-        worktree_manager=get_worktree_manager(),
-        codex_runner=CodexExecRunner(
-            model=settings.analysis_model,
-            reasoning_effort=settings.analysis_reasoning_effort,
-        ),
+        worktree_manager=worktree_manager,
+        codex_runner=codex_runner,
         slack_notifier=slack_client,
         timeout_seconds=settings.job_timeout_seconds,
+        session_idle_timeout_seconds=settings.codex_session_idle_timeout_seconds,
+    )
+    session_service = CodexSessionService(
+        repository=repository,
+        codex_runner=codex_runner,
+        idle_timeout_seconds=settings.codex_session_idle_timeout_seconds,
     )
 
     queue = InProcessJobQueue(
@@ -60,9 +86,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     set_job_queue(queue)
     await queue.start()
+    sweeper_task = asyncio.create_task(
+        _session_sweeper(session_service=session_service, worktree_manager=worktree_manager),
+        name="pangi-session-sweeper",
+    )
     try:
         yield
     finally:
+        sweeper_task.cancel()
+        await asyncio.gather(sweeper_task, return_exceptions=True)
         await queue.stop()
         set_job_queue(None)
 

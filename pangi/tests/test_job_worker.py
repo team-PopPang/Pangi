@@ -10,6 +10,7 @@ def make_job(repository, *, event_id="Ev123", repo_key="PopPang-iOS"):
     return repository.create_job(
         event_id=event_id,
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="분석해줘",
         repo_key=repo_key,

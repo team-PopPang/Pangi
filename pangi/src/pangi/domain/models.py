@@ -24,6 +24,18 @@ class JobType(StrEnum):
     XCODEBUILD_FAILURE = "xcodebuild_failure"
 
 
+class ThreadMessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class CodexSessionStatus(StrEnum):
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    ARCHIVED = "archived"
+    ARCHIVE_FAILED = "archive_failed"
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -35,8 +47,21 @@ class SlackThread:
     channel_id: str
     thread_ts: str
     last_job_id: str | None
+    active_codex_session_id: str | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ThreadMessage:
+    id: str
+    slack_thread_id: str
+    role: ThreadMessageRole
+    text: str
+    message_ts: str | None
+    event_id: str | None
+    source_job_id: str | None
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -44,6 +69,7 @@ class AgentJob:
     id: str
     event_id: str
     slack_thread_id: str
+    codex_session_id: str | None
     slack_team_id: str
     slack_channel_id: str
     slack_thread_ts: str
@@ -65,6 +91,7 @@ class AgentJob:
 class CodexRun:
     id: str
     job_id: str
+    codex_session_id: str | None
     mode: str
     command: str
     prompt: str
@@ -72,5 +99,20 @@ class CodexRun:
     stderr: str | None
     exit_code: int | None
     timed_out: bool
+    workspace_path: str | None
     started_at: datetime
     finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class CodexSession:
+    id: str
+    slack_thread_id: str
+    codex_thread_id: str
+    workspace_path: str
+    status: CodexSessionStatus
+    last_used_at: datetime
+    expires_at: datetime
+    archived_at: datetime | None
+    created_at: datetime
+    updated_at: datetime

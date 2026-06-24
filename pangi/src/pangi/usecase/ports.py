@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from pangi.domain.models import CodexSession, SlackThread
 from pangi.usecase.git_context import GitContext, GitRepoCatalog
 from pangi.usecase.notion_context import NotionContext
 from pangi.usecase.request_decision import ClassifiedRequest
@@ -42,7 +43,13 @@ class JobQueue(Protocol):
 class RequestOrchestrator(Protocol):
     """Slack 요청을 어떤 Pangi 흐름으로 처리할지 결정하는 포트."""
 
-    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
+    async def decide(
+        self,
+        *,
+        text: str,
+        allowed_repo_keys: tuple[str, ...],
+        thread_context: str = "",
+    ) -> ClassifiedRequest:
         """요청 텍스트와 허용 repo 목록을 보고 실행 분기 결정을 반환한다."""
         ...
 
@@ -50,7 +57,15 @@ class RequestOrchestrator(Protocol):
 class ChatResponder(Protocol):
     """repo worktree 없이 일반 AI 대화 응답을 생성하는 포트."""
 
-    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+    async def respond(
+        self,
+        *,
+        slack_thread: SlackThread,
+        text: str,
+        user_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> str:
         """Slack 일반 대화 요청에 대한 답변 텍스트를 생성한다."""
         ...
 
@@ -76,17 +91,27 @@ class GitContextProvider(Protocol):
 
 
 @dataclass(frozen=True)
-class WorktreeContext:
-    path: Path
+class ThreadWorkspaceContext:
+    workspace_path: Path
+    repo_path: Path
     source_repo_path: Path
     base_ref: str
 
 
 class WorktreeManager(Protocol):
-    """usecase가 read-only 분석용 git worktree를 준비하기 위해 사용하는 포트."""
+    """usecase가 thread별 workspace와 repo checkout을 준비하기 위해 사용하는 포트."""
 
-    async def prepare_read_only_worktree(self, *, job_id: str, repo_key: str) -> WorktreeContext:
-        """job id와 repo key를 기준으로 격리된 read-only 분석용 worktree를 만든다."""
+    async def prepare_thread_repo_workspace(
+        self,
+        *,
+        slack_thread_id: str,
+        repo_key: str,
+    ) -> ThreadWorkspaceContext:
+        """Slack thread와 repo key를 기준으로 thread workspace 내부 repo checkout을 준비한다."""
+        ...
+
+    async def cleanup_thread_workspace(self, *, slack_thread_id: str) -> None:
+        """Slack thread의 workspace를 정리한다."""
         ...
 
 
@@ -97,6 +122,8 @@ class CodexExecutionResult:
     stderr: str
     exit_code: int | None
     timed_out: bool = False
+    codex_session_id: str | None = None
+    workspace_path: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
@@ -107,9 +134,14 @@ class CodexRunner(Protocol):
     async def run_read_only(
         self,
         *,
-        worktree_path: Path,
+        workspace_path: Path,
         prompt: str,
         timeout_seconds: float,
+        resume_session_id: str | None = None,
     ) -> CodexExecutionResult:
-        """지정한 worktree에서 Codex read-only 분석을 실행하고 출력 결과를 반환한다."""
+        """지정한 workspace에서 Codex read-only 실행 또는 resume을 수행한다."""
+        ...
+
+    async def archive_session(self, *, codex_session_id: str) -> None:
+        """저장된 Codex session을 archive한다."""
         ...

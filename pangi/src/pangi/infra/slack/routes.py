@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from dataclasses import replace
+from time import monotonic
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, HTTPException, Request
@@ -24,6 +27,7 @@ from pangi.usecase.git_context import (
     GitRepoCatalogItem,
     format_repo_catalog_response,
 )
+from pangi.usecase.input_guardrail import route_request_input
 from pangi.usecase.request_decision import (
     GIT_CONTEXT_DISABLED_MESSAGE,
     NOTION_CONTEXT_DISABLED_MESSAGE,
@@ -36,10 +40,25 @@ from pangi.usecase.submit_slack_request import SubmitSlackRequestInput, SubmitSl
 router = APIRouter(prefix="/slack", tags=["slack"])
 _processed_event_ids: set[str] = set()
 logger = logging.getLogger(__name__)
+GIT_REPO_KEYS_CACHE_TTL_SECONDS = 300
+GIT_REPO_KEYS_TIMEOUT_SECONDS = 5
+_allowed_repo_keys_cache: tuple[tuple[str, ...], float] | None = None
+_GIT_REPO_KEYS_OPTIONAL_CLASSIFICATIONS = frozenset(
+    {
+        RequestClassification.BLOCKED_WEB_ANALYSIS,
+        RequestClassification.CODEX_CHAT,
+        RequestClassification.GIT_CONTEXT_CHAT,
+        RequestClassification.NOTION_CONTEXT_CHAT,
+        RequestClassification.REPO_CATALOG,
+        RequestClassification.UNSUPPORTED,
+    }
+)
 
 
 def reset_processed_event_ids() -> None:
     _processed_event_ids.clear()
+    global _allowed_repo_keys_cache
+    _allowed_repo_keys_cache = None
 
 
 async def _verified_body(request: Request) -> bytes:
@@ -69,16 +88,41 @@ def _validate_access(*, user_id: str, channel_id: str) -> None:
 
 
 async def _allowed_repo_keys() -> tuple[str, ...]:
+    global _allowed_repo_keys_cache
     local_repo_keys = get_settings().available_repo_keys()
     provider = get_git_context_provider()
     if provider is None:
         return local_repo_keys
+
+    now = monotonic()
+    if _allowed_repo_keys_cache is not None:
+        keys, expires_at = _allowed_repo_keys_cache
+        if now < expires_at:
+            return keys
+
     try:
-        catalog = await provider.fetch_repo_catalog(local_repo_keys=local_repo_keys)
+        catalog = await asyncio.wait_for(
+            provider.fetch_repo_catalog(local_repo_keys=local_repo_keys),
+            timeout=GIT_REPO_KEYS_TIMEOUT_SECONDS,
+        )
     except Exception as error:
         logger.warning("Failed to fetch Git MCP repo keys: %s", error)
         return local_repo_keys
-    return tuple(item.name for item in catalog.items)
+    keys = tuple(item.name for item in catalog.items)
+    _allowed_repo_keys_cache = (keys, now + GIT_REPO_KEYS_CACHE_TTL_SECONDS)
+    return keys
+
+
+async def _allowed_repo_keys_for_text(text: str) -> tuple[str, ...]:
+    local_repo_keys = get_settings().available_repo_keys()
+    route = route_request_input(text, allowed_repo_keys=local_repo_keys)
+    if (
+        route.decision is not None
+        and not route.needs_ai_orchestrator
+        and route.decision.kind in _GIT_REPO_KEYS_OPTIONAL_CLASSIFICATIONS
+    ):
+        return local_repo_keys
+    return await _allowed_repo_keys()
 
 
 @router.post("/events")
@@ -144,7 +188,7 @@ async def slack_commands(request: Request) -> JSONResponse:
 
     _validate_access(user_id=command.user_id, channel_id=command.channel_id)
     local_repo_keys = get_settings().available_repo_keys()
-    allowed_repo_keys = await _allowed_repo_keys()
+    allowed_repo_keys = await _allowed_repo_keys_for_text(command.text)
     orchestrator = get_request_orchestrator()
     decision = await orchestrator.decide(text=command.text, allowed_repo_keys=allowed_repo_keys)
     if not decision.should_create_job:
@@ -183,6 +227,7 @@ async def slack_commands(request: Request) -> JSONResponse:
         job = repository.create_job(
             event_id=command.event_id or f"slash:{command.channel_id}:{command.user_id}:{thread_ts}",
             slack_thread=thread,
+            codex_session_id=thread.active_codex_session_id,
             requester_user_id=command.user_id,
             prompt=command.text,
             repo_key=decision.repo_key,
@@ -211,6 +256,7 @@ async def slack_interactions(request: Request) -> JSONResponse:
 
 
 async def _process_app_mention(request_input: SubmitSlackRequestInput) -> None:
+    request_input = await _add_initial_in_progress_reaction(request_input)
     use_case = SubmitSlackRequestUseCase(
         repository=get_job_repository(),
         job_queue=get_job_queue(),
@@ -219,13 +265,28 @@ async def _process_app_mention(request_input: SubmitSlackRequestInput) -> None:
         chat_responder=get_chat_responder(),
         notion_context_provider=get_notion_context_provider(),
         git_context_provider=get_git_context_provider(),
-        allowed_repo_keys=await _allowed_repo_keys(),
+        allowed_repo_keys=await _allowed_repo_keys_for_text(request_input.text),
         local_repo_keys=get_settings().available_repo_keys(),
     )
     try:
         await use_case.execute(request_input)
     except Exception as error:
         logger.exception("Failed to process Slack app mention %s: %s", request_input.event_id, error)
+
+
+async def _add_initial_in_progress_reaction(request_input: SubmitSlackRequestInput) -> SubmitSlackRequestInput:
+    if not request_input.message_ts:
+        return request_input
+    try:
+        await get_slack_client().add_reaction(
+            channel_id=request_input.channel_id,
+            message_ts=request_input.message_ts,
+            name="eyes",
+        )
+        return replace(request_input, reaction_already_added=True)
+    except Exception as error:
+        logger.warning("Failed to add early Slack reaction: %s", error)
+        return request_input
 
 
 async def _repo_catalog_text(*, local_repo_keys: tuple[str, ...]) -> str:

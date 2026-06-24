@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from pangi.domain.models import JobStatus
+from pangi.domain.models import JobStatus, SlackThread, ThreadMessageRole
 from pangi.repository import DuplicateEventError, JobRepository
 from pangi.usecase.git_context import (
     GitContextAccessDeniedError,
@@ -30,6 +30,7 @@ from pangi.usecase.request_decision import (
     RequestClassification,
     build_needs_repo_message,
 )
+from pangi.usecase.thread_context import build_thread_context
 from pangi.usecase.ports import (
     ChatResponder,
     GitContextProvider,
@@ -62,6 +63,7 @@ class SubmitSlackRequestInput:
     thread_ts: str
     event_id: str
     message_ts: str
+    reaction_already_added: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,15 +101,24 @@ class SubmitSlackRequestUseCase:
         self._background_runner = background_runner
 
     async def execute(self, request: SubmitSlackRequestInput) -> SubmitSlackRequestResult:
-        await self._add_in_progress_reaction(request)
+        if not request.reaction_already_added:
+            await self._add_in_progress_reaction(request)
+        thread = self._repository.get_or_create_thread(
+            team_id=request.team_id,
+            channel_id=request.channel_id,
+            thread_ts=request.thread_ts,
+        )
+        thread_context = self._build_thread_context(thread)
+        self._record_user_message(thread, request)
         try:
             decision = await self._request_orchestrator.decide(
                 text=request.text,
                 allowed_repo_keys=self._allowed_repo_keys,
+                thread_context=thread_context,
             )
         except Exception:
             logger.exception("Failed to classify Slack request")
-            await self._post_policy_message(request, CLASSIFICATION_FAILURE_MESSAGE)
+            await self._post_policy_message(request, CLASSIFICATION_FAILURE_MESSAGE, slack_thread=thread)
             await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
             return SubmitSlackRequestResult(
                 job_id=None,
@@ -116,7 +127,7 @@ class SubmitSlackRequestUseCase:
             )
 
         if decision.kind == RequestClassification.CODEX_CHAT:
-            self._background_runner(self._post_chat_response(request))
+            self._background_runner(self._post_chat_response(request, thread, thread_context))
             return SubmitSlackRequestResult(
                 job_id=None,
                 job_status=None,
@@ -124,7 +135,7 @@ class SubmitSlackRequestUseCase:
             )
 
         if decision.kind == RequestClassification.NOTION_CONTEXT_CHAT:
-            self._background_runner(self._post_notion_context_response(request))
+            self._background_runner(self._post_notion_context_response(request, thread, thread_context))
             return SubmitSlackRequestResult(
                 job_id=None,
                 job_status=None,
@@ -132,7 +143,7 @@ class SubmitSlackRequestUseCase:
             )
 
         if decision.kind == RequestClassification.GIT_CONTEXT_CHAT:
-            self._background_runner(self._post_git_context_response(request))
+            self._background_runner(self._post_git_context_response(request, thread, thread_context))
             return SubmitSlackRequestResult(
                 job_id=None,
                 job_status=None,
@@ -140,7 +151,7 @@ class SubmitSlackRequestUseCase:
             )
 
         if decision.kind == RequestClassification.REPO_CATALOG:
-            self._background_runner(self._post_repo_catalog_response(request))
+            self._background_runner(self._post_repo_catalog_response(request, thread))
             return SubmitSlackRequestResult(
                 job_id=None,
                 job_status=None,
@@ -148,7 +159,11 @@ class SubmitSlackRequestUseCase:
             )
 
         if not decision.should_create_job:
-            await self._post_policy_message(request, self._reply_text_for_non_job_decision(decision))
+            await self._post_policy_message(
+                request,
+                self._reply_text_for_non_job_decision(decision),
+                slack_thread=thread,
+            )
             await self._replace_in_progress_reaction(request, name=SUCCESS_REACTION_NAME)
             return SubmitSlackRequestResult(
                 job_id=None,
@@ -157,7 +172,11 @@ class SubmitSlackRequestUseCase:
             )
 
         if decision.kind != RequestClassification.REPO_ANALYSIS or decision.repo_key is None:
-            await self._post_policy_message(request, build_needs_repo_message(self._allowed_repo_keys))
+            await self._post_policy_message(
+                request,
+                build_needs_repo_message(self._allowed_repo_keys),
+                slack_thread=thread,
+            )
             await self._replace_in_progress_reaction(request, name=SUCCESS_REACTION_NAME)
             return SubmitSlackRequestResult(
                 job_id=None,
@@ -165,15 +184,11 @@ class SubmitSlackRequestUseCase:
                 classification=RequestClassification.NEEDS_REPO,
             )
 
-        thread = self._repository.get_or_create_thread(
-            team_id=request.team_id,
-            channel_id=request.channel_id,
-            thread_ts=request.thread_ts,
-        )
         try:
             job = self._repository.create_job(
                 event_id=request.event_id,
                 slack_thread=thread,
+                codex_session_id=thread.active_codex_session_id,
                 requester_user_id=request.user_id,
                 prompt=request.text,
                 slack_message_ts=request.message_ts or None,
@@ -248,7 +263,13 @@ class SubmitSlackRequestUseCase:
         except Exception as error:
             logger.warning("Failed to post Slack message: %s", error)
 
-    async def _post_policy_message(self, request: SubmitSlackRequestInput, text: str) -> None:
+    async def _post_policy_message(
+        self,
+        request: SubmitSlackRequestInput,
+        text: str,
+        *,
+        slack_thread: SlackThread,
+    ) -> None:
         if not text:
             return
         safe_text = prepare_output_markdown(text, max_chars=CHAT_REPLY_MAX_CHARS)
@@ -258,13 +279,20 @@ class SubmitSlackRequestUseCase:
                 thread_ts=request.thread_ts,
                 text=safe_text,
             )
+            self._record_assistant_message(slack_thread, safe_text)
         except Exception as error:
             logger.warning("Failed to post Slack policy message: %s", error)
 
-    async def _post_chat_response(self, request: SubmitSlackRequestInput) -> None:
+    async def _post_chat_response(
+        self,
+        request: SubmitSlackRequestInput,
+        slack_thread: SlackThread,
+        thread_context: str,
+    ) -> None:
         succeeded = True
         try:
             response_text = await self._chat_responder.respond(
+                slack_thread=slack_thread,
                 text=request.text,
                 user_id=request.user_id,
                 channel_id=request.channel_id,
@@ -282,6 +310,7 @@ class SubmitSlackRequestUseCase:
                 thread_ts=request.thread_ts,
                 text=safe_text,
             )
+            self._record_assistant_message(slack_thread, safe_text)
             await self._replace_in_progress_reaction(
                 request,
                 name=SUCCESS_REACTION_NAME if succeeded else FAILURE_REACTION_NAME,
@@ -290,7 +319,12 @@ class SubmitSlackRequestUseCase:
             logger.warning("Failed to post Slack chat response: %s", error)
             await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
 
-    async def _post_notion_context_response(self, request: SubmitSlackRequestInput) -> None:
+    async def _post_notion_context_response(
+        self,
+        request: SubmitSlackRequestInput,
+        slack_thread: SlackThread,
+        thread_context: str,
+    ) -> None:
         succeeded = True
         if self._notion_context_provider is None:
             response_text = NOTION_CONTEXT_DISABLED_MESSAGE
@@ -303,6 +337,7 @@ class SubmitSlackRequestUseCase:
                     thread_ts=request.thread_ts,
                 )
                 response_text = await self._chat_responder.respond(
+                    slack_thread=slack_thread,
                     text=build_notion_context_prompt(user_text=request.text, context=context),
                     user_id=request.user_id,
                     channel_id=request.channel_id,
@@ -324,6 +359,7 @@ class SubmitSlackRequestUseCase:
                 thread_ts=request.thread_ts,
                 text=safe_text,
             )
+            self._record_assistant_message(slack_thread, safe_text)
             await self._replace_in_progress_reaction(
                 request,
                 name=SUCCESS_REACTION_NAME if succeeded else FAILURE_REACTION_NAME,
@@ -332,7 +368,12 @@ class SubmitSlackRequestUseCase:
             logger.warning("Failed to post Slack Notion context response: %s", error)
             await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
 
-    async def _post_git_context_response(self, request: SubmitSlackRequestInput) -> None:
+    async def _post_git_context_response(
+        self,
+        request: SubmitSlackRequestInput,
+        slack_thread: SlackThread,
+        thread_context: str,
+    ) -> None:
         succeeded = True
         if self._git_context_provider is None:
             response_text = GIT_CONTEXT_DISABLED_MESSAGE
@@ -345,6 +386,7 @@ class SubmitSlackRequestUseCase:
                     thread_ts=request.thread_ts,
                 )
                 response_text = await self._chat_responder.respond(
+                    slack_thread=slack_thread,
                     text=build_git_context_prompt(user_text=request.text, context=context),
                     user_id=request.user_id,
                     channel_id=request.channel_id,
@@ -366,6 +408,7 @@ class SubmitSlackRequestUseCase:
                 thread_ts=request.thread_ts,
                 text=safe_text,
             )
+            self._record_assistant_message(slack_thread, safe_text)
             await self._replace_in_progress_reaction(
                 request,
                 name=SUCCESS_REACTION_NAME if succeeded else FAILURE_REACTION_NAME,
@@ -374,7 +417,7 @@ class SubmitSlackRequestUseCase:
             logger.warning("Failed to post Slack Git context response: %s", error)
             await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
 
-    async def _post_repo_catalog_response(self, request: SubmitSlackRequestInput) -> None:
+    async def _post_repo_catalog_response(self, request: SubmitSlackRequestInput, slack_thread: SlackThread) -> None:
         succeeded = True
         if self._git_context_provider is None:
             catalog = self._local_repo_catalog()
@@ -395,6 +438,7 @@ class SubmitSlackRequestUseCase:
                 thread_ts=request.thread_ts,
                 text=safe_text,
             )
+            self._record_assistant_message(slack_thread, safe_text)
             await self._replace_in_progress_reaction(
                 request,
                 name=SUCCESS_REACTION_NAME if succeeded else FAILURE_REACTION_NAME,
@@ -408,3 +452,36 @@ class SubmitSlackRequestUseCase:
             items=tuple(GitRepoCatalogItem(name=repo_key, status="ready") for repo_key in self._local_repo_keys),
             git_mcp_enabled=False,
         )
+
+    def _build_thread_context(self, slack_thread: SlackThread) -> str:
+        messages = self._repository.list_thread_messages(slack_thread.id, limit=20)
+        return build_thread_context(messages)
+
+    def _record_user_message(self, slack_thread: SlackThread, request: SubmitSlackRequestInput) -> None:
+        try:
+            self._repository.append_thread_message(
+                slack_thread_id=slack_thread.id,
+                role=ThreadMessageRole.USER,
+                text=request.text,
+                message_ts=request.message_ts or None,
+                event_id=request.event_id or None,
+            )
+        except Exception as error:
+            logger.warning("Failed to record Slack user message: %s", error)
+
+    def _record_assistant_message(
+        self,
+        slack_thread: SlackThread,
+        text: str,
+        *,
+        source_job_id: str | None = None,
+    ) -> None:
+        try:
+            self._repository.append_thread_message(
+                slack_thread_id=slack_thread.id,
+                role=ThreadMessageRole.ASSISTANT,
+                text=text,
+                source_job_id=source_job_id,
+            )
+        except Exception as error:
+            logger.warning("Failed to record Slack assistant message: %s", error)

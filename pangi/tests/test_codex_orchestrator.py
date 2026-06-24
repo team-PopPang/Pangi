@@ -21,9 +21,11 @@ class FakeInnerOrchestrator:
     def __init__(self, decision):
         self.decision = decision
         self.calls = []
+        self.thread_contexts = []
 
-    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]):
+    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...], thread_context: str = ""):
         self.calls.append({"text": text, "allowed_repo_keys": allowed_repo_keys})
+        self.thread_contexts.append(thread_context)
         return self.decision
 
 
@@ -38,6 +40,18 @@ def test_codex_orchestrator_loads_instructions_from_markdown():
     assert "repo_analysis" in prompt
     assert "Allowed repo keys:\nPopPang-iOS" in prompt
     assert "Slack message:\nPopPang-iOS 구조 분석해줘" in prompt
+
+
+def test_codex_orchestrator_prompt_includes_thread_context():
+    prompt = _build_orchestrator_prompt(
+        text="그럼 iOS도 봐줘",
+        allowed_repo_keys=("PopPang-iOS",),
+        thread_context="이전 Slack thread 대화:\n- 사용자: PopPang-AOS 봐줘",
+    )
+
+    assert "이전 Slack thread 대화" in prompt
+    assert "PopPang-AOS 봐줘" in prompt
+    assert "Slack message:\n그럼 iOS도 봐줘" in prompt
 
 
 def test_codex_orchestrator_builds_codex_exec_command(tmp_path):
@@ -229,6 +243,7 @@ def test_guarded_orchestrator_calls_inner_only_for_ambiguous_request():
         result = await orchestrator.decide(
             text="어제 말한 그 흐름 좀 봐줘",
             allowed_repo_keys=("PopPang-iOS",),
+            thread_context="이전 Slack thread 대화:\n- 팡이: 로그인 흐름을 봤습니다.",
         )
 
         assert result.kind == RequestClassification.CODEX_CHAT
@@ -239,6 +254,7 @@ def test_guarded_orchestrator_calls_inner_only_for_ambiguous_request():
                 "allowed_repo_keys": ("PopPang-iOS",),
             }
         ]
+        assert inner.thread_contexts == ["이전 Slack thread 대화:\n- 팡이: 로그인 흐름을 봤습니다."]
 
     asyncio.run(scenario())
 

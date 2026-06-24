@@ -47,7 +47,13 @@ class CodexRequestOrchestratorError(RuntimeError):
 
 
 class DeterministicRequestOrchestrator:
-    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
+    async def decide(
+        self,
+        *,
+        text: str,
+        allowed_repo_keys: tuple[str, ...],
+        thread_context: str = "",
+    ) -> ClassifiedRequest:
         return decide_guarded_request(text, allowed_repo_keys=allowed_repo_keys)
 
 
@@ -55,12 +61,22 @@ class DeterministicRequestOrchestrator:
 class GuardedRequestOrchestrator:
     orchestrator: RequestOrchestrator
 
-    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
+    async def decide(
+        self,
+        *,
+        text: str,
+        allowed_repo_keys: tuple[str, ...],
+        thread_context: str = "",
+    ) -> ClassifiedRequest:
         guardrail_route = route_request_input(text, allowed_repo_keys=allowed_repo_keys)
         if guardrail_route.decision is not None and not guardrail_route.needs_ai_orchestrator:
             return guardrail_route.decision
 
-        decision = await self.orchestrator.decide(text=text, allowed_repo_keys=allowed_repo_keys)
+        decision = await self.orchestrator.decide(
+            text=text,
+            allowed_repo_keys=allowed_repo_keys,
+            thread_context=thread_context,
+        )
         return enforce_orchestrator_decision(
             decision,
             text=text,
@@ -76,10 +92,20 @@ class CodexRequestOrchestrator:
     timeout_seconds: float = 20
     workspace_path: Path | None = None
 
-    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]) -> ClassifiedRequest:
+    async def decide(
+        self,
+        *,
+        text: str,
+        allowed_repo_keys: tuple[str, ...],
+        thread_context: str = "",
+    ) -> ClassifiedRequest:
         workspace = self._workspace_path()
         workspace.mkdir(parents=True, exist_ok=True)
-        prompt = _build_orchestrator_prompt(text=text, allowed_repo_keys=allowed_repo_keys)
+        prompt = _build_orchestrator_prompt(
+            text=text,
+            allowed_repo_keys=allowed_repo_keys,
+            thread_context=thread_context,
+        )
 
         with tempfile.TemporaryDirectory(prefix="pangi-orchestrator-") as temp_dir:
             temp_path = Path(temp_dir)
@@ -164,8 +190,14 @@ class CodexRequestOrchestrator:
         )
 
 
-def _build_orchestrator_prompt(*, text: str, allowed_repo_keys: tuple[str, ...]) -> str:
+def _build_orchestrator_prompt(
+    *,
+    text: str,
+    allowed_repo_keys: tuple[str, ...],
+    thread_context: str = "",
+) -> str:
     repo_list = ", ".join(allowed_repo_keys) or "(none)"
+    context_section = f"\n{thread_context}\n" if thread_context else ""
     return f"""\
 {_load_orchestrator_instructions()}
 
@@ -173,7 +205,7 @@ def _build_orchestrator_prompt(*, text: str, allowed_repo_keys: tuple[str, ...])
 
 Allowed repo keys:
 {repo_list}
-
+{context_section}
 Slack message:
 {text}
 """

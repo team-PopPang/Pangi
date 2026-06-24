@@ -74,15 +74,16 @@ def test_worktree_manager_creates_detached_read_only_worktree(tmp_path):
         settings = settings_for(tmp_path, source_repo)
         manager = GitWorktreeManager(settings=settings)
 
-        context = await manager.prepare_read_only_worktree(
-            job_id="job_123",
+        context = await manager.prepare_thread_repo_workspace(
+            slack_thread_id="thread_123",
             repo_key="PopPang-iOS",
         )
 
-        assert context.path == settings.worktree_path_for_job("job_123")
+        assert context.workspace_path == settings.thread_workspace_path("thread_123")
+        assert context.repo_path == settings.repo_workspace_path("thread_123", "PopPang-iOS")
         assert context.base_ref == "origin/develop"
-        assert (context.path / "README.md").read_text(encoding="utf-8") == "# Pangi test repo\n"
-        assert run_git(context.path, "branch", "--show-current").strip() == ""
+        assert (context.repo_path / "README.md").read_text(encoding="utf-8") == "# Pangi test repo\n"
+        assert run_git(context.repo_path, "branch", "--show-current").strip() == ""
 
     asyncio.run(scenario())
 
@@ -93,13 +94,13 @@ def test_worktree_manager_falls_back_to_main_when_develop_is_missing(tmp_path):
         settings = settings_for(tmp_path, source_repo)
         manager = GitWorktreeManager(settings=settings)
 
-        context = await manager.prepare_read_only_worktree(
-            job_id="job_123",
+        context = await manager.prepare_thread_repo_workspace(
+            slack_thread_id="thread_123",
             repo_key="PopPang-iOS",
         )
 
         assert context.base_ref == "origin/main"
-        assert (context.path / "README.md").is_file()
+        assert (context.repo_path / "README.md").is_file()
 
     asyncio.run(scenario())
 
@@ -116,13 +117,13 @@ def test_worktree_manager_clones_missing_org_repo_before_creating_worktree(tmp_p
         )
         manager = GitWorktreeManager(settings=settings, command_timeout_seconds=10)
 
-        context = await manager.prepare_read_only_worktree(
-            job_id="job_clone",
+        context = await manager.prepare_thread_repo_workspace(
+            slack_thread_id="thread_clone",
             repo_key="PopPang-BE",
         )
 
         assert settings.repo_path_for_key("PopPang-BE").is_dir()
-        assert (context.path / "README.md").read_text(encoding="utf-8") == "# PopPang-BE\n"
+        assert (context.repo_path / "README.md").read_text(encoding="utf-8") == "# PopPang-BE\n"
 
     asyncio.run(scenario())
 
@@ -135,7 +136,7 @@ def test_worktree_manager_rejects_missing_git_repo(tmp_path):
         manager = GitWorktreeManager(settings=settings_for(tmp_path, source_repo))
 
         with pytest.raises(GitCommandError):
-            await manager.prepare_read_only_worktree(job_id="job_123", repo_key="PopPang-iOS")
+            await manager.prepare_thread_repo_workspace(slack_thread_id="thread_123", repo_key="PopPang-iOS")
 
     asyncio.run(scenario())
 
@@ -144,10 +145,26 @@ def test_worktree_manager_rejects_existing_worktree_path(tmp_path):
     async def scenario():
         source_repo = create_source_repo(tmp_path)
         settings = settings_for(tmp_path, source_repo)
-        settings.worktree_path_for_job("job_123").mkdir(parents=True)
+        manager = GitWorktreeManager(settings=settings)
+
+        first = await manager.prepare_thread_repo_workspace(slack_thread_id="thread_123", repo_key="PopPang-iOS")
+        second = await manager.prepare_thread_repo_workspace(slack_thread_id="thread_123", repo_key="PopPang-iOS")
+
+        assert first.repo_path == second.repo_path
+
+    asyncio.run(scenario())
+
+
+def test_worktree_manager_rejects_existing_file_at_repo_workspace_path(tmp_path):
+    async def scenario():
+        source_repo = create_source_repo(tmp_path)
+        settings = settings_for(tmp_path, source_repo)
+        repo_path = settings.repo_workspace_path("thread_123", "PopPang-iOS")
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+        repo_path.write_text("not-a-directory", encoding="utf-8")
         manager = GitWorktreeManager(settings=settings)
 
         with pytest.raises(WorktreePathExistsError):
-            await manager.prepare_read_only_worktree(job_id="job_123", repo_key="PopPang-iOS")
+            await manager.prepare_thread_repo_workspace(slack_thread_id="thread_123", repo_key="PopPang-iOS")
 
     asyncio.run(scenario())

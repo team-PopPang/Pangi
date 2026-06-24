@@ -55,18 +55,28 @@ class FakeSlack:
 class FakeOrchestrator:
     def __init__(self, decision):
         self.decision = decision
+        self.thread_contexts = []
 
-    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]):
+    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...], thread_context: str = ""):
+        self.thread_contexts.append(thread_context)
         return self.decision
 
 
 class FailingOrchestrator:
-    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...]):
+    async def decide(self, *, text: str, allowed_repo_keys: tuple[str, ...], thread_context: str = ""):
         raise RuntimeError("classification boom")
 
 
 class FakeChatResponder:
-    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+    async def respond(
+        self,
+        *,
+        slack_thread,
+        text: str,
+        user_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> str:
         return f"답장: {text}"
 
 
@@ -74,9 +84,18 @@ class CapturingChatResponder:
     def __init__(self):
         self.requests = []
 
-    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+    async def respond(
+        self,
+        *,
+        slack_thread,
+        text: str,
+        user_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> str:
         self.requests.append(
             {
+                "slack_thread_id": slack_thread.id,
                 "text": text,
                 "user_id": user_id,
                 "channel_id": channel_id,
@@ -87,12 +106,28 @@ class CapturingChatResponder:
 
 
 class MarkdownChatResponder:
-    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+    async def respond(
+        self,
+        *,
+        slack_thread,
+        text: str,
+        user_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> str:
         return "# 결론\n**강조** [문서](https://example.com)"
 
 
 class FailingChatResponder:
-    async def respond(self, *, text: str, user_id: str, channel_id: str, thread_ts: str) -> str:
+    async def respond(
+        self,
+        *,
+        slack_thread,
+        text: str,
+        user_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> str:
         raise RuntimeError("boom")
 
 
@@ -156,15 +191,20 @@ class AccessDeniedGitContextProvider:
         raise GitContextAccessDeniedError("not allowed")
 
 
-def make_request(text: str = "안녕") -> SubmitSlackRequestInput:
+def make_request(
+    text: str = "안녕",
+    *,
+    event_id: str = "Ev123",
+    message_ts: str = "1710000000.000002",
+) -> SubmitSlackRequestInput:
     return SubmitSlackRequestInput(
         team_id="T123",
         channel_id="C123",
         user_id="U123",
         text=text,
         thread_ts="1710000000.000001",
-        event_id="Ev123",
-        message_ts="1710000000.000002",
+        event_id=event_id,
+        message_ts=message_ts,
     )
 
 
@@ -226,6 +266,84 @@ def test_codex_chat_posts_reply_without_repo_job(tmp_path):
                 "text": "답장: 안녕",
             }
         ]
+
+    asyncio.run(scenario())
+
+
+def test_codex_chat_records_thread_messages(tmp_path):
+    async def scenario():
+        repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
+        queue = FakeQueue()
+        slack = FakeSlack()
+        tasks = []
+
+        def collect_task(task):
+            tasks.append(task)
+
+        use_case = SubmitSlackRequestUseCase(
+            repository=repository,
+            job_queue=queue,
+            slack_notifier=slack,
+            request_orchestrator=FakeOrchestrator(
+                ClassifiedRequest(
+                    kind=RequestClassification.CODEX_CHAT,
+                    should_create_job=False,
+                )
+            ),
+            chat_responder=FakeChatResponder(),
+            allowed_repo_keys=("PopPang-iOS",),
+            background_runner=collect_task,
+        )
+
+        await use_case.execute(make_request("안녕"))
+        await asyncio.gather(*tasks)
+
+        thread = repository.list_threads(limit=1)[0]
+        messages = repository.list_thread_messages(thread.id, limit=10)
+        assert [message.role.value for message in messages] == ["user", "assistant"]
+        assert [message.text for message in messages] == ["안녕", "답장: 안녕"]
+        assert messages[0].event_id == "Ev123"
+
+    asyncio.run(scenario())
+
+
+def test_codex_chat_keeps_same_slack_thread_between_turns(tmp_path):
+    async def scenario():
+        repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
+        queue = FakeQueue()
+        slack = FakeSlack()
+        chat = CapturingChatResponder()
+        orchestrator = FakeOrchestrator(
+            ClassifiedRequest(
+                kind=RequestClassification.CODEX_CHAT,
+                should_create_job=False,
+            )
+        )
+        tasks = []
+
+        def collect_task(task):
+            tasks.append(task)
+
+        use_case = SubmitSlackRequestUseCase(
+            repository=repository,
+            job_queue=queue,
+            slack_notifier=slack,
+            request_orchestrator=orchestrator,
+            chat_responder=chat,
+            allowed_repo_keys=("PopPang-iOS",),
+            background_runner=collect_task,
+        )
+
+        await use_case.execute(make_request("안녕", event_id="Ev1", message_ts="1710000000.000002"))
+        await asyncio.gather(*tasks)
+        tasks.clear()
+
+        await use_case.execute(make_request("방금 말한 거 이어서 설명해줘", event_id="Ev2", message_ts="1710000000.000003"))
+        await asyncio.gather(*tasks)
+
+        assert chat.requests[0]["slack_thread_id"] == chat.requests[1]["slack_thread_id"]
+        assert orchestrator.thread_contexts[0] == ""
+        assert "이전 Slack thread 대화" in orchestrator.thread_contexts[1]
 
     asyncio.run(scenario())
 

@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from pangi.domain.models import AgentJob, CodexRun, JobStatus, JobType, SlackThread
+from pangi.domain.models import (
+    AgentJob,
+    CodexRun,
+    CodexSession,
+    CodexSessionStatus,
+    JobStatus,
+    JobType,
+    SlackThread,
+    ThreadMessage,
+    ThreadMessageRole,
+)
 
 
 DEFAULT_REPO_KEY = "PopPang-iOS"
@@ -21,11 +31,32 @@ class JobRepository(Protocol):
         """Slack thread 식별자로 thread record를 조회하거나 새로 만든다."""
         ...
 
+    def append_thread_message(
+        self,
+        *,
+        slack_thread_id: str,
+        role: ThreadMessageRole,
+        text: str,
+        message_ts: str | None = None,
+        event_id: str | None = None,
+        source_job_id: str | None = None,
+    ) -> ThreadMessage:
+        """Slack thread 안의 user/assistant turn을 저장하고 반환한다.
+
+        `event_id`가 있는 user message는 Slack retry에도 중복 저장되지 않아야 한다.
+        """
+        ...
+
+    def list_thread_messages(self, slack_thread_id: str, *, limit: int = 20) -> list[ThreadMessage]:
+        """prompt context에 사용할 최근 thread message를 오래된 순서로 반환한다."""
+        ...
+
     def create_job(
         self,
         *,
         event_id: str,
         slack_thread: SlackThread,
+        codex_session_id: str | None,
         requester_user_id: str,
         prompt: str,
         slack_message_ts: str | None = None,
@@ -62,6 +93,7 @@ class JobRepository(Protocol):
         job_id: str,
         *,
         worktree_path: str | None = None,
+        codex_session_id: str | None = None,
         stdout: str | None = None,
         stderr: str | None = None,
         error_message: str | None = None,
@@ -73,6 +105,7 @@ class JobRepository(Protocol):
         self,
         *,
         job_id: str,
+        codex_session_id: str | None,
         mode: str,
         command: str,
         prompt: str,
@@ -80,10 +113,53 @@ class JobRepository(Protocol):
         stderr: str | None = None,
         exit_code: int | None = None,
         timed_out: bool = False,
+        workspace_path: str | None = None,
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
     ) -> CodexRun:
         """job 안에서 실행된 Codex 실행 기록을 저장하고 반환한다."""
+        ...
+
+    def get_active_codex_session(self, slack_thread_id: str) -> CodexSession | None:
+        """Slack thread의 현재 활성 Codex session을 조회한다."""
+        ...
+
+    def create_codex_session(
+        self,
+        *,
+        slack_thread_id: str,
+        codex_thread_id: str,
+        workspace_path: str,
+        status: CodexSessionStatus,
+        last_used_at: datetime,
+        expires_at: datetime,
+    ) -> CodexSession:
+        """Slack thread의 활성 Codex session을 생성하고 thread에 연결한다."""
+        ...
+
+    def update_codex_session_activity(
+        self,
+        codex_session_id: str,
+        *,
+        status: CodexSessionStatus | None = None,
+        last_used_at: datetime | None = None,
+        expires_at: datetime | None = None,
+    ) -> CodexSession:
+        """Codex session의 상태와 activity timestamp를 갱신한다."""
+        ...
+
+    def archive_codex_session(
+        self,
+        codex_session_id: str,
+        *,
+        status: CodexSessionStatus,
+        archived_at: datetime | None,
+    ) -> CodexSession:
+        """Codex session을 archive 상태로 바꾸고 thread의 active 연결을 해제한다."""
+        ...
+
+    def list_expired_active_codex_sessions(self, *, now: datetime, limit: int = 100) -> list[CodexSession]:
+        """idle timeout을 지난 활성 Codex session 목록을 반환한다."""
         ...
 
     def list_threads(self, *, limit: int = 50) -> list[SlackThread]:

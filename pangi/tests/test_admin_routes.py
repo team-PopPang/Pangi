@@ -114,6 +114,7 @@ def seed_job(repository):
     return repository.create_job(
         event_id="Ev123",
         slack_thread=thread,
+        codex_session_id=None,
         requester_user_id="U123",
         prompt="<script>alert('x')</script>",
     )
