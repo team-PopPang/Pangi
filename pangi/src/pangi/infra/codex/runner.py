@@ -130,6 +130,7 @@ class CodexExecRunner:
                 *self.command_prefix,
                 "resume",
                 resume_session_id,
+                "--skip-git-repo-check",
                 "--json",
                 "--output-last-message",
                 str(output_path),

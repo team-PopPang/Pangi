@@ -152,7 +152,13 @@ def test_codex_runner_resume_reuses_existing_session_id(tmp_path):
         )
 
         args = json.loads(result.stdout)
-        assert args[:4] == ["resume", "codex-thread-123", "--json", "--output-last-message"]
+        assert args[:5] == [
+            "resume",
+            "codex-thread-123",
+            "--skip-git-repo-check",
+            "--json",
+            "--output-last-message",
+        ]
         assert result.codex_session_id == "codex-thread-123"
 
     asyncio.run(scenario())
