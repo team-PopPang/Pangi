@@ -154,6 +154,16 @@ def test_input_guardrail_routes_poppang_team_repo_output_as_catalog():
     assert route.features.has_repo_catalog_intent is True
 
 
+def test_input_guardrail_routes_github_repo_discovery_as_catalog():
+    route = route_request_input("깃허브레포 뭐뭐 분석가능해", allowed_repo_keys=("PopPang-iOS",))
+
+    assert route.needs_ai_orchestrator is False
+    assert route.decision is not None
+    assert route.decision.kind == RequestClassification.REPO_CATALOG
+    assert route.decision.should_create_job is False
+    assert route.features.has_repo_catalog_intent is True
+
+
 def test_input_guardrail_resolves_ios_alias_to_repo_analysis():
     route = route_request_input(
         "ios 팀원이 어떤 UI를 개편하고 있는지 분석해줄래?",

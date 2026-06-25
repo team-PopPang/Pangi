@@ -174,6 +174,8 @@ REPO_CATALOG_PHRASES = (
 REPO_CATALOG_SCOPE_KEYWORDS = (
     "팝팡",
     "poppang",
+    "깃허브",
+    "github",
     "팀",
     "조직",
     "org",
@@ -190,6 +192,16 @@ REPO_CATALOG_ACTION_KEYWORDS = (
     "전체",
     "catalog",
     "list",
+)
+REPO_CATALOG_DISCOVERY_KEYWORDS = (
+    "가능",
+    "분석가능",
+    "분석 가능",
+    "분석가능해",
+    "어떤",
+    "무슨",
+    "뭐",
+    "뭐뭐",
 )
 REPO_PLATFORM_ALIASES = {
     "ios": ("ios", "아이오에스", "아이폰", "iphone"),
@@ -544,7 +556,11 @@ def extract_request_features(text: str, *, allowed_repo_keys: Iterable[str] = ()
     has_notion_write_intent = has_notion_keyword and _has_any(lowered, NOTION_WRITE_KEYWORDS, matched_terms)
     if has_notion_url:
         matched_terms.append("notion-url")
-    has_repo_catalog_intent = _has_repo_catalog_intent(normalized, matched_terms)
+    has_repo_catalog_intent = _has_repo_catalog_intent(
+        normalized,
+        matched_terms,
+        repo_key=repo_key,
+    )
     has_git_context_intent = (
         not has_notion_intent
         and not has_repo_catalog_intent
@@ -618,7 +634,12 @@ def _has_any(text: str, keywords: Iterable[str], matched_terms: list[str] | None
     return False
 
 
-def _has_repo_catalog_intent(text: str, matched_terms: list[str] | None = None) -> bool:
+def _has_repo_catalog_intent(
+    text: str,
+    matched_terms: list[str] | None = None,
+    *,
+    repo_key: str | None = None,
+) -> bool:
     lowered = text.lower()
     compacted = _compact_text(text)
     for phrase in REPO_CATALOG_PHRASES:
@@ -626,10 +647,15 @@ def _has_repo_catalog_intent(text: str, matched_terms: list[str] | None = None) 
             if matched_terms is not None:
                 matched_terms.append(phrase)
             return True
+    if repo_key is not None:
+        return False
     if (
         _has_compact_any(compacted, REPO_CATALOG_SCOPE_KEYWORDS)
         and _has_compact_any(compacted, REPO_TARGET_KEYWORDS)
-        and _has_compact_any(compacted, REPO_CATALOG_ACTION_KEYWORDS)
+        and (
+            _has_compact_any(compacted, REPO_CATALOG_ACTION_KEYWORDS)
+            or _has_compact_any(compacted, REPO_CATALOG_DISCOVERY_KEYWORDS)
+        )
     ):
         if matched_terms is not None:
             matched_terms.append("team-repo-catalog")

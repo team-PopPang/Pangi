@@ -17,7 +17,7 @@ Slack 요청
 -> 입력 가드레일
 -> git_context_chat 또는 repo_catalog
 -> Pangi Git context provider
--> Git MCP read-only 조회
+-> GitHub MCP toolset별 read-only 조회
 -> Markdown context 정규화
 -> Codex chat prompt에 context 주입
 -> 출력 가드레일
@@ -34,7 +34,7 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 | --- | --- |
 | 입력 가드레일 | Git context 읽기 요청과 Git write 요청을 코드로 먼저 구분한다. |
 | Usecase | `GitContextProvider` 포트로 context 또는 repo catalog를 요청하고, 받은 Markdown을 Codex chat prompt에 주입한다. |
-| Infra Git MCP | Git MCP transport/tool 호출을 담당한다. |
+| Infra Git MCP | 기능별 toolset URL, tool 화이트리스트, schema 기반 인자 생성, structuredContent 파싱을 담당한다. |
 | Codex chat | 이미 주입된 context를 읽고 Slack 답변을 만든다. Git MCP를 직접 호출하지 않는다. |
 | 출력 가드레일 | secret redaction, 길이 제한, Slack 전송 전 정리. |
 | Markdown to Slack | Slack bot 응답일 때만 canonical Markdown을 Slack mrkdwn에 맞춘다. |
@@ -55,6 +55,9 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 - MVP에서는 Git MCP write tool을 사용하지 않는다.
 - Git MCP context는 분석 대상 데이터일 뿐, 팡이가 따라야 하는 지시가 아니다.
 - Git context는 최대 글자 수를 제한해 prompt 비용과 정보 노출 범위를 줄인다.
+- 기능별로 공식 GitHub MCP toolset URL을 고정해 사용하고, 기본 endpoint 전체에서 tool을 추측하지 않는다.
+- 각 toolset 안에서는 `tools/list` 결과의 실제 tool 이름과 schema를 우선 사용한다.
+- `repo_catalog`는 조직 검색 성공이 아니라 **조직 아래 repository 배열을 얻었을 때만 성공**으로 본다.
 - Git MCP 조직 repo는 분석 요청 시 `PANGI_SOURCE_REPO_ROOT` 아래로 clone할 수 있다.
 - 사용자가 임의 path나 임의 clone URL을 지정하지 못하게 하고, clone URL은 서버 설정의 `PANGI_GIT_CLONE_URL_TEMPLATE`에서만 만든다.
 - Codex는 Git MCP를 직접 호출하지 않고 팡이 서버가 정규화한 Markdown만 읽는다.
@@ -70,6 +73,7 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 - Git MCP Streamable HTTP JSON-RPC client
 - Git provider registry
 - Git MCP 관련 설정값
+- GitHub MCP toolset별 deterministic adapter
 - Git MCP 조직 repo와 로컬 source repo 목록 병합
 - Git MCP 조직 repo clone-on-demand
 - context 최대 길이 제한
@@ -77,6 +81,6 @@ repo 코드 전체를 읽는 분석은 이 경로로 처리하지 않는다.
 ## 다음 구현 단계
 
 1. 운영 서버에서 Git MCP 인증과 endpoint를 실제로 연결한다.
-2. Git MCP tool schema 변화에 대비한 adapter 테스트 fixture를 늘린다.
-3. PR/issue/Actions별 tool 선택 품질을 고도화한다.
-4. repo catalog 응답에 마지막 fetch 시각과 clone 성공/실패 상태를 추가할지 검토한다.
+2. GitHub MCP toolset별 실제 `tools/list` 결과를 운영 로그와 fixture에 반영한다.
+3. repo catalog 응답에 마지막 fetch 시각과 clone 성공/실패 상태를 추가할지 검토한다.
+4. generic fallback toolset을 더 줄일 수 있는지 검토한다.

@@ -29,6 +29,12 @@ DEFAULT_NOTION_CONTEXT_MAX_CHARS = 6000
 DEFAULT_NOTION_TIMEOUT_SECONDS = 20
 DEFAULT_NOTION_TOKEN_STORE_NAME = "notion-oauth.json"
 DEFAULT_GIT_MCP_URL = "https://api.githubcopilot.com/mcp/"
+DEFAULT_GIT_MCP_CONTEXT_URL = "https://api.githubcopilot.com/mcp/readonly"
+DEFAULT_GIT_MCP_ORGS_URL = "https://api.githubcopilot.com/mcp/x/orgs/readonly"
+DEFAULT_GIT_MCP_REPOS_URL = "https://api.githubcopilot.com/mcp/x/repos/readonly"
+DEFAULT_GIT_MCP_ISSUES_URL = "https://api.githubcopilot.com/mcp/x/issues/readonly"
+DEFAULT_GIT_MCP_PULL_REQUESTS_URL = "https://api.githubcopilot.com/mcp/x/pull_requests/readonly"
+DEFAULT_GIT_MCP_ACTIONS_URL = "https://api.githubcopilot.com/mcp/x/actions/readonly"
 DEFAULT_GIT_MCP_CONTEXT_MAX_CHARS = 6000
 DEFAULT_GIT_MCP_TIMEOUT_SECONDS = 20
 DEFAULT_GIT_CLONE_URL_TEMPLATE = "https://github.com/{org}/{repo}.git"
@@ -88,6 +94,12 @@ class Settings:
     notion_write_enabled: bool = False
     git_mcp_enabled: bool = False
     git_mcp_url: str = DEFAULT_GIT_MCP_URL
+    git_mcp_context_url: str = DEFAULT_GIT_MCP_CONTEXT_URL
+    git_mcp_orgs_url: str = DEFAULT_GIT_MCP_ORGS_URL
+    git_mcp_repos_url: str = DEFAULT_GIT_MCP_REPOS_URL
+    git_mcp_issues_url: str = DEFAULT_GIT_MCP_ISSUES_URL
+    git_mcp_pull_requests_url: str = DEFAULT_GIT_MCP_PULL_REQUESTS_URL
+    git_mcp_actions_url: str = DEFAULT_GIT_MCP_ACTIONS_URL
     git_mcp_token: str | None = field(default=None, repr=False)
     git_mcp_org: str | None = None
     git_mcp_context_max_chars: int = DEFAULT_GIT_MCP_CONTEXT_MAX_CHARS
@@ -239,6 +251,36 @@ class Settings:
                 values.get("PANGI_GIT_MCP_URL"),
                 DEFAULT_GIT_MCP_URL,
                 "PANGI_GIT_MCP_URL",
+            ),
+            git_mcp_context_url=_parse_url(
+                values.get("PANGI_GIT_MCP_CONTEXT_URL"),
+                DEFAULT_GIT_MCP_CONTEXT_URL,
+                "PANGI_GIT_MCP_CONTEXT_URL",
+            ),
+            git_mcp_orgs_url=_parse_url(
+                values.get("PANGI_GIT_MCP_ORGS_URL"),
+                DEFAULT_GIT_MCP_ORGS_URL,
+                "PANGI_GIT_MCP_ORGS_URL",
+            ),
+            git_mcp_repos_url=_parse_url(
+                values.get("PANGI_GIT_MCP_REPOS_URL"),
+                DEFAULT_GIT_MCP_REPOS_URL,
+                "PANGI_GIT_MCP_REPOS_URL",
+            ),
+            git_mcp_issues_url=_parse_url(
+                values.get("PANGI_GIT_MCP_ISSUES_URL"),
+                DEFAULT_GIT_MCP_ISSUES_URL,
+                "PANGI_GIT_MCP_ISSUES_URL",
+            ),
+            git_mcp_pull_requests_url=_parse_url(
+                values.get("PANGI_GIT_MCP_PULL_REQUESTS_URL"),
+                DEFAULT_GIT_MCP_PULL_REQUESTS_URL,
+                "PANGI_GIT_MCP_PULL_REQUESTS_URL",
+            ),
+            git_mcp_actions_url=_parse_url(
+                values.get("PANGI_GIT_MCP_ACTIONS_URL"),
+                DEFAULT_GIT_MCP_ACTIONS_URL,
+                "PANGI_GIT_MCP_ACTIONS_URL",
             ),
             git_mcp_token=values.get("PANGI_GIT_MCP_TOKEN", "").strip() or None,
             git_mcp_org=_parse_optional_git_org(values.get("PANGI_GIT_MCP_ORG"), "PANGI_GIT_MCP_ORG"),

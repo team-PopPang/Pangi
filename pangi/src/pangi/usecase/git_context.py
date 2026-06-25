@@ -72,13 +72,19 @@ def build_git_context_prompt(*, user_text: str, context: GitContext) -> str:
 
 def format_repo_catalog_response(catalog: GitRepoCatalog) -> str:
     if not catalog.items:
-        return "현재 팡이가 분석할 수 있는 repo를 찾지 못했습니다. 서버의 source repo root 설정을 확인해주세요."
+        if catalog.git_mcp_enabled:
+            return "현재 팡이가 분석할 수 있는 repo를 찾지 못했습니다. Git MCP 조직 repo와 로컬 clone 상태를 함께 확인해주세요."
+        return (
+            "현재 팡이가 분석할 수 있는 repo를 찾지 못했습니다. "
+            "Git MCP가 비활성 또는 조회 실패라 로컬 clone만 확인했습니다. "
+            "서버의 PANGI_SOURCE_REPO_ROOT 또는 Git MCP 설정을 확인해주세요."
+        )
 
     lines = ["현재 팡이가 볼 수 있는 repo 상태예요."]
     if catalog.org:
         lines.append(f"Git MCP 조직: {catalog.org}")
     if not catalog.git_mcp_enabled:
-        lines.append("Git MCP는 아직 연결되지 않아 로컬 clone 기준으로만 정리했습니다.")
+        lines.append("Git MCP가 비활성 또는 조회 실패라 로컬 clone 기준으로만 정리했습니다.")
     lines.append("")
 
     for item in catalog.items:

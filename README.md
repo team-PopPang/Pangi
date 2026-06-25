@@ -95,6 +95,7 @@ flowchart TD
 - 입력 가드레일 기반 외부 웹/쓰기 요청 조기 차단과 1차 라우팅
 - Notion 문서 읽기 요청의 별도 분류와 공식 MCP 기반 Notion context provider
 - Git MCP context 요청과 repo catalog 요청의 별도 분류
+- Git MCP toolset 고정 기반 deterministic adapter
 - 애매한 요청만 처리하는 Codex CLI 기반 orchestrator adapter
 - Slack thread별 active Codex session 생성/재사용
 - Slack thread별 active thread workspace 생성/재사용
@@ -373,6 +374,12 @@ PANGI_ADMIN_PASSWORD=
 | `PANGI_NOTION_WRITE_ENABLED` | `0` | 예약 설정값. MVP에서는 Notion write 요청을 지원하지 않음 |
 | `PANGI_GIT_MCP_ENABLED` | `0` | Git MCP context provider 사용 여부 |
 | `PANGI_GIT_MCP_URL` | `https://api.githubcopilot.com/mcp/` | Git MCP Streamable HTTP endpoint |
+| `PANGI_GIT_MCP_CONTEXT_URL` | `https://api.githubcopilot.com/mcp/readonly` | generic Git context fallback toolset URL |
+| `PANGI_GIT_MCP_ORGS_URL` | `https://api.githubcopilot.com/mcp/x/orgs/readonly` | repo catalog용 GitHub Organizations toolset URL |
+| `PANGI_GIT_MCP_REPOS_URL` | `https://api.githubcopilot.com/mcp/x/repos/readonly` | repo metadata/context용 GitHub Repositories toolset URL |
+| `PANGI_GIT_MCP_ISSUES_URL` | `https://api.githubcopilot.com/mcp/x/issues/readonly` | issue context용 GitHub Issues toolset URL |
+| `PANGI_GIT_MCP_PULL_REQUESTS_URL` | `https://api.githubcopilot.com/mcp/x/pull_requests/readonly` | PR context용 GitHub Pull Requests toolset URL |
+| `PANGI_GIT_MCP_ACTIONS_URL` | `https://api.githubcopilot.com/mcp/x/actions/readonly` | Actions/workflow context용 GitHub Actions toolset URL |
 | `PANGI_GIT_MCP_TOKEN` | 빈 값 | Git MCP 인증 token. 실제 값은 `.env` 또는 배포 환경에만 저장 |
 | `PANGI_GIT_MCP_ORG` | 빈 값 | repo catalog를 조회할 GitHub organization 이름 |
 | `PANGI_GIT_MCP_CONTEXT_MAX_CHARS` | `6000` | Codex prompt에 붙일 Git context 최대 길이 |
@@ -385,7 +392,7 @@ PANGI_ADMIN_PASSWORD=
 
 Notion context는 공식 Notion MCP를 직접 Codex에 열지 않고, 팡이 서버가 허용된 page/database만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. Notion 연결은 관리자 페이지 `/pangi-admin/notion`에서 OAuth로 진행합니다. 자세한 기준은 [docs/architecture/notion-context.md](docs/architecture/notion-context.md)를 봅니다.
 
-Git context도 Codex에 Git MCP 권한을 직접 열지 않고, 팡이 서버가 Git MCP에서 필요한 repo/PR/issue/Actions context만 read-only로 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. 실제 코드 전체 분석은 `PANGI_SOURCE_REPO_ROOT` 하위 source repo와 thread workspace 내부 repo checkout에서 수행합니다. Git MCP 조직 repo가 아직 source root에 없으면, 분석 요청 시 `PANGI_GIT_CLONE_URL_TEMPLATE`으로 clone한 뒤 thread workspace 아래 detached checkout을 만듭니다.
+Git context도 Codex에 Git MCP 권한을 직접 열지 않고, 팡이 서버가 GitHub MCP의 toolset을 기능별로 고정해서 read-only 조회한 뒤 Markdown context로 정규화해서 Codex chat prompt에 붙이는 구조입니다. `repo_catalog`는 조직 검색 자체가 아니라 조직 아래 **repository 목록**을 목표로 하므로 `repos` toolset을 우선 사용하고, PR은 `pull_requests`, issue는 `issues`, Actions는 `actions`, 일반 repo 메타데이터는 `repos` toolset을 우선 사용합니다. 실제 코드 전체 분석은 `PANGI_SOURCE_REPO_ROOT` 하위 source repo와 thread workspace 내부 repo checkout에서 수행합니다. Git MCP 조직 repo가 아직 source root에 없으면, 분석 요청 시 `PANGI_GIT_CLONE_URL_TEMPLATE`으로 clone한 뒤 thread workspace 아래 detached checkout을 만듭니다.
 
 임시 개발 환경에서 모든 Slack user/channel을 허용하려면 `*`를 사용할 수 있습니다.
 

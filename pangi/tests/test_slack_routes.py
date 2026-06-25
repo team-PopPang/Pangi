@@ -487,6 +487,33 @@ def test_slack_events_uses_git_repo_catalog_for_repo_catalog_request(monkeypatch
     assert "PopPang-AOS" in fake_slack.messages[-1]["text"]
 
 
+def test_slack_events_uses_git_repo_catalog_for_github_repo_discovery_phrase(monkeypatch, tmp_path):
+    fake_slack = configure_settings(monkeypatch, tmp_path)
+    git_provider = CapturingGitContextProvider()
+    set_git_context_provider(git_provider)
+
+    status, body = post_slack_event(
+        {
+            "type": "event_callback",
+            "team_id": "T123",
+            "event_id": "EvGitHubRepoCatalog123",
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "user": "U123",
+                "text": "<@U999> 깃허브레포 뭐뭐 분석가능해",
+                "thread_ts": "1710000000.000001",
+                "ts": "1710000000.000002",
+            },
+        }
+    )
+
+    assert status == 200
+    assert body["accepted"] is True
+    assert git_provider.repo_catalog_calls >= 1
+    assert "PopPang-AOS" in fake_slack.messages[-1]["text"]
+
+
 def test_slack_events_ignores_bot_message(monkeypatch, tmp_path):
     configure_settings(monkeypatch, tmp_path)
 

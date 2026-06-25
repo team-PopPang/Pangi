@@ -68,6 +68,12 @@ def test_settings_parses_allowlists_repo_paths_and_default_timeout():
     assert settings.notion_write_enabled is False
     assert settings.git_mcp_enabled is False
     assert settings.git_mcp_url == "https://api.githubcopilot.com/mcp/"
+    assert settings.git_mcp_context_url == "https://api.githubcopilot.com/mcp/readonly"
+    assert settings.git_mcp_orgs_url == "https://api.githubcopilot.com/mcp/x/orgs/readonly"
+    assert settings.git_mcp_repos_url == "https://api.githubcopilot.com/mcp/x/repos/readonly"
+    assert settings.git_mcp_issues_url == "https://api.githubcopilot.com/mcp/x/issues/readonly"
+    assert settings.git_mcp_pull_requests_url == "https://api.githubcopilot.com/mcp/x/pull_requests/readonly"
+    assert settings.git_mcp_actions_url == "https://api.githubcopilot.com/mcp/x/actions/readonly"
     assert settings.git_mcp_token is None
     assert settings.git_mcp_org is None
     assert settings.git_mcp_context_max_chars == 6000
@@ -184,6 +190,12 @@ def test_settings_uses_configured_git_mcp_options():
         valid_env(
             PANGI_GIT_MCP_ENABLED="1",
             PANGI_GIT_MCP_URL="https://api.githubcopilot.com/mcp/",
+            PANGI_GIT_MCP_CONTEXT_URL="https://api.githubcopilot.com/mcp/readonly",
+            PANGI_GIT_MCP_ORGS_URL="https://api.githubcopilot.com/mcp/x/orgs/readonly",
+            PANGI_GIT_MCP_REPOS_URL="https://api.githubcopilot.com/mcp/x/repos/readonly",
+            PANGI_GIT_MCP_ISSUES_URL="https://api.githubcopilot.com/mcp/x/issues/readonly",
+            PANGI_GIT_MCP_PULL_REQUESTS_URL="https://api.githubcopilot.com/mcp/x/pull_requests/readonly",
+            PANGI_GIT_MCP_ACTIONS_URL="https://api.githubcopilot.com/mcp/x/actions/readonly",
             PANGI_GIT_MCP_TOKEN="placeholder-git-token",
             PANGI_GIT_MCP_ORG="team-PopPang",
             PANGI_GIT_MCP_CONTEXT_MAX_CHARS="3000",
@@ -195,6 +207,12 @@ def test_settings_uses_configured_git_mcp_options():
 
     assert settings.git_mcp_enabled is True
     assert settings.git_mcp_url == "https://api.githubcopilot.com/mcp/"
+    assert settings.git_mcp_context_url == "https://api.githubcopilot.com/mcp/readonly"
+    assert settings.git_mcp_orgs_url == "https://api.githubcopilot.com/mcp/x/orgs/readonly"
+    assert settings.git_mcp_repos_url == "https://api.githubcopilot.com/mcp/x/repos/readonly"
+    assert settings.git_mcp_issues_url == "https://api.githubcopilot.com/mcp/x/issues/readonly"
+    assert settings.git_mcp_pull_requests_url == "https://api.githubcopilot.com/mcp/x/pull_requests/readonly"
+    assert settings.git_mcp_actions_url == "https://api.githubcopilot.com/mcp/x/actions/readonly"
     assert settings.git_mcp_token == "placeholder-git-token"
     assert settings.git_mcp_org == "team-PopPang"
     assert settings.git_mcp_context_max_chars == 3000
@@ -212,6 +230,9 @@ def test_settings_uses_configured_git_mcp_options():
 def test_settings_rejects_invalid_git_mcp_options():
     with pytest.raises(SettingsError, match="PANGI_GIT_MCP_URL"):
         Settings.from_env(valid_env(PANGI_GIT_MCP_URL="ftp://api.githubcopilot.com/mcp/"))
+
+    with pytest.raises(SettingsError, match="PANGI_GIT_MCP_ORGS_URL"):
+        Settings.from_env(valid_env(PANGI_GIT_MCP_ORGS_URL="ftp://api.githubcopilot.com/mcp/x/orgs/readonly"))
 
     with pytest.raises(SettingsError, match="PANGI_GIT_MCP_ORG"):
         Settings.from_env(valid_env(PANGI_GIT_MCP_ORG="../team-PopPang"))

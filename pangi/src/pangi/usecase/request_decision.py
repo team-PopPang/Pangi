@@ -55,7 +55,7 @@ def build_needs_repo_message(allowed_repo_keys: Iterable[str]) -> str:
     if not repo_keys:
         return (
             "현재 팡이가 분석할 수 있는 repo를 찾지 못했습니다. "
-            "서버의 PANGI_SOURCE_REPO_ROOT 아래에 PopPang repo clone이 있는지 확인해주세요."
+            "서버의 Git MCP 조직 설정 또는 PANGI_SOURCE_REPO_ROOT 아래 로컬 clone 상태를 확인해주세요."
         )
 
     repo_lines = "\n".join(f"- {repo_key}" for repo_key in sorted(repo_keys))

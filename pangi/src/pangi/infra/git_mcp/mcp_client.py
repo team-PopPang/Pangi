@@ -27,6 +27,12 @@ class GitMcpTool:
     input_schema: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class GitMcpToolResult:
+    text: str
+    structured_content: Any = None
+
+
 class GitMcpHttpClient:
     def __init__(self, *, mcp_url: str, access_token: str | None, timeout_seconds: int) -> None:
         self._mcp_url = mcp_url.rstrip("/")
@@ -53,10 +59,17 @@ class GitMcpHttpClient:
         return tuple(tools)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        result = await self.call_tool_result(name, arguments)
+        return result.text
+
+    async def call_tool_result(self, name: str, arguments: dict[str, Any]) -> GitMcpToolResult:
         result = await self._request("tools/call", {"name": name, "arguments": arguments})
         if result.get("isError") is True:
             raise GitMcpError(f"Git MCP tool failed: {name}")
-        return _tool_result_to_text(result)
+        return GitMcpToolResult(
+            text=_tool_result_to_text(result),
+            structured_content=result.get("structuredContent"),
+        )
 
     async def _request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if not self._initialized:

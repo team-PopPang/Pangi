@@ -755,7 +755,7 @@ def test_repo_catalog_posts_local_only_response_without_provider(tmp_path):
         assert result.classification == RequestClassification.REPO_CATALOG
         assert repository.list_jobs() == []
         assert queue.job_ids == []
-        assert "Git MCP는 아직 연결되지 않아" in slack.messages[0]["text"]
+        assert "Git MCP가 비활성 또는 조회 실패라" in slack.messages[0]["text"]
         assert "PopPang-iOS: 분석 가능" in slack.messages[0]["text"]
         assert "PopPang-FE: 분석 가능" in slack.messages[0]["text"]
         assert slack.reactions[-1]["name"] == "white_check_mark"
@@ -833,6 +833,42 @@ def test_repo_catalog_passes_local_repo_keys_to_git_context_provider(tmp_path):
         await asyncio.gather(*tasks)
 
         assert provider.local_repo_keys == ("PopPang-iOS",)
+
+    asyncio.run(scenario())
+
+
+def test_repo_catalog_uses_github_repo_discovery_phrase(tmp_path):
+    async def scenario():
+        repository = SQLiteJobRepository(tmp_path / "pangi.sqlite3")
+        queue = FakeQueue()
+        slack = FakeSlack()
+        tasks = []
+
+        def collect_task(task):
+            tasks.append(task)
+
+        use_case = SubmitSlackRequestUseCase(
+            repository=repository,
+            job_queue=queue,
+            slack_notifier=slack,
+            request_orchestrator=FakeOrchestrator(
+                ClassifiedRequest(
+                    kind=RequestClassification.REPO_CATALOG,
+                    should_create_job=False,
+                )
+            ),
+            chat_responder=FakeChatResponder(),
+            git_context_provider=FakeGitContextProvider(),
+            allowed_repo_keys=("PopPang-iOS",),
+            background_runner=collect_task,
+        )
+
+        result = await use_case.execute(make_request("깃허브레포 뭐뭐 분석가능해"))
+        await asyncio.gather(*tasks)
+
+        assert result.classification == RequestClassification.REPO_CATALOG
+        assert "Git MCP 조직: team-PopPang" in slack.messages[0]["text"]
+        assert "PopPang-BE: 분석 가능, 요청 시 서버가 clone" in slack.messages[0]["text"]
 
     asyncio.run(scenario())
 
