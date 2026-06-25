@@ -76,4 +76,5 @@ Notion 공식 문서는 원격 MCP 서버 `https://mcp.notion.com/mcp` 사용을
 1. 실제 Slack app mention에서 Notion 문서 요청 end-to-end 테스트를 수행한다.
 2. database row 선별 로직을 질문 키워드, 날짜, 담당자, 상태 기준으로 고도화한다.
 3. Notion MCP tool schema 변화에 대비한 adapter 테스트 fixture를 늘린다.
-4. 연결 실패/토큰 만료/권한 부족 상황의 Slack 안내 문구를 더 세분화한다.
+4. page 조회 성공, database query 실패, database fetch fallback 성공 여부가 운영 로그에서 구분되게 유지한다.
+5. 연결 실패/토큰 만료/권한 부족 상황의 Slack 안내 문구를 더 세분화한다.

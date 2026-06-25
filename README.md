@@ -9,6 +9,10 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 팡이가 먼저 읽고, 팀이 더 빠르게 판단합니다.
 ```
 
+## 아키텍처
+
+![Pangi MVP Architecture](docs/architecture/pangi-mvp-architecture.png)
+
 ## 지금 팡이가 할 수 있는 것
 
 - Slack에서 `@팡이` mention과 slash command 요청을 받을 수 있습니다.

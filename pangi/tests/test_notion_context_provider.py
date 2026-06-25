@@ -1,11 +1,12 @@
 import asyncio
+import logging
 from pathlib import Path
 
 import pytest
 
 from pangi.config import Settings
 from pangi.infra.notion.context_provider import NotionMcpContextProvider
-from pangi.infra.notion.mcp_client import NotionMcpTool
+from pangi.infra.notion.mcp_client import NotionMcpError, NotionMcpTool
 from pangi.infra.notion.token_store import (
     JsonNotionTokenStore,
     NotionOAuthClientRegistration,
@@ -42,6 +43,27 @@ class FakeMcpClient:
 class FakeOAuthClient:
     async def refresh_tokens(self, connection):
         return connection.tokens
+
+
+class FakeMcpClientQueryFailureThenFallback:
+    def __init__(self):
+        self.calls = []
+
+    async def list_tools(self):
+        return (
+            NotionMcpTool(name="notion-fetch", description="Fetch a Notion page or database by id"),
+            NotionMcpTool(name="notion-query-database", description="Query a Notion database"),
+        )
+
+    async def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        if name == "notion-query-database":
+            raise NotionMcpError("database query permission denied")
+        if name == "notion-fetch" and arguments.get("id") == DATABASE_ID:
+            return "회의록 데이터베이스 구조\n- 날짜\n- 제목\n- 참석자"
+        if name == "notion-fetch" and arguments.get("id") == PAGE_ID:
+            return "회의록 페이지 구조\n- 회의 제목"
+        return ""
 
 
 def valid_env(**overrides: str) -> dict[str, str]:
@@ -147,3 +169,24 @@ def test_provider_truncates_long_context(tmp_path):
 
     assert len(context.markdown) <= 50
     assert "생략했습니다" in context.markdown
+
+
+def test_provider_logs_database_query_failure_and_fetch_fallback(tmp_path, caplog):
+    settings = Settings.from_env(valid_env(PANGI_NOTION_CONTEXT_MAX_CHARS="1000"))
+    store = JsonNotionTokenStore(tmp_path / "oauth.json")
+    save_connected_token(store)
+    provider = NotionMcpContextProvider(
+        settings=settings,
+        token_store=store,
+        oauth_client=FakeOAuthClient(),
+        mcp_client_factory=lambda *, access_token: FakeMcpClientQueryFailureThenFallback(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        context = asyncio.run(provider.fetch_context(text="6월 24일 노션 회의록 요약해줘", user_id="U", channel_id="C", thread_ts="1"))
+
+    assert "회의록 페이지 구조" in context.markdown
+    assert "회의록 데이터베이스 구조" in context.markdown
+    assert "Notion context targets selected" in caplog.text
+    assert "Notion database query returned no content; trying fetch fallback" in caplog.text
+    assert "Notion database fetch fallback succeeded" in caplog.text

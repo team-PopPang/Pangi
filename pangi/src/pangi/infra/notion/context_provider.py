@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import replace
@@ -19,6 +20,7 @@ from pangi.usecase.notion_context import (
 
 NOTION_ID_IN_TEXT_PATTERN = re.compile(r"(?i)[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}")
 DEFAULT_DATABASE_ROW_LIMIT = 10
+logger = logging.getLogger(__name__)
 
 
 class NotionMcpClientFactory(Protocol):
@@ -61,6 +63,11 @@ class NotionMcpContextProvider:
         selected = _select_allowed_targets(text, self._settings)
         if not selected.page_ids and not selected.database_ids:
             raise NotionContextAccessDeniedError("No allowed Notion target matched the request")
+        logger.info(
+            "Notion context targets selected: pages=%d databases=%d",
+            len(selected.page_ids),
+            len(selected.database_ids),
+        )
 
         tools = await client.list_tools()
         sections: list[str] = []
@@ -140,7 +147,13 @@ async def _fetch_page_text(*, client: NotionMcpHttpClient, tools: tuple[NotionMc
             {"page_id": page_id},
             {"url": f"https://www.notion.so/{page_id}"},
         ),
+        target_label=f"page:{page_id}",
+        stage="fetch",
     )
+    if content:
+        logger.info("Notion page fetch succeeded: page_id=%s", page_id)
+    else:
+        logger.warning("Notion page fetch returned no content: page_id=%s", page_id)
     return content
 
 
@@ -152,16 +165,20 @@ async def _fetch_database_text(
 ) -> str:
     query_content = await _try_tool_calls(
         client=client,
-        tools=_candidate_tools(tools, include_any=("query", "database")),
+        tools=_candidate_tools(tools, include_any=("query",)),
         argument_sets=(
             {"database_id": database_id, "page_size": DEFAULT_DATABASE_ROW_LIMIT},
             {"database_id": database_id},
             {"id": database_id},
         ),
+        target_label=f"database:{database_id}",
+        stage="query",
     )
     if query_content:
+        logger.info("Notion database query succeeded: database_id=%s", database_id)
         return query_content
-    return await _try_tool_calls(
+    logger.warning("Notion database query returned no content; trying fetch fallback: database_id=%s", database_id)
+    fallback_content = await _try_tool_calls(
         client=client,
         tools=_candidate_tools(tools, include_any=("fetch", "retrieve", "database")),
         argument_sets=(
@@ -169,7 +186,14 @@ async def _fetch_database_text(
             {"database_id": database_id},
             {"url": f"https://www.notion.so/{database_id}"},
         ),
+        target_label=f"database:{database_id}",
+        stage="fetch-fallback",
     )
+    if fallback_content:
+        logger.info("Notion database fetch fallback succeeded: database_id=%s", database_id)
+    else:
+        logger.warning("Notion database fetch fallback returned no content: database_id=%s", database_id)
+    return fallback_content
 
 
 async def _try_tool_calls(
@@ -177,6 +201,8 @@ async def _try_tool_calls(
     client: NotionMcpHttpClient,
     tools: tuple[NotionMcpTool, ...],
     argument_sets: tuple[dict[str, object], ...],
+    target_label: str,
+    stage: str,
 ) -> str:
     last_error: Exception | None = None
     for tool in tools:
@@ -187,11 +213,37 @@ async def _try_tool_calls(
                 raise
             except NotionMcpError as error:
                 last_error = error
+                logger.warning(
+                    "Notion MCP tool failed: target=%s stage=%s tool=%s arguments=%s error=%s",
+                    target_label,
+                    stage,
+                    tool.name,
+                    sorted(arguments),
+                    error,
+                )
                 continue
             if content.strip():
+                logger.info(
+                    "Notion MCP tool returned content: target=%s stage=%s tool=%s arguments=%s",
+                    target_label,
+                    stage,
+                    tool.name,
+                    sorted(arguments),
+                )
                 return content.strip()
     if last_error is not None:
+        logger.warning(
+            "Notion MCP target returned no usable content after tool errors: target=%s stage=%s",
+            target_label,
+            stage,
+        )
         return ""
+    logger.warning(
+        "Notion MCP target returned no usable content: target=%s stage=%s tools=%d",
+        target_label,
+        stage,
+        len(tools),
+    )
     return ""
 
 
