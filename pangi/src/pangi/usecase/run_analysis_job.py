@@ -7,7 +7,12 @@ from pangi.domain.policies import redact_secrets
 from pangi.repository import JobRepository
 from pangi.usecase.codex_session import CodexSessionService
 from pangi.usecase.build_prompt import build_read_only_analysis_prompt
-from pangi.usecase.output_guardrail import prepare_output_markdown
+from pangi.usecase.output_guardrail import (
+    classify_error_kind,
+    next_action_for_error,
+    prepare_error_markdown,
+    prepare_output_markdown,
+)
 from pangi.usecase.ports import CodexExecutionResult, CodexRunner, SlackNotifier, WorktreeManager
 
 
@@ -172,10 +177,17 @@ class RunAnalysisJobUseCase:
             if session_notice
             else ""
         )
-        response_text = prepare_output_markdown(
-            f"{session_prefix}팡이 read-only 분석이 실패했습니다. job_id: {job.id}\n\n{message}",
-            max_chars=SLACK_RESULT_MAX_CHARS,
+        kind = classify_error_kind(message)
+        response_text = prepare_error_markdown(
+            stage="repo_analysis",
+            kind=kind,
+            summary="Codex read-only analysis failed",
+            detail=message,
+            next_action=next_action_for_error(stage="repo_analysis", kind=kind),
+            job_id=job.id,
         )
+        if session_prefix:
+            response_text = f"{session_prefix}{response_text}"
         await self._slack_notifier.post_message(
             channel_id=job.slack_channel_id,
             thread_ts=job.slack_thread_ts,
@@ -190,10 +202,16 @@ class RunAnalysisJobUseCase:
             if session_notice
             else ""
         )
-        response_text = prepare_output_markdown(
-            f"{session_prefix}팡이 read-only 분석 시간이 초과되었습니다. job_id: {job.id}\n\n{message}",
-            max_chars=SLACK_RESULT_MAX_CHARS,
+        response_text = prepare_error_markdown(
+            stage="repo_analysis",
+            kind="timeout",
+            summary="Codex read-only analysis timed out",
+            detail=message,
+            next_action=next_action_for_error(stage="repo_analysis", kind="timeout"),
+            job_id=job.id,
         )
+        if session_prefix:
+            response_text = f"{session_prefix}{response_text}"
         await self._slack_notifier.post_message(
             channel_id=job.slack_channel_id,
             thread_ts=job.slack_thread_ts,
@@ -236,11 +254,7 @@ class RunAnalysisJobUseCase:
 
     def _failure_summary(self, exit_code: int | None, stdout: str, stderr: str) -> str:
         detail = stderr.strip() or stdout.strip() or "Codex output is empty"
-        detail = prepare_output_markdown(
-            detail,
-            max_chars=SLACK_ERROR_MAX_CHARS,
-            empty_fallback="Codex output is empty",
-        )
+        detail = detail or "Codex output is empty"
         return f"Codex exited with code {exit_code}. {detail}"
 
 

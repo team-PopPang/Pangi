@@ -165,7 +165,10 @@ def test_run_analysis_job_posts_failure_and_raises_on_nonzero_exit(tmp_path):
         with pytest.raises(AnalysisJobFailed):
             await use_case.execute(job)
 
-        assert "실패했습니다" in slack.messages[-1][2]
+        assert "⚠️ Pangi Error" in slack.messages[-1][2]
+        assert "stage: repo_analysis" in slack.messages[-1][2]
+        assert "detail:\nCodex exited with code 2. boom" in slack.messages[-1][2]
+        assert "job_id: " in slack.messages[-1][2]
         assert slack.removed_reactions == [("C123", "171.2", "eyes")]
         assert slack.reactions == [("C123", "171.2", "x")]
         assert repository.get_job(job.id).error_message.startswith("Codex exited with code 2")
@@ -201,7 +204,9 @@ def test_run_analysis_job_posts_timeout_and_raises(tmp_path):
         with pytest.raises(AnalysisJobTimedOut):
             await use_case.execute(job)
 
-        assert "시간이 초과" in slack.messages[-1][2]
+        assert "⚠️ Pangi Error" in slack.messages[-1][2]
+        assert "kind: timeout" in slack.messages[-1][2]
+        assert "detail:\nCodex read-only analysis timed out" in slack.messages[-1][2]
         assert slack.removed_reactions == [("C123", "171.2", "eyes")]
         assert slack.reactions == [("C123", "171.2", "x")]
         assert repository.list_codex_runs()[0].timed_out is True

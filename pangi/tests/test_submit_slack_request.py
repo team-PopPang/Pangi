@@ -420,7 +420,7 @@ def test_codex_chat_marks_failure_reaction_when_reply_generation_fails(tmp_path)
             {
                 "channel_id": "C123",
                 "thread_ts": "1710000000.000001",
-                "text": "팡이 대화 응답 생성에 실패했습니다.",
+                "text": "⚠️ Pangi Error\n\n```text\nstage: codex_chat\nkind: upstream_error\nsummary: Codex chat failed\ndetail:\nboom\nnext_action: Check Codex CLI auth, workspace path, and stderr detail.\n```",
             }
         ]
         assert slack.reactions == [
@@ -947,7 +947,7 @@ def test_orchestrator_failure_posts_failure_message_and_reaction(tmp_path):
             {
                 "channel_id": "C123",
                 "thread_ts": "1710000000.000001",
-                "text": "팡이 요청 분류가 지연되어 실패했습니다. 잠시 후 다시 요청해주세요.",
+                "text": "⚠️ Pangi Error\n\n```text\nstage: classification\nkind: upstream_error\nsummary: Slack request classification failed\ndetail:\nclassification boom\nnext_action: Check orchestrator auth/config and the raw classification error detail.\n```",
             }
         ]
         assert slack.reactions == [
