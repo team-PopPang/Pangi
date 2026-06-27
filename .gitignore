@@ -1,5 +1,8 @@
 __pycache__/
 *.py[cod]
+.DS_Store
+*/.DS_Store
+.$*.bkp
 
 .pytest_cache/
 .mypy_cache/
