@@ -21,6 +21,7 @@ from pangi.usecase.notion_context import (
     build_notion_context_prompt,
 )
 from pangi.usecase.output_guardrail import prepare_output_markdown
+from pangi.usecase.output_guardrail import classify_error_kind, next_action_for_error, prepare_error_markdown
 from pangi.usecase.request_decision import (
     GIT_CONTEXT_ACCESS_DENIED_MESSAGE,
     GIT_CONTEXT_DISABLED_MESSAGE,
@@ -45,7 +46,6 @@ IN_PROGRESS_REACTION_NAME = "eyes"
 SUCCESS_REACTION_NAME = "white_check_mark"
 FAILURE_REACTION_NAME = "x"
 CHAT_REPLY_MAX_CHARS = 3500
-CLASSIFICATION_FAILURE_MESSAGE = "팡이 요청 분류가 지연되어 실패했습니다. 잠시 후 다시 요청해주세요."
 logger = logging.getLogger(__name__)
 BackgroundRunner = Callable[[Awaitable[None]], None]
 
@@ -116,9 +116,19 @@ class SubmitSlackRequestUseCase:
                 allowed_repo_keys=self._allowed_repo_keys,
                 thread_context=thread_context,
             )
-        except Exception:
+        except Exception as error:
             logger.exception("Failed to classify Slack request")
-            await self._post_policy_message(request, CLASSIFICATION_FAILURE_MESSAGE, slack_thread=thread)
+            await self._post_policy_message(
+                request,
+                prepare_error_markdown(
+                    stage="classification",
+                    kind=classify_error_kind(str(error)),
+                    summary="Slack request classification failed",
+                    detail=str(error),
+                    next_action=next_action_for_error(stage="classification", kind=classify_error_kind(str(error))),
+                ),
+                slack_thread=thread,
+            )
             await self._replace_in_progress_reaction(request, name=FAILURE_REACTION_NAME)
             return SubmitSlackRequestResult(
                 job_id=None,
@@ -301,7 +311,15 @@ class SubmitSlackRequestUseCase:
         except Exception as error:
             logger.warning("Failed to generate chat response: %s", error)
             succeeded = False
-            response_text = "팡이 대화 응답 생성에 실패했습니다."
+            detail = str(error)
+            kind = classify_error_kind(detail)
+            response_text = prepare_error_markdown(
+                stage="codex_chat",
+                kind=kind,
+                summary="Codex chat failed",
+                detail=detail,
+                next_action=next_action_for_error(stage="codex_chat", kind=kind),
+            )
 
         safe_text = prepare_output_markdown(response_text, max_chars=CHAT_REPLY_MAX_CHARS)
         try:
@@ -350,7 +368,15 @@ class SubmitSlackRequestUseCase:
             except Exception as error:
                 logger.warning("Failed to generate Notion context response: %s", error)
                 succeeded = False
-                response_text = "Notion 문서 확인에 실패했습니다. 잠시 후 다시 요청해주세요."
+                detail = str(error)
+                kind = classify_error_kind(detail)
+                response_text = prepare_error_markdown(
+                    stage="notion_context",
+                    kind=kind,
+                    summary="Notion context response failed",
+                    detail=detail,
+                    next_action=next_action_for_error(stage="notion_context", kind=kind),
+                )
 
         safe_text = prepare_output_markdown(response_text, max_chars=CHAT_REPLY_MAX_CHARS)
         try:
@@ -399,7 +425,15 @@ class SubmitSlackRequestUseCase:
             except Exception as error:
                 logger.warning("Failed to generate Git context response: %s", error)
                 succeeded = False
-                response_text = "Git context 확인에 실패했습니다. 잠시 후 다시 요청해주세요."
+                detail = str(error)
+                kind = classify_error_kind(detail)
+                response_text = prepare_error_markdown(
+                    stage="git_context",
+                    kind=kind,
+                    summary="Git context response failed",
+                    detail=detail,
+                    next_action=next_action_for_error(stage="git_context", kind=kind),
+                )
 
         safe_text = prepare_output_markdown(response_text, max_chars=CHAT_REPLY_MAX_CHARS)
         try:
