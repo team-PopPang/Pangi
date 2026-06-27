@@ -265,3 +265,22 @@ cd pangi
 source .venv/bin/activate
 pytest
 ```
+
+## 배포 스크립트
+
+- `deploy-bot.sh`: 원격 앱 디렉터리를 지우고 다시 올리는 full deploy 용도입니다. 초기화나 비상 복구에 가깝습니다.
+- `deploy.sh`: 운영용 code-only deploy입니다. 원격 `.env`, `.data`, `nohup.out`을 보존한 채 `src/`, `pyproject.toml`, `requirements.txt`, `README.md`만 동기화합니다.
+
+운영용 배포 예:
+
+```bash
+cd pangi
+./deploy.sh
+```
+
+테스트까지 같이 올리고 싶으면:
+
+```bash
+cd pangi
+SYNC_TESTS=1 ./deploy.sh
+```
