@@ -1,6 +1,7 @@
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
-from pangi.domain import CodexSessionStatus, JobStatus, JobType, ThreadMessageRole
+from pangi.domain import CodexSessionStatus, JobStatus, JobType, ScheduleRunStatus, ScheduleType, ThreadMessageRole
 from pangi.repository import SQLiteJobRepository
 
 
@@ -198,6 +199,80 @@ def test_repository_lists_recent_rows(tmp_path):
     assert listed_thread.last_job_id == job.id
     assert repository.list_jobs(limit=10) == [job]
     assert repository.list_codex_runs(limit=10) == [run]
+
+
+def test_repository_creates_due_schedule_and_claims_run(tmp_path):
+    repository = make_repo(tmp_path)
+    now = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    scheduled_for = now + timedelta(minutes=1)
+    following_run = now + timedelta(days=1)
+
+    task = repository.create_scheduled_task(
+        name="daily report",
+        team_id="T123",
+        channel_id="C123",
+        requester_user_id="U123",
+        prompt="PopPang-iOS 분석해줘",
+        schedule_type=ScheduleType.DAILY,
+        timezone="Asia/Seoul",
+        time_of_day="09:00",
+        next_run_at=scheduled_for,
+    )
+
+    assert repository.list_due_scheduled_tasks(now=now, limit=10) == []
+    assert repository.list_due_scheduled_tasks(now=scheduled_for, limit=10) == [task]
+
+    run = repository.claim_scheduled_task_run(
+        task_id=task.id,
+        scheduled_for=scheduled_for,
+        next_run_at=following_run,
+    )
+
+    assert run is not None
+    assert run.status == ScheduleRunStatus.CLAIMED
+    assert run.event_id == f"schedule:{task.id}:{scheduled_for.isoformat()}"
+    assert repository.claim_scheduled_task_run(
+        task_id=task.id,
+        scheduled_for=scheduled_for,
+        next_run_at=following_run,
+    ) is None
+
+    updated_task = repository.get_scheduled_task(task.id)
+    assert updated_task.next_run_at == following_run
+    assert updated_task.last_run_at == scheduled_for
+
+
+def test_repository_updates_scheduled_task_run(tmp_path):
+    repository = make_repo(tmp_path)
+    scheduled_for = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    task = repository.create_scheduled_task(
+        name="once",
+        team_id="T123",
+        channel_id="C123",
+        requester_user_id="U123",
+        prompt="안녕",
+        schedule_type=ScheduleType.ONCE,
+        timezone="Asia/Seoul",
+        run_at=scheduled_for,
+        next_run_at=scheduled_for,
+    )
+    run = repository.claim_scheduled_task_run(
+        task_id=task.id,
+        scheduled_for=scheduled_for,
+        next_run_at=None,
+    )
+
+    updated = repository.update_scheduled_task_run(
+        run.id,
+        status=ScheduleRunStatus.SUCCEEDED,
+        slack_thread_ts="171.1",
+        classification="codex_chat",
+    )
+
+    assert updated.status == ScheduleRunStatus.SUCCEEDED
+    assert updated.slack_thread_ts == "171.1"
+    assert updated.classification == "codex_chat"
+    assert repository.get_scheduled_task(task.id).enabled is False
 
 
 def test_repository_persists_jobs_across_instances(tmp_path):

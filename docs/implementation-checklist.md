@@ -24,6 +24,7 @@
 - [x] 7단계: git worktree manager 만들기
 - [x] 8단계: Codex runner 만들기
 - [x] 9단계: Slack thread 응답 연결하기
+- [x] 9-1단계: 스케줄러 MVP 붙이기
 - [ ] 10단계: 1차 MVP end-to-end 검증
 - [ ] 11단계: 안전장치 강화
 - [ ] 12단계: Notion report 붙이기
@@ -788,6 +789,46 @@ Codex가 원본 repo를 직접 건드리지 않도록 job마다 격리된 작업
 - [x] 사용자는 Slack thread에서 job 상태를 볼 수 있다.
 - [x] 최종 분석 결과가 thread에 표시된다.
 - [x] 실패해도 조용히 사라지지 않는다.
+
+---
+
+## 9-1단계: 스케줄러 MVP 붙이기
+
+### 목표
+
+관리자가 등록한 반복 요청을 정해진 시간에 자동으로 실행하되, 기존 Slack 요청 처리 흐름과 안전장치를 그대로 재사용한다.
+
+### 체크리스트
+
+- [x] 스케줄러 설계 문서를 추가한다.
+  - 완료 기준: `docs/architecture/scheduler.md`에 범위, 저장 구조, 안전 규칙이 정리되어 있다.
+
+- [x] 스케줄 저장 모델을 추가한다.
+  - 완료 기준: `ScheduledTask`, `ScheduledTaskRun` 모델과 SQLite 테이블이 있다.
+
+- [x] due schedule claim 중복 방지를 구현한다.
+  - 완료 기준: `UNIQUE(scheduled_task_id, scheduled_for)`와 `event_id` unique 제약으로 같은 예약 시각이 두 번 실행되지 않는다.
+
+- [x] in-process scheduler를 만든다.
+  - 완료 기준: `PANGI_SCHEDULER_ENABLED=1`이면 lifespan에서 scheduler task가 시작된다.
+
+- [x] 예약 실행이 기존 Slack request usecase를 통과하게 한다.
+  - 완료 기준: Scheduler가 Codex runner를 직접 호출하지 않고 `SubmitSlackRequestUseCase`를 사용한다.
+
+- [x] 관리자 스케줄 페이지를 추가한다.
+  - 완료 기준: `/pangi-admin/schedules`에서 `once`, `daily`, `weekly` 예약을 만들고 실행 기록을 볼 수 있다.
+
+- [x] 스케줄러 설정을 추가한다.
+  - 완료 기준: `.env.example`에 `PANGI_SCHEDULER_ENABLED`, `PANGI_SCHEDULER_TICK_SECONDS`가 있다.
+
+- [x] 스케줄러 테스트를 작성한다.
+  - 완료 기준: due 조회, claim 중복 방지, chat schedule, repo analysis schedule이 테스트된다.
+
+### 완료 기준
+
+- [x] Scheduler는 Slack user/channel allowlist를 우회하지 않는다.
+- [x] Scheduler는 입력 가드레일과 Orchestrator를 우회하지 않는다.
+- [x] repo 분석 예약은 기존 `AgentJob`과 job queue로 실행된다.
 
 ---
 

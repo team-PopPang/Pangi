@@ -19,8 +19,8 @@ class SlackNotifier(Protocol):
     구현이 바뀌어도 업무 흐름 코드는 그대로 유지할 수 있다.
     """
 
-    async def post_message(self, *, channel_id: str, text: str, thread_ts: str | None = None) -> None:
-        """지정한 Slack channel 또는 thread에 메시지를 보낸다."""
+    async def post_message(self, *, channel_id: str, text: str, thread_ts: str | None = None) -> str | None:
+        """지정한 Slack channel 또는 thread에 메시지를 보내고 Slack ts를 반환한다."""
         ...
 
     async def add_reaction(self, *, channel_id: str, message_ts: str, name: str) -> None:
