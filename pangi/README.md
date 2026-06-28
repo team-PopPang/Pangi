@@ -44,6 +44,7 @@
 - 관리자 홈 페이지
 - 관리자 MCP 상태 페이지
 - 관리자 스케줄 페이지와 예약 실행 기록
+- deterministic Eval runner와 core/red-team case
 - Slack Web API `chat.postMessage` 기반 접수/상태 메시지
 - Slack Web API `reactions.add` 기반 요청 접수 `eyes` reaction
 - 일반 대화와 read-only 분석 성공 응답 시 원본 메시지 `eyes` reaction을 `white_check_mark`로 전환
@@ -274,6 +275,14 @@ cd pangi
 source .venv/bin/activate
 pytest
 ```
+
+프롬프트, 모델, provider, toolset 변경 후에는 Eval suite도 실행합니다.
+
+```bash
+PYTHONPATH=src python3 -m pangi.evaluations.run
+```
+
+Eval은 답변 정답을 채점하기보다 분류, provider 호출, 금지 호출, Codex read-only 경계, secret redaction 같은 행동 계약을 검증합니다.
 
 ## 배포 스크립트
 

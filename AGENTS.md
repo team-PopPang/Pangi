@@ -204,6 +204,7 @@ FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
 - 출력 가드레일/Slack 응답 포맷 작업: [docs/architecture/output-pipeline.md](docs/architecture/output-pipeline.md)
 - git worktree / thread workspace 작업: [docs/architecture/git-worktree.md](docs/architecture/git-worktree.md)
 - 저장소/job 모델 작업: [docs/architecture/storage.md](docs/architecture/storage.md)
+- Eval/Red Team/프롬프트 안전 회귀 검증 작업: [docs/architecture/evaluations.md](docs/architecture/evaluations.md)
 - 승인 흐름 작업: [docs/architecture/approvals.md](docs/architecture/approvals.md)
 - 보안/권한/secret 작업: [docs/security/safety-rules.md](docs/security/safety-rules.md)
 

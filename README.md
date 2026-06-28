@@ -26,6 +26,7 @@ Slack에서 `@팡이`를 부르면 팡이는 기본적으로 AI 대화로 답합
 - 외부 웹/URL 분석, 코드 수정, PR 생성, 배포, commit/push 요청은 입력 가드레일에서 차단하고 안내 응답만 보냅니다.
 - 요청을 받으면 원본 Slack 메시지에 `eyes` reaction을 달고, 일반 대화나 read-only 분석 응답에 성공하면 `white_check_mark`로 전환합니다. 실패나 timeout은 `x`로 전환합니다.
 - 관리자 페이지에서 `once`, `daily`, `weekly` 스케줄을 등록하면 정해진 시간에 기존 Slack 요청 처리 흐름으로 자동 실행할 수 있습니다.
+- Eval suite로 입력 가드레일, provider 호출, Codex read-only 경계, Red Team case를 deterministic하게 검증할 수 있습니다.
 - 관리자 DB 확인 페이지에서 Slack thread, job, Codex run 기록을 확인할 수 있습니다.
 
 ## 팡이의 생명력을 바꾸는 곳
@@ -125,6 +126,7 @@ flowchart TD
 - 관리자 MCP 상태 페이지 `/pangi-admin/mcp`
 - 관리자 Notion OAuth 연결 페이지 `/pangi-admin/notion`
 - 관리자 스케줄 페이지 `/pangi-admin/schedules`
+- Eval runner `PYTHONPATH=src python3 -m pangi.evaluations.run`
 
 ## 아직 남은 것
 
@@ -538,6 +540,17 @@ cd pangi
 source .venv/bin/activate
 pytest
 ```
+
+프롬프트, 모델, provider, toolset 변경 후에는 Eval도 함께 실행합니다.
+
+```bash
+cd pangi
+source .venv/bin/activate
+PYTHONPATH=src python3 -m pangi.evaluations.run
+```
+
+Eval은 정답 채점기가 아니라 팡이가 의도한 실행 경계 안에서 움직였는지 검증합니다.
+자세한 기준은 [docs/architecture/evaluations.md](docs/architecture/evaluations.md)를 봅니다.
 
 ## 안전 원칙
 
