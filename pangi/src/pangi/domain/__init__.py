@@ -5,6 +5,14 @@ from pangi.domain.models import (
     CodexRun,
     CodexSession,
     CodexSessionStatus,
+    EvalCaseDefinition,
+    EvalCaseResultRecord,
+    EvalCaseStatus,
+    EvalRedTeamCandidate,
+    EvalRedTeamCandidateStatus,
+    EvalRun,
+    EvalRunStatus,
+    EvalTraceEventRecord,
     JobStatus,
     JobType,
     ScheduleRunStatus,
@@ -14,6 +22,7 @@ from pangi.domain.models import (
     SlackThread,
     ThreadMessage,
     ThreadMessageRole,
+    utc_now,
 )
 
 __all__ = [
@@ -21,6 +30,14 @@ __all__ = [
     "CodexRun",
     "CodexSession",
     "CodexSessionStatus",
+    "EvalCaseDefinition",
+    "EvalCaseResultRecord",
+    "EvalCaseStatus",
+    "EvalRedTeamCandidate",
+    "EvalRedTeamCandidateStatus",
+    "EvalRun",
+    "EvalRunStatus",
+    "EvalTraceEventRecord",
     "JobStatus",
     "JobType",
     "ScheduleRunStatus",
@@ -30,4 +47,5 @@ __all__ = [
     "SlackThread",
     "ThreadMessage",
     "ThreadMessageRole",
+    "utc_now",
 ]

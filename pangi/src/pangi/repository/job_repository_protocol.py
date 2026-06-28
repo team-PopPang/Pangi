@@ -8,6 +8,14 @@ from pangi.domain.models import (
     CodexRun,
     CodexSession,
     CodexSessionStatus,
+    EvalCaseDefinition,
+    EvalCaseResultRecord,
+    EvalCaseStatus,
+    EvalRedTeamCandidate,
+    EvalRedTeamCandidateStatus,
+    EvalRun,
+    EvalRunStatus,
+    EvalTraceEventRecord,
     JobStatus,
     JobType,
     ScheduleRunStatus,
@@ -238,4 +246,119 @@ class JobRepository(Protocol):
 
     def list_scheduled_task_runs(self, *, limit: int = 50) -> list[ScheduledTaskRun]:
         """관리자 확인용으로 최근 예약 실행 기록을 반환한다."""
+        ...
+
+    def upsert_eval_case(
+        self,
+        *,
+        suite: str,
+        case_id: str,
+        name: str,
+        tags: tuple[str, ...],
+        case_json: dict[str, object],
+    ) -> EvalCaseDefinition:
+        """Eval case 정의 snapshot을 저장하거나 최신 내용으로 갱신한다."""
+        ...
+
+    def list_eval_cases(self, *, limit: int = 100) -> list[EvalCaseDefinition]:
+        """관리자 확인용으로 등록된 Eval case 정의를 반환한다."""
+        ...
+
+    def create_eval_run(
+        self,
+        *,
+        suite: str,
+        mode: str,
+        status: EvalRunStatus,
+        total_count: int,
+        passed_count: int,
+        failed_count: int,
+        prompt_fingerprint: str | None,
+        model_fingerprint: str | None,
+        provider_fingerprint: str | None,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> EvalRun:
+        """Eval 실행 요약을 저장한다."""
+        ...
+
+    def append_eval_case_result(
+        self,
+        *,
+        eval_run_id: str,
+        suite: str,
+        case_id: str,
+        name: str,
+        status: EvalCaseStatus,
+        classification: str,
+        job_id: str | None,
+        job_repo_key: str | None,
+        failures: tuple[str, ...],
+        slack_messages: tuple[str, ...],
+    ) -> EvalCaseResultRecord:
+        """Eval run 안의 case 결과를 저장한다."""
+        ...
+
+    def append_eval_trace_event(
+        self,
+        *,
+        eval_case_result_id: str,
+        event_index: int,
+        name: str,
+        attributes: dict[str, object],
+    ) -> EvalTraceEventRecord:
+        """case 결과에 연결되는 trace event를 저장한다."""
+        ...
+
+    def list_eval_runs(self, *, limit: int = 50) -> list[EvalRun]:
+        """관리자 확인용으로 최근 Eval run 목록을 반환한다."""
+        ...
+
+    def list_eval_case_results(
+        self,
+        *,
+        eval_run_id: str | None = None,
+        limit: int = 100,
+    ) -> list[EvalCaseResultRecord]:
+        """최근 또는 특정 Eval run의 case 결과를 반환한다."""
+        ...
+
+    def list_eval_trace_events(
+        self,
+        *,
+        eval_case_result_id: str | None = None,
+        limit: int = 200,
+    ) -> list[EvalTraceEventRecord]:
+        """최근 또는 특정 case 결과의 trace event를 반환한다."""
+        ...
+
+    def create_eval_red_team_candidate(
+        self,
+        *,
+        suite: str,
+        case_id: str,
+        name: str,
+        input: str,
+        attack_surface: str,
+        case_json: dict[str, object],
+    ) -> EvalRedTeamCandidate:
+        """Red Team Agent가 만든 후보 case를 draft 상태로 저장한다."""
+        ...
+
+    def set_eval_red_team_candidate_status(
+        self,
+        candidate_id: str,
+        *,
+        status: EvalRedTeamCandidateStatus,
+    ) -> EvalRedTeamCandidate:
+        """Red Team 후보 case의 검토 상태를 갱신한다."""
+        ...
+
+    def list_eval_red_team_candidates(
+        self,
+        *,
+        status: EvalRedTeamCandidateStatus | None = None,
+        limit: int = 50,
+    ) -> list[EvalRedTeamCandidate]:
+        """관리자 확인용으로 Red Team 후보 case 목록을 반환한다."""
         ...

@@ -5,12 +5,14 @@ import json
 from dataclasses import asdict
 from typing import Iterable
 
+from pangi.domain import utc_now
 from pangi.evaluations.grader import grade_eval_result
 from pangi.evaluations.harness import execute_eval_case
 from pangi.evaluations.models import EvalCase, EvalCaseResult, EvalRunResult
 
 
 async def run_eval_cases(cases: Iterable[EvalCase], *, fail_fast: bool = False) -> EvalRunResult:
+    started_at = utc_now()
     results: list[EvalCaseResult] = []
     for case in cases:
         execution = await execute_eval_case(case)
@@ -18,7 +20,7 @@ async def run_eval_cases(cases: Iterable[EvalCase], *, fail_fast: bool = False) 
         results.append(result)
         if fail_fast and not result.passed:
             break
-    return EvalRunResult(results=tuple(results))
+    return EvalRunResult(results=tuple(results), started_at=started_at, finished_at=utc_now())
 
 
 def run_eval_cases_sync(cases: Iterable[EvalCase], *, fail_fast: bool = False) -> EvalRunResult:
