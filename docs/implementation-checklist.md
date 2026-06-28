@@ -947,11 +947,18 @@ Slack에서 요청을 보내면 팡이가 실제로 read-only 분석 결과를 t
 - [ ] shell injection 회귀 테스트를 작성한다.
   - 완료 기준: 사용자 메시지에 `; rm -rf` 같은 문자열이 있어도 argv prompt로만 전달된다.
 
+- [x] Eval 플랫폼의 1차 behavior/red-team runner를 만든다.
+  - 완료 기준: `docs/architecture/evaluations.md`에 목적, trace event, case DSL, grader 기준이 정리되어 있다.
+  - 완료 기준: `pangi/evals/cases/`에 core behavior와 red-team case가 있다.
+  - 완료 기준: `PYTHONPATH=src python3 -m pangi.evaluations.run`으로 deterministic Eval suite를 실행할 수 있다.
+  - 완료 기준: Grader가 필수 호출, 금지 호출, 분류, job 생성 여부, secret-like 출력 노출을 검사한다.
+
 ### 완료 기준
 
 - [ ] 허용되지 않은 사용자/채널/repo가 차단된다.
 - [ ] secret이 Slack/로그에 노출되지 않는다.
 - [ ] Codex 실행 위치가 항상 안전한 worktree다.
+- [x] prompt/model/provider 변경 회귀를 볼 수 있는 Eval suite가 있다.
 
 ---
 
