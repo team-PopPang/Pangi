@@ -23,12 +23,13 @@
 - 입력 가드레일 1차 라우팅과 Codex CLI 기반 orchestrator 보조 분류
 - Notion 문서 읽기 요청 분류와 공식 MCP 기반 Notion context provider
 - Git MCP 기반 GitHub/Git context 요청 분류, repo catalog 응답, 조직 repo clone-on-demand
-- `SlackThread`, `AgentJob`, `CodexRun` 모델
+- `SlackThread`, `AgentJob`, `CodexRun`, `ScheduledTask`, `ScheduledTaskRun` 모델
 - SQLite 기반 job 저장소
 - Slack 요청을 `queued` 상태 job으로 저장
 - Slack event id 기반 중복 job 방지
 - job 상태 변경과 Codex run 기록 저장
 - in-process background worker
+- in-process scheduler
 - FastAPI startup/shutdown 기반 worker lifecycle
 - job 상태 전환: `queued` -> `running` -> `succeeded` / `failed` / `timed_out`
 - worker progress hook
@@ -40,6 +41,9 @@
 - Codex stdout/stderr/exit code/timeout 저장
 - Slack thread에 read-only 분석 성공/실패/timeout 결과 응답
 - Slack/외부 출력 전 secret redaction과 길이 제한
+- 관리자 홈 페이지
+- 관리자 MCP 상태 페이지
+- 관리자 스케줄 페이지와 예약 실행 기록
 - Slack Web API `chat.postMessage` 기반 접수/상태 메시지
 - Slack Web API `reactions.add` 기반 요청 접수 `eyes` reaction
 - 일반 대화와 read-only 분석 성공 응답 시 원본 메시지 `eyes` reaction을 `white_check_mark`로 전환
@@ -196,6 +200,8 @@ cd pangi
 - `PANGI_NOTION_TIMEOUT_SECONDS`: Notion context 조회 timeout입니다. 기본값은 20초입니다.
 - `PANGI_NOTION_TOKEN_STORE_PATH`: Notion OAuth token store 경로입니다. 비우면 worktree root 아래 `_notion/notion-oauth.json`을 사용합니다.
 - `PANGI_NOTION_WRITE_ENABLED`: 예약 설정값입니다. MVP에서는 Notion write 요청을 지원하지 않습니다.
+- `PANGI_SCHEDULER_ENABLED`: 관리자 페이지에 저장된 예약 작업의 자동 실행 여부입니다. 기본값은 `0`입니다.
+- `PANGI_SCHEDULER_TICK_SECONDS`: scheduler가 due schedule을 확인하는 간격입니다. 기본값은 30초입니다.
 - `PANGI_ENABLE_ADMIN_PAGES`: 관리자 페이지를 열려면 `1`로 설정합니다. 기본값은 `0`입니다.
 - `PANGI_ADMIN_PASSWORD`: 관리자 페이지 비밀번호입니다. 관리자 페이지를 켤 때만 필요합니다.
 
@@ -246,7 +252,7 @@ PANGI_ADMIN_PASSWORD=change-this-password
 접속 주소:
 
 ```text
-http://127.0.0.1:8000/pangi-admin/login
+http://127.0.0.1:8000/pangi-admin
 ```
 
 로그인 정보:
@@ -254,7 +260,10 @@ http://127.0.0.1:8000/pangi-admin/login
 - 아이디: `pangi`
 - 비밀번호: `PANGI_ADMIN_PASSWORD`에 설정한 값
 
-로그인 후 `/pangi-admin/db`에서 최근 `agent_jobs`, `slack_threads`, `codex_runs`를 확인할 수 있습니다.
+로그인 후 `/pangi-admin` 홈에서 DB 기록, 스케줄, MCP 상태, Notion 연결 화면으로 이동할 수 있습니다.
+`/pangi-admin/db`에서 최근 `agent_jobs`, `slack_threads`, `codex_runs`를 확인할 수 있습니다.
+`/pangi-admin/schedules`에서는 `once`, `daily`, `weekly` 예약 작업을 등록하고 실행 기록을 확인할 수 있습니다. 실제 자동 실행은 `PANGI_SCHEDULER_ENABLED=1`일 때만 동작합니다.
+`/pangi-admin/mcp`에서는 Notion/Git MCP 설정과 endpoint 목록을 확인할 수 있으며 token 값은 표시하지 않습니다.
 
 Notion context를 사용하려면 로그인 후 `/pangi-admin/notion`에서 Notion OAuth 연결을 완료합니다. 운영 서버에서는 `PANGI_PUBLIC_BASE_URL`을 외부에서 접근 가능한 팡이 서버 URL로 설정합니다.
 
