@@ -39,6 +39,7 @@ DEFAULT_GIT_MCP_CONTEXT_MAX_CHARS = 6000
 DEFAULT_GIT_MCP_TIMEOUT_SECONDS = 20
 DEFAULT_GIT_CLONE_URL_TEMPLATE = "https://github.com/{org}/{repo}.git"
 DEFAULT_CODEX_SESSION_IDLE_TIMEOUT_SECONDS = 3600
+DEFAULT_SCHEDULER_TICK_SECONDS = 30
 ALLOW_ALL_MARKER = "*"
 JOB_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
@@ -107,6 +108,8 @@ class Settings:
     git_mcp_write_enabled: bool = False
     git_clone_url_template: str | None = None
     codex_session_idle_timeout_seconds: int = DEFAULT_CODEX_SESSION_IDLE_TIMEOUT_SECONDS
+    scheduler_enabled: bool = False
+    scheduler_tick_seconds: int = DEFAULT_SCHEDULER_TICK_SECONDS
     enable_admin_pages: bool = False
     admin_password: str | None = field(default=None, repr=False)
 
@@ -306,6 +309,11 @@ class Settings:
                     str(DEFAULT_CODEX_SESSION_IDLE_TIMEOUT_SECONDS),
                 ),
                 "PANGI_CODEX_SESSION_IDLE_TIMEOUT_SECONDS",
+            ),
+            scheduler_enabled=_parse_bool(values.get("PANGI_SCHEDULER_ENABLED", "0"), "PANGI_SCHEDULER_ENABLED"),
+            scheduler_tick_seconds=_parse_positive_int(
+                values.get("PANGI_SCHEDULER_TICK_SECONDS", str(DEFAULT_SCHEDULER_TICK_SECONDS)),
+                "PANGI_SCHEDULER_TICK_SECONDS",
             ),
             enable_admin_pages=enable_admin_pages,
             admin_password=admin_password,

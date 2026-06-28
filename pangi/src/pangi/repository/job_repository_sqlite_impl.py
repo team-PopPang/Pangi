@@ -12,6 +12,10 @@ from pangi.domain.models import (
     CodexSessionStatus,
     JobStatus,
     JobType,
+    ScheduleRunStatus,
+    ScheduleType,
+    ScheduledTask,
+    ScheduledTaskRun,
     SlackThread,
     ThreadMessage,
     ThreadMessageRole,
@@ -310,6 +314,192 @@ class SQLiteJobRepository:
             ).fetchall()
             return [_row_to_codex_run(row) for row in rows]
 
+    def create_scheduled_task(
+        self,
+        *,
+        name: str,
+        team_id: str,
+        channel_id: str,
+        requester_user_id: str,
+        prompt: str,
+        schedule_type: ScheduleType,
+        timezone: str,
+        next_run_at: datetime | None,
+        time_of_day: str | None = None,
+        days_of_week: str | None = None,
+        run_at: datetime | None = None,
+        enabled: bool = True,
+    ) -> ScheduledTask:
+        now = utc_now()
+        task_id = _new_id("schedule")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scheduled_tasks (
+                    id, name, enabled, team_id, channel_id, requester_user_id, prompt,
+                    schedule_type, timezone, time_of_day, days_of_week, run_at,
+                    next_run_at, last_run_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (
+                    task_id,
+                    name,
+                    1 if enabled else 0,
+                    team_id,
+                    channel_id,
+                    requester_user_id,
+                    prompt,
+                    schedule_type.value,
+                    timezone,
+                    time_of_day,
+                    days_of_week,
+                    _dump_dt(run_at) if run_at else None,
+                    _dump_dt(next_run_at) if next_run_at else None,
+                    _dump_dt(now),
+                    _dump_dt(now),
+                ),
+            )
+            return self._get_scheduled_task(conn, task_id)
+
+    def set_scheduled_task_enabled(self, task_id: str, *, enabled: bool) -> ScheduledTask:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE scheduled_tasks
+                SET enabled = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (1 if enabled else 0, _dump_dt(now), task_id),
+            )
+            return self._get_scheduled_task(conn, task_id)
+
+    def get_scheduled_task(self, task_id: str) -> ScheduledTask | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM scheduled_tasks WHERE id = ?", (task_id,)).fetchone()
+            return _row_to_scheduled_task(row) if row else None
+
+    def list_scheduled_tasks(self, *, limit: int = 50) -> list[ScheduledTask]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM scheduled_tasks
+                ORDER BY enabled DESC, next_run_at ASC, updated_at DESC
+                LIMIT ?
+                """,
+                (_normalize_limit(limit),),
+            ).fetchall()
+            return [_row_to_scheduled_task(row) for row in rows]
+
+    def list_due_scheduled_tasks(self, *, now: datetime, limit: int = 20) -> list[ScheduledTask]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM scheduled_tasks
+                WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
+                ORDER BY next_run_at ASC
+                LIMIT ?
+                """,
+                (_dump_dt(now), _normalize_limit(limit)),
+            ).fetchall()
+            return [_row_to_scheduled_task(row) for row in rows]
+
+    def claim_scheduled_task_run(
+        self,
+        *,
+        task_id: str,
+        scheduled_for: datetime,
+        next_run_at: datetime | None,
+    ) -> ScheduledTaskRun | None:
+        now = utc_now()
+        run_id = _new_id("schedule_run")
+        event_id = f"schedule:{task_id}:{_dump_dt(scheduled_for)}"
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO scheduled_task_runs (
+                        id, scheduled_task_id, scheduled_for, status, event_id, slack_thread_ts,
+                        job_id, classification, error_message, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        task_id,
+                        _dump_dt(scheduled_for),
+                        ScheduleRunStatus.CLAIMED.value,
+                        event_id,
+                        _dump_dt(now),
+                        _dump_dt(now),
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE scheduled_tasks
+                    SET next_run_at = ?, last_run_at = ?, enabled = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        _dump_dt(next_run_at) if next_run_at else None,
+                        _dump_dt(scheduled_for),
+                        1 if next_run_at is not None else 0,
+                        _dump_dt(now),
+                        task_id,
+                    ),
+                )
+                return self._get_scheduled_task_run(conn, run_id)
+        except sqlite3.IntegrityError as error:
+            if "scheduled_task_runs" in str(error):
+                return None
+            raise
+
+    def update_scheduled_task_run(
+        self,
+        run_id: str,
+        *,
+        status: ScheduleRunStatus,
+        slack_thread_ts: str | None = None,
+        job_id: str | None = None,
+        classification: str | None = None,
+        error_message: str | None = None,
+    ) -> ScheduledTaskRun:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE scheduled_task_runs
+                SET status = ?,
+                    slack_thread_ts = COALESCE(?, slack_thread_ts),
+                    job_id = COALESCE(?, job_id),
+                    classification = COALESCE(?, classification),
+                    error_message = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status.value,
+                    slack_thread_ts,
+                    job_id,
+                    classification,
+                    error_message,
+                    _dump_dt(now),
+                    run_id,
+                ),
+            )
+            return self._get_scheduled_task_run(conn, run_id)
+
+    def list_scheduled_task_runs(self, *, limit: int = 50) -> list[ScheduledTaskRun]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM scheduled_task_runs
+                ORDER BY scheduled_for DESC, updated_at DESC
+                LIMIT ?
+                """,
+                (_normalize_limit(limit),),
+            ).fetchall()
+            return [_row_to_scheduled_task_run(row) for row in rows]
+
     def get_active_codex_session(self, slack_thread_id: str) -> CodexSession | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -527,6 +717,42 @@ class SQLiteJobRepository:
                     FOREIGN KEY(job_id) REFERENCES agent_jobs(id),
                     FOREIGN KEY(codex_session_id) REFERENCES codex_sessions(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    team_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    requester_user_id TEXT NOT NULL,
+                    prompt TEXT NOT NULL,
+                    schedule_type TEXT NOT NULL,
+                    timezone TEXT NOT NULL,
+                    time_of_day TEXT,
+                    days_of_week TEXT,
+                    run_at TEXT,
+                    next_run_at TEXT,
+                    last_run_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+                    id TEXT PRIMARY KEY,
+                    scheduled_task_id TEXT NOT NULL,
+                    scheduled_for TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    event_id TEXT NOT NULL UNIQUE,
+                    slack_thread_ts TEXT,
+                    job_id TEXT,
+                    classification TEXT,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(scheduled_task_id, scheduled_for),
+                    FOREIGN KEY(scheduled_task_id) REFERENCES scheduled_tasks(id),
+                    FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
+                );
                 """
             )
             self._ensure_slack_threads_active_session_id(conn)
@@ -564,6 +790,18 @@ class SQLiteJobRepository:
         if row is None:
             raise KeyError(codex_session_id)
         return _row_to_codex_session(row)
+
+    def _get_scheduled_task(self, conn: sqlite3.Connection, task_id: str) -> ScheduledTask:
+        row = conn.execute("SELECT * FROM scheduled_tasks WHERE id = ?", (task_id,)).fetchone()
+        if row is None:
+            raise KeyError(task_id)
+        return _row_to_scheduled_task(row)
+
+    def _get_scheduled_task_run(self, conn: sqlite3.Connection, run_id: str) -> ScheduledTaskRun:
+        row = conn.execute("SELECT * FROM scheduled_task_runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return _row_to_scheduled_task_run(row)
 
     def _ensure_slack_threads_active_session_id(self, conn: sqlite3.Connection) -> None:
         columns = {
@@ -704,6 +942,43 @@ def _row_to_codex_session(row: sqlite3.Row) -> CodexSession:
         last_used_at=_load_dt(row["last_used_at"]),
         expires_at=_load_dt(row["expires_at"]),
         archived_at=_load_dt(row["archived_at"]) if row["archived_at"] else None,
+        created_at=_load_dt(row["created_at"]),
+        updated_at=_load_dt(row["updated_at"]),
+    )
+
+
+def _row_to_scheduled_task(row: sqlite3.Row) -> ScheduledTask:
+    return ScheduledTask(
+        id=row["id"],
+        name=row["name"],
+        enabled=bool(row["enabled"]),
+        team_id=row["team_id"],
+        channel_id=row["channel_id"],
+        requester_user_id=row["requester_user_id"],
+        prompt=row["prompt"],
+        schedule_type=ScheduleType(row["schedule_type"]),
+        timezone=row["timezone"],
+        time_of_day=row["time_of_day"],
+        days_of_week=row["days_of_week"],
+        run_at=_load_dt(row["run_at"]) if row["run_at"] else None,
+        next_run_at=_load_dt(row["next_run_at"]) if row["next_run_at"] else None,
+        last_run_at=_load_dt(row["last_run_at"]) if row["last_run_at"] else None,
+        created_at=_load_dt(row["created_at"]),
+        updated_at=_load_dt(row["updated_at"]),
+    )
+
+
+def _row_to_scheduled_task_run(row: sqlite3.Row) -> ScheduledTaskRun:
+    return ScheduledTaskRun(
+        id=row["id"],
+        scheduled_task_id=row["scheduled_task_id"],
+        scheduled_for=_load_dt(row["scheduled_for"]),
+        status=ScheduleRunStatus(row["status"]),
+        event_id=row["event_id"],
+        slack_thread_ts=row["slack_thread_ts"],
+        job_id=row["job_id"],
+        classification=row["classification"],
+        error_message=row["error_message"],
         created_at=_load_dt(row["created_at"]),
         updated_at=_load_dt(row["updated_at"]),
     )

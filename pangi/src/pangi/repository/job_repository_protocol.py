@@ -10,6 +10,10 @@ from pangi.domain.models import (
     CodexSessionStatus,
     JobStatus,
     JobType,
+    ScheduleRunStatus,
+    ScheduleType,
+    ScheduledTask,
+    ScheduledTaskRun,
     SlackThread,
     ThreadMessage,
     ThreadMessageRole,
@@ -172,4 +176,66 @@ class JobRepository(Protocol):
 
     def list_codex_runs(self, *, limit: int = 50) -> list[CodexRun]:
         """관리자 확인용으로 최근 Codex 실행 기록 목록을 반환한다."""
+        ...
+
+    def create_scheduled_task(
+        self,
+        *,
+        name: str,
+        team_id: str,
+        channel_id: str,
+        requester_user_id: str,
+        prompt: str,
+        schedule_type: ScheduleType,
+        timezone: str,
+        next_run_at: datetime | None,
+        time_of_day: str | None = None,
+        days_of_week: str | None = None,
+        run_at: datetime | None = None,
+        enabled: bool = True,
+    ) -> ScheduledTask:
+        """예약 작업 정의를 저장한다."""
+        ...
+
+    def set_scheduled_task_enabled(self, task_id: str, *, enabled: bool) -> ScheduledTask:
+        """예약 작업 활성 상태를 변경한다."""
+        ...
+
+    def get_scheduled_task(self, task_id: str) -> ScheduledTask | None:
+        """예약 작업 id로 정의를 조회한다."""
+        ...
+
+    def list_scheduled_tasks(self, *, limit: int = 50) -> list[ScheduledTask]:
+        """관리자 확인용으로 예약 작업 목록을 반환한다."""
+        ...
+
+    def list_due_scheduled_tasks(self, *, now: datetime, limit: int = 20) -> list[ScheduledTask]:
+        """실행 예정 시간이 지난 활성 예약 작업 목록을 반환한다."""
+        ...
+
+    def claim_scheduled_task_run(
+        self,
+        *,
+        task_id: str,
+        scheduled_for: datetime,
+        next_run_at: datetime | None,
+    ) -> ScheduledTaskRun | None:
+        """예약 실행을 중복 없이 claim하고 다음 실행 시각을 갱신한다."""
+        ...
+
+    def update_scheduled_task_run(
+        self,
+        run_id: str,
+        *,
+        status: ScheduleRunStatus,
+        slack_thread_ts: str | None = None,
+        job_id: str | None = None,
+        classification: str | None = None,
+        error_message: str | None = None,
+    ) -> ScheduledTaskRun:
+        """예약 실행 결과를 갱신한다."""
+        ...
+
+    def list_scheduled_task_runs(self, *, limit: int = 50) -> list[ScheduledTaskRun]:
+        """관리자 확인용으로 최근 예약 실행 기록을 반환한다."""
         ...

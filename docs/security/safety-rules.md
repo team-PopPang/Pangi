@@ -51,6 +51,13 @@
 - Codex CLI interactive approval에 의존하지 않고, 승인은 Slack Approval Flow가 담당한다.
 - Codex가 commit/push/PR 생성을 직접 하지 않는다.
 
+## Scheduler 제한
+
+- Scheduler는 Codex runner를 직접 호출하지 않고 기존 Slack 요청 처리 usecase를 통과한다.
+- 예약 작업 생성 시 Slack user/channel allowlist를 검증한다.
+- 예약 prompt도 입력 가드레일과 Orchestrator 정책 보정을 그대로 통과한다.
+- `PANGI_SCHEDULER_ENABLED=0`이면 저장된 예약 작업이 있어도 자동 실행하지 않는다.
+
 ## Git 안전 규칙
 
 - main/develop 같은 기본 브랜치를 직접 수정하지 않는다.

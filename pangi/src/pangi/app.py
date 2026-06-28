@@ -8,9 +8,13 @@ from fastapi import FastAPI
 from pangi.config import get_settings
 from pangi.domain.models import AgentJob, JobStatus
 from pangi.infra.admin import router as admin_router
-from pangi.infra.codex import CodexExecRunner
+from pangi.infra.codex import CodexExecRunner, get_chat_responder
 from pangi.infra.git import get_worktree_manager
+from pangi.infra.git_mcp import get_git_context_provider
+from pangi.infra.notion import get_notion_context_provider
+from pangi.infra.orchestrator import get_request_orchestrator
 from pangi.infra.queue import InProcessJobQueue, set_job_queue
+from pangi.infra.scheduler import InProcessScheduler, ScheduledTaskRunner
 from pangi.infra.slack import router as slack_router
 from pangi.infra.slack.client import get_slack_client
 from pangi.repository import get_job_repository
@@ -86,6 +90,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     set_job_queue(queue)
     await queue.start()
+    scheduler: InProcessScheduler | None = None
+    if settings.scheduler_enabled:
+        scheduler_runner = ScheduledTaskRunner(
+            repository=repository,
+            job_queue=queue,
+            slack_notifier=slack_client,
+            request_orchestrator=get_request_orchestrator(),
+            chat_responder=get_chat_responder(),
+            notion_context_provider=get_notion_context_provider(),
+            git_context_provider=get_git_context_provider(),
+        )
+        scheduler = InProcessScheduler(
+            runner=scheduler_runner,
+            tick_seconds=settings.scheduler_tick_seconds,
+        )
+        await scheduler.start()
     sweeper_task = asyncio.create_task(
         _session_sweeper(session_service=session_service, worktree_manager=worktree_manager),
         name="pangi-session-sweeper",
@@ -93,6 +113,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if scheduler is not None:
+            await scheduler.stop()
         sweeper_task.cancel()
         await asyncio.gather(sweeper_task, return_exceptions=True)
         await queue.stop()

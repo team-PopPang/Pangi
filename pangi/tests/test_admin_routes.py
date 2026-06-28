@@ -175,6 +175,46 @@ def test_admin_login_can_view_db_page(monkeypatch, tmp_path):
     assert "<script>alert('x')</script>" not in html
 
 
+def test_admin_login_redirects_to_home_page(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path, enable_admin=True)
+    body = urlencode({"username": "pangi", "password": "admin-password"}).encode("utf-8")
+
+    login_status, login_headers, _ = request(
+        "POST",
+        "/pangi-admin/login",
+        body=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    cookie = login_headers["set-cookie"].split(";", 1)[0]
+    home_status, _, home_body = request("GET", "/pangi-admin/", headers={"Cookie": cookie})
+    html = home_body.decode("utf-8")
+
+    assert login_status == 303
+    assert login_headers["location"] == "/pangi-admin/"
+    assert home_status == 200
+    assert "Pangi Admin" in html
+    assert "DB 기록" in html
+    assert "스케줄" in html
+    assert "MCP 상태" in html
+
+
+def test_admin_root_path_redirects_to_home_slash(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path, enable_admin=True)
+    body = urlencode({"username": "pangi", "password": "admin-password"}).encode("utf-8")
+    _, login_headers, _ = request(
+        "POST",
+        "/pangi-admin/login",
+        body=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    cookie = login_headers["set-cookie"].split(";", 1)[0]
+
+    status, headers, _ = request("GET", "/pangi-admin", headers={"Cookie": cookie})
+
+    assert status in {307, 308}
+    assert headers["location"] == "http://testserver/pangi-admin/"
+
+
 def test_admin_login_can_view_notion_page(monkeypatch, tmp_path):
     configure_settings(monkeypatch, tmp_path, enable_admin=True, enable_notion=True)
     body = urlencode({"username": "pangi", "password": "admin-password"}).encode("utf-8")
@@ -195,6 +235,74 @@ def test_admin_login_can_view_notion_page(monkeypatch, tmp_path):
     assert "허용 page</dt><dd>1개" in html
     assert "허용 database</dt><dd>1개" in html
     assert "access-token" not in html
+
+
+def test_admin_can_view_mcp_page_without_secret_values(monkeypatch, tmp_path):
+    monkeypatch.setenv("PANGI_GIT_MCP_ENABLED", "1")
+    monkeypatch.setenv("PANGI_GIT_MCP_TOKEN", "secret-token")
+    configure_settings(monkeypatch, tmp_path, enable_admin=True, enable_notion=True)
+    body = urlencode({"username": "pangi", "password": "admin-password"}).encode("utf-8")
+    _, login_headers, _ = request(
+        "POST",
+        "/pangi-admin/login",
+        body=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    cookie = login_headers["set-cookie"].split(";", 1)[0]
+
+    status, _, response_body = request("GET", "/pangi-admin/mcp", headers={"Cookie": cookie})
+    html = response_body.decode("utf-8")
+
+    assert status == 200
+    assert "Pangi MCP" in html
+    assert "Notion MCP" in html
+    assert "Git MCP" in html
+    assert "pull_requests" in html
+    assert "secret-token" not in html
+    assert "placeholder-bot-token" not in html
+
+
+def test_admin_can_create_schedule(monkeypatch, tmp_path):
+    repository = configure_settings(monkeypatch, tmp_path, enable_admin=True)
+    login_body = urlencode({"username": "pangi", "password": "admin-password"}).encode("utf-8")
+    login_status, login_headers, _ = request(
+        "POST",
+        "/pangi-admin/login",
+        body=login_body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    cookie = login_headers["set-cookie"].split(";", 1)[0]
+    schedule_body = urlencode(
+        {
+            "name": "morning note",
+            "team_id": "T123",
+            "channel_id": "C123",
+            "requester_user_id": "U123",
+            "schedule_type": "daily",
+            "timezone": "Asia/Seoul",
+            "time_of_day": "09:00",
+            "prompt": "오늘 업무 요약해줘",
+        }
+    ).encode("utf-8")
+
+    create_status, create_headers, _ = request(
+        "POST",
+        "/pangi-admin/schedules",
+        body=schedule_body,
+        headers={"Content-Type": "application/x-www-form-urlencoded", "Cookie": cookie},
+    )
+    page_status, _, page_body = request("GET", "/pangi-admin/schedules", headers={"Cookie": cookie})
+    schedules = repository.list_scheduled_tasks(limit=10)
+    html = page_body.decode("utf-8")
+
+    assert login_status == 303
+    assert create_status == 303
+    assert create_headers["location"] == "/pangi-admin/schedules"
+    assert page_status == 200
+    assert len(schedules) == 1
+    assert schedules[0].name == "morning note"
+    assert "Pangi Schedules" in html
+    assert "morning note" in html
 
 
 def test_admin_notion_page_requires_login(monkeypatch, tmp_path):

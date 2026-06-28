@@ -36,6 +36,19 @@ class CodexSessionStatus(StrEnum):
     ARCHIVE_FAILED = "archive_failed"
 
 
+class ScheduleType(StrEnum):
+    ONCE = "once"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+
+
+class ScheduleRunStatus(StrEnum):
+    CLAIMED = "claimed"
+    SUBMITTED = "submitted"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -114,5 +127,40 @@ class CodexSession:
     last_used_at: datetime
     expires_at: datetime
     archived_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ScheduledTask:
+    id: str
+    name: str
+    enabled: bool
+    team_id: str
+    channel_id: str
+    requester_user_id: str
+    prompt: str
+    schedule_type: ScheduleType
+    timezone: str
+    time_of_day: str | None
+    days_of_week: str | None
+    run_at: datetime | None
+    next_run_at: datetime | None
+    last_run_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class ScheduledTaskRun:
+    id: str
+    scheduled_task_id: str
+    scheduled_for: datetime
+    status: ScheduleRunStatus
+    event_id: str
+    slack_thread_ts: str | None
+    job_id: str | None
+    classification: str | None
+    error_message: str | None
     created_at: datetime
     updated_at: datetime

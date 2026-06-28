@@ -122,6 +122,55 @@ FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
 FOREIGN KEY(codex_session_id) REFERENCES codex_sessions(id)
 ```
 
+### `scheduled_tasks`
+
+관리자가 등록한 예약 작업 정의를 저장한다.
+
+```text
+id TEXT PRIMARY KEY
+name TEXT NOT NULL
+enabled INTEGER NOT NULL
+team_id TEXT NOT NULL
+channel_id TEXT NOT NULL
+requester_user_id TEXT NOT NULL
+prompt TEXT NOT NULL
+schedule_type TEXT NOT NULL
+timezone TEXT NOT NULL
+time_of_day TEXT
+days_of_week TEXT
+run_at TEXT
+next_run_at TEXT
+last_run_at TEXT
+created_at TEXT NOT NULL
+updated_at TEXT NOT NULL
+```
+
+`schedule_type`은 현재 `once`, `daily`, `weekly`를 사용한다.
+`days_of_week`는 월요일 `0`부터 일요일 `6`까지의 값을 쉼표로 저장한다.
+
+### `scheduled_task_runs`
+
+예약 작업의 각 실행 시도와 기존 Slack/job 흐름 연결을 저장한다.
+
+```text
+id TEXT PRIMARY KEY
+scheduled_task_id TEXT NOT NULL
+scheduled_for TEXT NOT NULL
+status TEXT NOT NULL
+event_id TEXT NOT NULL UNIQUE
+slack_thread_ts TEXT
+job_id TEXT
+classification TEXT
+error_message TEXT
+created_at TEXT NOT NULL
+updated_at TEXT NOT NULL
+UNIQUE(scheduled_task_id, scheduled_for)
+FOREIGN KEY(scheduled_task_id) REFERENCES scheduled_tasks(id)
+FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
+```
+
+`status`는 현재 `claimed`, `submitted`, `succeeded`, `failed`를 사용한다.
+
 ## 구현 원칙
 
 - Python/FastAPI 기반을 우선한다.
@@ -150,6 +199,7 @@ FOREIGN KEY(codex_session_id) REFERENCES codex_sessions(id)
 - Notion 문서 context 작업: [docs/architecture/notion-context.md](docs/architecture/notion-context.md)
 - Git MCP context 작업: [docs/architecture/git-context.md](docs/architecture/git-context.md)
 - background job 작업: [docs/architecture/jobs.md](docs/architecture/jobs.md)
+- 스케줄러 작업: [docs/architecture/scheduler.md](docs/architecture/scheduler.md)
 - Codex 실행 작업: [docs/architecture/codex-runner.md](docs/architecture/codex-runner.md)
 - 출력 가드레일/Slack 응답 포맷 작업: [docs/architecture/output-pipeline.md](docs/architecture/output-pipeline.md)
 - git worktree / thread workspace 작업: [docs/architecture/git-worktree.md](docs/architecture/git-worktree.md)
