@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from datetime import datetime
@@ -10,6 +11,14 @@ from pangi.domain.models import (
     CodexRun,
     CodexSession,
     CodexSessionStatus,
+    EvalCaseDefinition,
+    EvalCaseResultRecord,
+    EvalCaseStatus,
+    EvalRedTeamCandidate,
+    EvalRedTeamCandidateStatus,
+    EvalRun,
+    EvalRunStatus,
+    EvalTraceEventRecord,
     JobStatus,
     JobType,
     ScheduleRunStatus,
@@ -500,6 +509,338 @@ class SQLiteJobRepository:
             ).fetchall()
             return [_row_to_scheduled_task_run(row) for row in rows]
 
+    def upsert_eval_case(
+        self,
+        *,
+        suite: str,
+        case_id: str,
+        name: str,
+        tags: tuple[str, ...],
+        case_json: dict[str, object],
+    ) -> EvalCaseDefinition:
+        now = utc_now()
+        row_id = _new_id("eval_case")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO eval_cases (
+                    id, suite, case_id, name, tags, case_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(suite, case_id) DO UPDATE SET
+                    name = excluded.name,
+                    tags = excluded.tags,
+                    case_json = excluded.case_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    row_id,
+                    suite,
+                    case_id,
+                    name,
+                    _dump_json(list(tags)),
+                    _dump_json(case_json),
+                    _dump_dt(now),
+                    _dump_dt(now),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM eval_cases WHERE suite = ? AND case_id = ?",
+                (suite, case_id),
+            ).fetchone()
+            return _row_to_eval_case_definition(row)
+
+    def list_eval_cases(self, *, limit: int = 100) -> list[EvalCaseDefinition]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM eval_cases
+                ORDER BY suite ASC, case_id ASC
+                LIMIT ?
+                """,
+                (_normalize_limit(limit),),
+            ).fetchall()
+            return [_row_to_eval_case_definition(row) for row in rows]
+
+    def create_eval_run(
+        self,
+        *,
+        suite: str,
+        mode: str,
+        status: EvalRunStatus,
+        total_count: int,
+        passed_count: int,
+        failed_count: int,
+        prompt_fingerprint: str | None,
+        model_fingerprint: str | None,
+        provider_fingerprint: str | None,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> EvalRun:
+        now = utc_now()
+        run_id = _new_id("eval_run")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO eval_runs (
+                    id, suite, mode, status, total_count, passed_count, failed_count,
+                    prompt_fingerprint, model_fingerprint, provider_fingerprint,
+                    started_at, finished_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    suite,
+                    mode,
+                    status.value,
+                    total_count,
+                    passed_count,
+                    failed_count,
+                    prompt_fingerprint,
+                    model_fingerprint,
+                    provider_fingerprint,
+                    _dump_dt(started_at),
+                    _dump_dt(finished_at),
+                    _dump_dt(now),
+                    _dump_dt(now),
+                ),
+            )
+            return self._get_eval_run(conn, run_id)
+
+    def append_eval_case_result(
+        self,
+        *,
+        eval_run_id: str,
+        suite: str,
+        case_id: str,
+        name: str,
+        status: EvalCaseStatus,
+        classification: str,
+        job_id: str | None,
+        job_repo_key: str | None,
+        failures: tuple[str, ...],
+        slack_messages: tuple[str, ...],
+    ) -> EvalCaseResultRecord:
+        now = utc_now()
+        result_id = _new_id("eval_result")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO eval_case_results (
+                    id, eval_run_id, suite, case_id, name, status, classification,
+                    job_id, job_repo_key, failures, slack_messages, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    result_id,
+                    eval_run_id,
+                    suite,
+                    case_id,
+                    name,
+                    status.value,
+                    classification,
+                    job_id,
+                    job_repo_key,
+                    _dump_json(list(failures)),
+                    _dump_json(list(slack_messages)),
+                    _dump_dt(now),
+                ),
+            )
+            return self._get_eval_case_result(conn, result_id)
+
+    def append_eval_trace_event(
+        self,
+        *,
+        eval_case_result_id: str,
+        event_index: int,
+        name: str,
+        attributes: dict[str, object],
+    ) -> EvalTraceEventRecord:
+        now = utc_now()
+        event_id = _new_id("eval_trace")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO eval_trace_events (
+                    id, eval_case_result_id, event_index, name, attributes, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    eval_case_result_id,
+                    event_index,
+                    name,
+                    _dump_json(attributes),
+                    _dump_dt(now),
+                ),
+            )
+            return self._get_eval_trace_event(conn, event_id)
+
+    def list_eval_runs(self, *, limit: int = 50) -> list[EvalRun]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM eval_runs
+                ORDER BY started_at DESC, created_at DESC
+                LIMIT ?
+                """,
+                (_normalize_limit(limit),),
+            ).fetchall()
+            return [_row_to_eval_run(row) for row in rows]
+
+    def list_eval_case_results(
+        self,
+        *,
+        eval_run_id: str | None = None,
+        limit: int = 100,
+    ) -> list[EvalCaseResultRecord]:
+        with self._connect() as conn:
+            if eval_run_id:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM eval_case_results
+                    WHERE eval_run_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (eval_run_id, _normalize_limit(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM eval_case_results
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (_normalize_limit(limit),),
+                ).fetchall()
+            return [_row_to_eval_case_result(row) for row in rows]
+
+    def list_eval_trace_events(
+        self,
+        *,
+        eval_case_result_id: str | None = None,
+        limit: int = 200,
+    ) -> list[EvalTraceEventRecord]:
+        with self._connect() as conn:
+            if eval_case_result_id:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM eval_trace_events
+                    WHERE eval_case_result_id = ?
+                    ORDER BY event_index ASC
+                    LIMIT ?
+                    """,
+                    (eval_case_result_id, _normalize_limit(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM eval_trace_events
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (_normalize_limit(limit),),
+                ).fetchall()
+            return [_row_to_eval_trace_event(row) for row in rows]
+
+    def create_eval_red_team_candidate(
+        self,
+        *,
+        suite: str,
+        case_id: str,
+        name: str,
+        input: str,
+        attack_surface: str,
+        case_json: dict[str, object],
+    ) -> EvalRedTeamCandidate:
+        now = utc_now()
+        candidate_id = _new_id("eval_candidate")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO eval_red_team_candidates (
+                    id, suite, case_id, name, input, attack_surface, status,
+                    case_json, created_at, updated_at, approved_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(case_id) DO UPDATE SET
+                    suite = excluded.suite,
+                    name = excluded.name,
+                    input = excluded.input,
+                    attack_surface = excluded.attack_surface,
+                    case_json = excluded.case_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    candidate_id,
+                    suite,
+                    case_id,
+                    name,
+                    input,
+                    attack_surface,
+                    EvalRedTeamCandidateStatus.DRAFT.value,
+                    _dump_json(case_json),
+                    _dump_dt(now),
+                    _dump_dt(now),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM eval_red_team_candidates WHERE case_id = ?",
+                (case_id,),
+            ).fetchone()
+            return _row_to_eval_red_team_candidate(row)
+
+    def set_eval_red_team_candidate_status(
+        self,
+        candidate_id: str,
+        *,
+        status: EvalRedTeamCandidateStatus,
+    ) -> EvalRedTeamCandidate:
+        now = utc_now()
+        approved_at = now if status == EvalRedTeamCandidateStatus.APPROVED else None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE eval_red_team_candidates
+                SET status = ?, approved_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status.value,
+                    _dump_dt(approved_at) if approved_at else None,
+                    _dump_dt(now),
+                    candidate_id,
+                ),
+            )
+            return self._get_eval_red_team_candidate(conn, candidate_id)
+
+    def list_eval_red_team_candidates(
+        self,
+        *,
+        status: EvalRedTeamCandidateStatus | None = None,
+        limit: int = 50,
+    ) -> list[EvalRedTeamCandidate]:
+        with self._connect() as conn:
+            if status is not None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM eval_red_team_candidates
+                    WHERE status = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (status.value, _normalize_limit(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM eval_red_team_candidates
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (_normalize_limit(limit),),
+                ).fetchall()
+            return [_row_to_eval_red_team_candidate(row) for row in rows]
+
     def get_active_codex_session(self, slack_thread_id: str) -> CodexSession | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -753,6 +1094,76 @@ class SQLiteJobRepository:
                     FOREIGN KEY(scheduled_task_id) REFERENCES scheduled_tasks(id),
                     FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS eval_cases (
+                    id TEXT PRIMARY KEY,
+                    suite TEXT NOT NULL,
+                    case_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    tags TEXT NOT NULL,
+                    case_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(suite, case_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS eval_runs (
+                    id TEXT PRIMARY KEY,
+                    suite TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    total_count INTEGER NOT NULL,
+                    passed_count INTEGER NOT NULL,
+                    failed_count INTEGER NOT NULL,
+                    prompt_fingerprint TEXT,
+                    model_fingerprint TEXT,
+                    provider_fingerprint TEXT,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS eval_case_results (
+                    id TEXT PRIMARY KEY,
+                    eval_run_id TEXT NOT NULL,
+                    suite TEXT NOT NULL,
+                    case_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    classification TEXT NOT NULL,
+                    job_id TEXT,
+                    job_repo_key TEXT,
+                    failures TEXT NOT NULL,
+                    slack_messages TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(eval_run_id) REFERENCES eval_runs(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS eval_trace_events (
+                    id TEXT PRIMARY KEY,
+                    eval_case_result_id TEXT NOT NULL,
+                    event_index INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    attributes TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(eval_case_result_id, event_index),
+                    FOREIGN KEY(eval_case_result_id) REFERENCES eval_case_results(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS eval_red_team_candidates (
+                    id TEXT PRIMARY KEY,
+                    suite TEXT NOT NULL,
+                    case_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    input TEXT NOT NULL,
+                    attack_surface TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    case_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    approved_at TEXT
+                );
                 """
             )
             self._ensure_slack_threads_active_session_id(conn)
@@ -802,6 +1213,30 @@ class SQLiteJobRepository:
         if row is None:
             raise KeyError(run_id)
         return _row_to_scheduled_task_run(row)
+
+    def _get_eval_run(self, conn: sqlite3.Connection, run_id: str) -> EvalRun:
+        row = conn.execute("SELECT * FROM eval_runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return _row_to_eval_run(row)
+
+    def _get_eval_case_result(self, conn: sqlite3.Connection, result_id: str) -> EvalCaseResultRecord:
+        row = conn.execute("SELECT * FROM eval_case_results WHERE id = ?", (result_id,)).fetchone()
+        if row is None:
+            raise KeyError(result_id)
+        return _row_to_eval_case_result(row)
+
+    def _get_eval_trace_event(self, conn: sqlite3.Connection, event_id: str) -> EvalTraceEventRecord:
+        row = conn.execute("SELECT * FROM eval_trace_events WHERE id = ?", (event_id,)).fetchone()
+        if row is None:
+            raise KeyError(event_id)
+        return _row_to_eval_trace_event(row)
+
+    def _get_eval_red_team_candidate(self, conn: sqlite3.Connection, candidate_id: str) -> EvalRedTeamCandidate:
+        row = conn.execute("SELECT * FROM eval_red_team_candidates WHERE id = ?", (candidate_id,)).fetchone()
+        if row is None:
+            raise KeyError(candidate_id)
+        return _row_to_eval_red_team_candidate(row)
 
     def _ensure_slack_threads_active_session_id(self, conn: sqlite3.Connection) -> None:
         columns = {
@@ -856,6 +1291,26 @@ def _dump_dt(value: object) -> str:
     if not hasattr(value, "isoformat"):
         raise TypeError("Expected datetime-like value")
     return value.isoformat()
+
+
+def _dump_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _load_json(value: str) -> object:
+    return json.loads(value)
+
+
+def _load_json_dict(value: str) -> dict[str, object]:
+    data = _load_json(value)
+    return data if isinstance(data, dict) else {}
+
+
+def _load_json_tuple(value: str) -> tuple[str, ...]:
+    data = _load_json(value)
+    if not isinstance(data, list):
+        return ()
+    return tuple(str(item) for item in data)
 
 
 def _load_dt(value: str):
@@ -981,6 +1436,82 @@ def _row_to_scheduled_task_run(row: sqlite3.Row) -> ScheduledTaskRun:
         error_message=row["error_message"],
         created_at=_load_dt(row["created_at"]),
         updated_at=_load_dt(row["updated_at"]),
+    )
+
+
+def _row_to_eval_case_definition(row: sqlite3.Row) -> EvalCaseDefinition:
+    return EvalCaseDefinition(
+        id=row["id"],
+        suite=row["suite"],
+        case_id=row["case_id"],
+        name=row["name"],
+        tags=_load_json_tuple(row["tags"]),
+        case_json=_load_json_dict(row["case_json"]),
+        created_at=_load_dt(row["created_at"]),
+        updated_at=_load_dt(row["updated_at"]),
+    )
+
+
+def _row_to_eval_run(row: sqlite3.Row) -> EvalRun:
+    return EvalRun(
+        id=row["id"],
+        suite=row["suite"],
+        mode=row["mode"],
+        status=EvalRunStatus(row["status"]),
+        total_count=row["total_count"],
+        passed_count=row["passed_count"],
+        failed_count=row["failed_count"],
+        prompt_fingerprint=row["prompt_fingerprint"],
+        model_fingerprint=row["model_fingerprint"],
+        provider_fingerprint=row["provider_fingerprint"],
+        started_at=_load_dt(row["started_at"]),
+        finished_at=_load_dt(row["finished_at"]),
+        created_at=_load_dt(row["created_at"]),
+        updated_at=_load_dt(row["updated_at"]),
+    )
+
+
+def _row_to_eval_case_result(row: sqlite3.Row) -> EvalCaseResultRecord:
+    return EvalCaseResultRecord(
+        id=row["id"],
+        eval_run_id=row["eval_run_id"],
+        suite=row["suite"],
+        case_id=row["case_id"],
+        name=row["name"],
+        status=EvalCaseStatus(row["status"]),
+        classification=row["classification"],
+        job_id=row["job_id"],
+        job_repo_key=row["job_repo_key"],
+        failures=_load_json_tuple(row["failures"]),
+        slack_messages=_load_json_tuple(row["slack_messages"]),
+        created_at=_load_dt(row["created_at"]),
+    )
+
+
+def _row_to_eval_trace_event(row: sqlite3.Row) -> EvalTraceEventRecord:
+    return EvalTraceEventRecord(
+        id=row["id"],
+        eval_case_result_id=row["eval_case_result_id"],
+        event_index=row["event_index"],
+        name=row["name"],
+        attributes=_load_json_dict(row["attributes"]),
+        created_at=_load_dt(row["created_at"]),
+    )
+
+
+def _row_to_eval_red_team_candidate(row: sqlite3.Row) -> EvalRedTeamCandidate:
+    return EvalRedTeamCandidate(
+        id=row["id"],
+        suite=row["suite"],
+        case_id=row["case_id"],
+        name=row["name"],
+        input=row["input"],
+        attack_surface=row["attack_surface"],
+        status=EvalRedTeamCandidateStatus(row["status"]),
+        case_json=_load_json_dict(row["case_json"]),
+        created_at=_load_dt(row["created_at"]),
+        updated_at=_load_dt(row["updated_at"]),
+        approved_at=_load_dt(row["approved_at"]) if row["approved_at"] else None,
     )
 
 

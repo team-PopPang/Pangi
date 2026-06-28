@@ -49,6 +49,22 @@ class ScheduleRunStatus(StrEnum):
     FAILED = "failed"
 
 
+class EvalRunStatus(StrEnum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class EvalCaseStatus(StrEnum):
+    PASSED = "passed"
+    FAILED = "failed"
+
+
+class EvalRedTeamCandidateStatus(StrEnum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -164,3 +180,74 @@ class ScheduledTaskRun:
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class EvalCaseDefinition:
+    id: str
+    suite: str
+    case_id: str
+    name: str
+    tags: tuple[str, ...]
+    case_json: dict[str, object]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class EvalRun:
+    id: str
+    suite: str
+    mode: str
+    status: EvalRunStatus
+    total_count: int
+    passed_count: int
+    failed_count: int
+    prompt_fingerprint: str | None
+    model_fingerprint: str | None
+    provider_fingerprint: str | None
+    started_at: datetime
+    finished_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class EvalCaseResultRecord:
+    id: str
+    eval_run_id: str
+    suite: str
+    case_id: str
+    name: str
+    status: EvalCaseStatus
+    classification: str
+    job_id: str | None
+    job_repo_key: str | None
+    failures: tuple[str, ...]
+    slack_messages: tuple[str, ...]
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class EvalTraceEventRecord:
+    id: str
+    eval_case_result_id: str
+    event_index: int
+    name: str
+    attributes: dict[str, object]
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class EvalRedTeamCandidate:
+    id: str
+    suite: str
+    case_id: str
+    name: str
+    input: str
+    attack_surface: str
+    status: EvalRedTeamCandidateStatus
+    case_json: dict[str, object]
+    created_at: datetime
+    updated_at: datetime
+    approved_at: datetime | None

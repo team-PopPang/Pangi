@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from pangi.usecase.request_decision import ClassifiedRequest, RequestClassification
@@ -64,6 +65,8 @@ class EvalCaseResult:
 @dataclass(frozen=True)
 class EvalRunResult:
     results: tuple[EvalCaseResult, ...]
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
     @property
     def passed(self) -> bool:

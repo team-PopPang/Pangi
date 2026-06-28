@@ -108,7 +108,7 @@ flowchart TD
 - thread workspace 내부 repo checkout 생성
 - Codex chat 응답 경로
 - 외부 웹/인터넷 분석 요청 차단
-- SQLite 기반 `SlackThread`, `CodexSession`, `AgentJob`, `CodexRun`, `ScheduledTask`, `ScheduledTaskRun` 저장소
+- SQLite 기반 `SlackThread`, `CodexSession`, `AgentJob`, `CodexRun`, `ScheduledTask`, `ScheduledTaskRun`, Eval run/result/trace 저장소
 - in-process background worker
 - in-process scheduler와 예약 실행 기록
 - job 상태 전환: `queued`, `running`, `succeeded`, `failed`, `timed_out`, `cancelled`
@@ -123,6 +123,7 @@ flowchart TD
 - Slack bot 응답 전용 Markdown to Slack 변환
 - 관리자 DB 확인 페이지 `/pangi-admin/db`
 - 관리자 홈 페이지 `/pangi-admin`
+- 관리자 Eval 운영 페이지 `/pangi-admin/evals`
 - 관리자 MCP 상태 페이지 `/pangi-admin/mcp`
 - 관리자 Notion OAuth 연결 페이지 `/pangi-admin/notion`
 - 관리자 스케줄 페이지 `/pangi-admin/schedules`
@@ -323,6 +324,88 @@ flowchart TD
 
 `scheduled_task_runs`는 `UNIQUE(scheduled_task_id, scheduled_for)`로 같은 예약 시각의 중복 실행을 막습니다.
 
+### `eval_cases`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 Eval case snapshot id |
+| `suite` | `TEXT` | `NOT NULL` | suite 이름 |
+| `case_id` | `TEXT` | `NOT NULL` | JSON DSL의 case id |
+| `name` | `TEXT` | `NOT NULL` | 사람이 읽는 case 이름 |
+| `tags` | `TEXT` | `NOT NULL` | JSON 배열 문자열 |
+| `case_json` | `TEXT` | `NOT NULL` | 원본 case DSL snapshot |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
+| `updated_at` | `TEXT` | `NOT NULL` | 수정 시각 |
+
+`eval_cases`는 `UNIQUE(suite, case_id)`로 같은 case snapshot을 갱신합니다.
+
+### `eval_runs`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 Eval run id |
+| `suite` | `TEXT` | `NOT NULL` | 실행 suite 이름 |
+| `mode` | `TEXT` | `NOT NULL` | 실행 모드 |
+| `status` | `TEXT` | `NOT NULL` | `succeeded` 또는 `failed` |
+| `total_count` | `INTEGER` | `NOT NULL` | 전체 case 수 |
+| `passed_count` | `INTEGER` | `NOT NULL` | 통과 case 수 |
+| `failed_count` | `INTEGER` | `NOT NULL` | 실패 case 수 |
+| `prompt_fingerprint` | `TEXT` |  | prompt 파일 fingerprint |
+| `model_fingerprint` | `TEXT` |  | model 설정 fingerprint |
+| `provider_fingerprint` | `TEXT` |  | provider/trace contract fingerprint |
+| `started_at` | `TEXT` | `NOT NULL` | 시작 시각 |
+| `finished_at` | `TEXT` | `NOT NULL` | 종료 시각 |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
+| `updated_at` | `TEXT` | `NOT NULL` | 수정 시각 |
+
+### `eval_case_results`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 case result id |
+| `eval_run_id` | `TEXT` | `NOT NULL`, `FOREIGN KEY` | `eval_runs.id` 참조 |
+| `suite` | `TEXT` | `NOT NULL` | case suite |
+| `case_id` | `TEXT` | `NOT NULL` | case id |
+| `name` | `TEXT` | `NOT NULL` | case 이름 |
+| `status` | `TEXT` | `NOT NULL` | `passed` 또는 `failed` |
+| `classification` | `TEXT` | `NOT NULL` | 요청 분류 결과 |
+| `job_id` | `TEXT` |  | 생성된 job id |
+| `job_repo_key` | `TEXT` |  | job repo key |
+| `failures` | `TEXT` | `NOT NULL` | 실패 이유 JSON 배열 |
+| `slack_messages` | `TEXT` | `NOT NULL` | Slack 출력 JSON 배열 |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
+
+### `eval_trace_events`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 trace event id |
+| `eval_case_result_id` | `TEXT` | `NOT NULL`, `FOREIGN KEY` | `eval_case_results.id` 참조 |
+| `event_index` | `INTEGER` | `NOT NULL` | case 안의 trace 순서 |
+| `name` | `TEXT` | `NOT NULL` | trace event 이름 |
+| `attributes` | `TEXT` | `NOT NULL` | event attribute JSON |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
+
+`eval_trace_events`는 `UNIQUE(eval_case_result_id, event_index)`로 같은 case 결과 안의 trace 순서를 중복 저장하지 않습니다.
+
+### `eval_red_team_candidates`
+
+| 컬럼 | 타입 | 제약 | 설명 |
+| --- | --- | --- | --- |
+| `id` | `TEXT` | `PRIMARY KEY` | 내부 Red Team 후보 id |
+| `suite` | `TEXT` | `NOT NULL` | 후보 suite 이름 |
+| `case_id` | `TEXT` | `NOT NULL`, `UNIQUE` | 후보 case id |
+| `name` | `TEXT` | `NOT NULL` | 후보 이름 |
+| `input` | `TEXT` | `NOT NULL` | 공격 입력 |
+| `attack_surface` | `TEXT` | `NOT NULL` | 공격 표면 tag |
+| `status` | `TEXT` | `NOT NULL` | `draft`, `approved`, `rejected` |
+| `case_json` | `TEXT` | `NOT NULL` | 후보 case DSL |
+| `created_at` | `TEXT` | `NOT NULL` | 생성 시각 |
+| `updated_at` | `TEXT` | `NOT NULL` | 수정 시각 |
+| `approved_at` | `TEXT` |  | 승인 시각 |
+
+승인된 후보는 admin/scheduled Eval 실행에 함께 포함됩니다.
+
 ## 로컬 실행
 
 ```bash
@@ -401,6 +484,9 @@ PANGI_GIT_MCP_WRITE_ENABLED=0
 PANGI_GIT_CLONE_URL_TEMPLATE=https://github.com/{org}/{repo}.git
 PANGI_SCHEDULER_ENABLED=0
 PANGI_SCHEDULER_TICK_SECONDS=30
+PANGI_EVAL_SCHEDULER_ENABLED=0
+PANGI_EVAL_SCHEDULER_INTERVAL_SECONDS=86400
+PANGI_EVAL_ALERT_CHANNEL_ID=
 PANGI_ENABLE_ADMIN_PAGES=0
 PANGI_ADMIN_PASSWORD=
 ```
@@ -441,6 +527,9 @@ PANGI_ADMIN_PASSWORD=
 | `PANGI_CODEX_SESSION_IDLE_TIMEOUT_SECONDS` | `3600` | Slack thread의 active Codex session idle timeout |
 | `PANGI_SCHEDULER_ENABLED` | `0` | 관리자 페이지에 저장된 예약 작업의 자동 실행 여부 |
 | `PANGI_SCHEDULER_TICK_SECONDS` | `30` | in-process scheduler가 due schedule을 확인하는 간격 |
+| `PANGI_EVAL_SCHEDULER_ENABLED` | `0` | Eval suite 자동 실행 여부 |
+| `PANGI_EVAL_SCHEDULER_INTERVAL_SECONDS` | `86400` | in-process Eval scheduler 실행 간격 |
+| `PANGI_EVAL_ALERT_CHANNEL_ID` | 빈 값 | Eval 실패 알림을 보낼 Slack channel id. 비우면 알림을 보내지 않음 |
 
 입력 가드레일은 AI가 아니라 코드로 유지합니다. Orchestrator는 심층 repo 분석이 아니라 흐름을 정하는 단계이므로 기본 mini 모델과 `low` reasoning을 사용합니다. 팡이가 실행하는 `codex exec`는 `-c model_reasoning_effort="..."`를 명시해, 팡이를 개발하는 사람의 `.codex/config.toml` 설정이 런타임 호출에 섞이지 않게 합니다.
 

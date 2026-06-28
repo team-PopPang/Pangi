@@ -12,7 +12,24 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from pangi.config import get_settings
-from pangi.domain.models import AgentJob, CodexRun, ScheduleType, ScheduledTask, ScheduledTaskRun, SlackThread, utc_now
+from pangi.domain.models import (
+    AgentJob,
+    CodexRun,
+    EvalCaseDefinition,
+    EvalCaseResultRecord,
+    EvalCaseStatus,
+    EvalRedTeamCandidate,
+    EvalRedTeamCandidateStatus,
+    EvalRun,
+    EvalTraceEventRecord,
+    ScheduleType,
+    ScheduledTask,
+    ScheduledTaskRun,
+    SlackThread,
+    utc_now,
+)
+from pangi.evaluations.operations import run_eval_suite
+from pangi.evaluations.red_team import generate_red_team_candidates
 from pangi.infra.notion.oauth import NotionOAuthClient, NotionOAuthError
 from pangi.infra.notion.token_store import JsonNotionTokenStore
 from pangi.repository import get_job_repository
@@ -36,6 +53,7 @@ ADMIN_NOTION_CONNECT_PATH = f"{ADMIN_PATH_PREFIX}/notion/connect"
 ADMIN_NOTION_CALLBACK_PATH = f"{ADMIN_PATH_PREFIX}/notion/callback"
 ADMIN_NOTION_DISCONNECT_PATH = f"{ADMIN_PATH_PREFIX}/notion/disconnect"
 ADMIN_SCHEDULES_PATH = f"{ADMIN_PATH_PREFIX}/schedules"
+ADMIN_EVALS_PATH = f"{ADMIN_PATH_PREFIX}/evals"
 
 router = APIRouter(prefix=ADMIN_PATH_PREFIX, tags=["admin"])
 ADMIN_USERNAME = "pangi"
@@ -83,6 +101,7 @@ async def admin_home(request: Request) -> Response:
             jobs=repository.list_jobs(limit=10),
             tasks=repository.list_scheduled_tasks(limit=10),
             runs=repository.list_scheduled_task_runs(limit=10),
+            eval_runs=repository.list_eval_runs(limit=10),
         )
     )
 
@@ -179,6 +198,90 @@ async def admin_disable_schedule(request: Request, task_id: str) -> Response:
         return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
     get_job_repository().set_scheduled_task_enabled(task_id, enabled=False)
     return RedirectResponse(ADMIN_SCHEDULES_PATH, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/evals", response_class=HTMLResponse)
+async def admin_evals(request: Request) -> Response:
+    _require_admin_enabled()
+    if not _has_valid_session(request):
+        return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    repository = get_job_repository()
+    eval_runs = repository.list_eval_runs(limit=30)
+    selected_run_id = request.query_params.get("run_id")
+    if selected_run_id is None and eval_runs:
+        selected_run_id = eval_runs[0].id
+    results = (
+        repository.list_eval_case_results(eval_run_id=selected_run_id, limit=120)
+        if selected_run_id
+        else []
+    )
+    trace_target = next((result for result in results if result.status == EvalCaseStatus.FAILED), None)
+    if trace_target is None and results:
+        trace_target = results[0]
+    trace_events = (
+        repository.list_eval_trace_events(eval_case_result_id=trace_target.id, limit=200)
+        if trace_target is not None
+        else []
+    )
+    return HTMLResponse(
+        _render_evals_page(
+            runs=eval_runs,
+            results=results,
+            trace_events=trace_events,
+            candidates=repository.list_eval_red_team_candidates(limit=50),
+            cases=repository.list_eval_cases(limit=200),
+            selected_run_id=selected_run_id,
+        )
+    )
+
+
+@router.post("/evals/run")
+async def admin_run_evals(request: Request) -> Response:
+    _require_admin_enabled()
+    if not _has_valid_session(request):
+        return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    repository = get_job_repository()
+    suite_run = await run_eval_suite(
+        repository=repository,
+        suite_name="admin",
+        persist=True,
+        include_approved_red_team=True,
+    )
+    suffix = f"?run_id={suite_run.persisted_run.id}" if suite_run.persisted_run else ""
+    return RedirectResponse(ADMIN_EVALS_PATH + suffix, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/evals/red-team-candidates")
+async def admin_generate_red_team_candidates(request: Request) -> Response:
+    _require_admin_enabled()
+    if not _has_valid_session(request):
+        return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    generate_red_team_candidates(get_job_repository())
+    return RedirectResponse(ADMIN_EVALS_PATH, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/evals/red-team-candidates/{candidate_id}/approve")
+async def admin_approve_red_team_candidate(request: Request, candidate_id: str) -> Response:
+    _require_admin_enabled()
+    if not _has_valid_session(request):
+        return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    get_job_repository().set_eval_red_team_candidate_status(
+        candidate_id,
+        status=EvalRedTeamCandidateStatus.APPROVED,
+    )
+    return RedirectResponse(ADMIN_EVALS_PATH, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/evals/red-team-candidates/{candidate_id}/reject")
+async def admin_reject_red_team_candidate(request: Request, candidate_id: str) -> Response:
+    _require_admin_enabled()
+    if not _has_valid_session(request):
+        return RedirectResponse(ADMIN_LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
+    get_job_repository().set_eval_red_team_candidate_status(
+        candidate_id,
+        status=EvalRedTeamCandidateStatus.REJECTED,
+    )
+    return RedirectResponse(ADMIN_EVALS_PATH, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/notion", response_class=HTMLResponse)
@@ -431,10 +534,17 @@ def _render_home_page(
     jobs: list[AgentJob],
     tasks: list[ScheduledTask],
     runs: list[ScheduledTaskRun],
+    eval_runs: list[EvalRun],
 ) -> str:
     settings = get_settings()
     active_tasks = sum(1 for task in tasks if task.enabled)
     failed_runs = sum(1 for run in runs if run.status.value == "failed")
+    latest_eval = eval_runs[0] if eval_runs else None
+    latest_eval_label = (
+        f"{latest_eval.passed_count}/{latest_eval.total_count}"
+        if latest_eval
+        else "없음"
+    )
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -489,7 +599,7 @@ def _render_home_page(
     }}
     .cards {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 14px;
     }}
     .card {{
@@ -572,6 +682,7 @@ def _render_home_page(
     <div class="nav">
       <a href="{ADMIN_DB_PATH}">DB</a>
       <a href="{ADMIN_SCHEDULES_PATH}">스케줄</a>
+      <a href="{ADMIN_EVALS_PATH}">Eval</a>
       <a href="{ADMIN_MCP_PATH}">MCP</a>
       <a href="{ADMIN_NOTION_PATH}">Notion</a>
       <form method="post" action="{ADMIN_LOGOUT_PATH}">
@@ -589,6 +700,10 @@ def _render_home_page(
         <strong>스케줄</strong>
         <span>반복 작업을 만들고 예약 실행 이력을 봅니다.</span>
       </a>
+      <a class="card" href="{ADMIN_EVALS_PATH}">
+        <strong>Eval</strong>
+        <span>Agent 행동 회귀와 Red Team 후보를 운영합니다.</span>
+      </a>
       <a class="card" href="{ADMIN_MCP_PATH}">
         <strong>MCP 상태</strong>
         <span>Notion/Git MCP 설정과 read-only context 상태를 봅니다.</span>
@@ -602,7 +717,8 @@ def _render_home_page(
       {_metric(len(jobs), "최근 job")}
       {_metric(active_tasks, "활성 스케줄")}
       {_metric(failed_runs, "최근 실패 예약")}
-      {_metric("켜짐" if settings.scheduler_enabled else "꺼짐", "Scheduler")}
+      {_metric(latest_eval_label, "최근 Eval pass")}
+      {_metric("켜짐" if settings.eval_scheduler_enabled else "꺼짐", "Eval Scheduler")}
     </div>
     <div class="panels">
       <section class="panel">
@@ -733,6 +849,7 @@ def _render_mcp_page(*, notion_connected: bool) -> str:
       <a href="{ADMIN_HOME_PATH}">홈</a>
       <a href="{ADMIN_DB_PATH}">DB</a>
       <a href="{ADMIN_SCHEDULES_PATH}">스케줄</a>
+      <a href="{ADMIN_EVALS_PATH}">Eval</a>
       <a href="{ADMIN_NOTION_PATH}">Notion</a>
       <form method="post" action="{ADMIN_LOGOUT_PATH}">
         <button class="logout" type="submit">로그아웃</button>
@@ -870,6 +987,7 @@ def _render_page(
     <div class="nav">
       <a href="{ADMIN_HOME_PATH}">홈</a>
       <a href="{ADMIN_SCHEDULES_PATH}">스케줄</a>
+      <a href="{ADMIN_EVALS_PATH}">Eval</a>
       <a href="{ADMIN_MCP_PATH}">MCP</a>
       <a href="{ADMIN_NOTION_PATH}">Notion 연결</a>
       <form method="post" action="{ADMIN_LOGOUT_PATH}">
@@ -973,6 +1091,7 @@ def _render_notion_page(*, connection_status: str = "disconnected", error: str |
       <a class="link secondary" href="{ADMIN_DB_PATH}">DB 보기</a>
       <a class="link secondary" href="{ADMIN_MCP_PATH}">MCP</a>
       <a class="link secondary" href="{ADMIN_SCHEDULES_PATH}">스케줄</a>
+      <a class="link secondary" href="{ADMIN_EVALS_PATH}">Eval</a>
     </div>
   </header>
   <main>
@@ -1138,6 +1257,7 @@ def _render_schedules_page(
       <a class="link secondary" href="{ADMIN_HOME_PATH}">홈</a>
       <a class="link secondary" href="{ADMIN_DB_PATH}">DB 보기</a>
       <a class="link secondary" href="{ADMIN_MCP_PATH}">MCP</a>
+      <a class="link secondary" href="{ADMIN_EVALS_PATH}">Eval</a>
       <a class="link secondary" href="{ADMIN_NOTION_PATH}">Notion 연결</a>
       <form method="post" action="{ADMIN_LOGOUT_PATH}">
         <button class="secondary" type="submit">로그아웃</button>
@@ -1215,6 +1335,160 @@ def _render_schedules_page(
 </html>"""
 
 
+def _render_evals_page(
+    *,
+    runs: list[EvalRun],
+    results: list[EvalCaseResultRecord],
+    trace_events: list[EvalTraceEventRecord],
+    candidates: list[EvalRedTeamCandidate],
+    cases: list[EvalCaseDefinition],
+    selected_run_id: str | None,
+) -> str:
+    settings = get_settings()
+    latest_run = runs[0] if runs else None
+    pass_rate = f"{latest_run.passed_count}/{latest_run.total_count}" if latest_run else "없음"
+    draft_count = sum(1 for candidate in candidates if candidate.status == EvalRedTeamCandidateStatus.DRAFT)
+    approved_count = sum(1 for candidate in candidates if candidate.status == EvalRedTeamCandidateStatus.APPROVED)
+    failed_count = latest_run.failed_count if latest_run else 0
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pangi Evals</title>
+  <style>
+    :root {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f6f7f8;
+      color: #172026;
+    }}
+    body {{ margin: 0; }}
+    header {{
+      padding: 24px 28px 16px;
+      background: #ffffff;
+      border-bottom: 1px solid #d9dee3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }}
+    main {{ padding: 20px 28px 36px; }}
+    h1 {{ margin: 0 0 6px; font-size: 24px; letter-spacing: 0; }}
+    h2 {{ margin: 28px 0 10px; font-size: 18px; letter-spacing: 0; }}
+    p {{ margin: 0; color: #5b6670; }}
+    button, .link {{
+      display: inline-block;
+      border: 0;
+      border-radius: 6px;
+      background: #0f766e;
+      color: #ffffff;
+      padding: 9px 12px;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+      text-decoration: none;
+    }}
+    .secondary {{ background: #ffffff; color: #172026; border: 1px solid #c8d0d7; }}
+    .danger {{ background: #b42318; }}
+    .actions {{ display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }}
+    .metrics {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }}
+    .metric {{
+      background: #ffffff;
+      border: 1px solid #d9dee3;
+      border-radius: 8px;
+      padding: 14px;
+    }}
+    .metric .value {{ font-size: 24px; font-weight: 750; color: #172026; }}
+    .metric .label {{ margin-top: 4px; color: #5b6670; font-size: 13px; }}
+    .table-wrap {{
+      overflow-x: auto;
+      background: #ffffff;
+      border: 1px solid #d9dee3;
+      border-radius: 8px;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+      font-size: 13px;
+    }}
+    th, td {{
+      padding: 9px 10px;
+      border-bottom: 1px solid #edf0f2;
+      vertical-align: top;
+      text-align: left;
+      white-space: nowrap;
+    }}
+    th {{ background: #f0f3f5; color: #2a333a; font-weight: 650; }}
+    tr:last-child td {{ border-bottom: 0; }}
+    .text {{ white-space: normal; min-width: 260px; max-width: 560px; }}
+    .status {{
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e8eef5;
+      font-size: 12px;
+    }}
+    .empty {{ padding: 16px; color: #6c767f; }}
+    .selected {{ font-weight: 750; }}
+    @media (max-width: 760px) {{
+      header {{ align-items: flex-start; flex-direction: column; }}
+      .metrics {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Pangi Evals</h1>
+      <p>Agent 행동 회귀, trace, Red Team 후보를 관리합니다.</p>
+    </div>
+    <div class="actions">
+      <a class="link secondary" href="{ADMIN_HOME_PATH}">홈</a>
+      <a class="link secondary" href="{ADMIN_DB_PATH}">DB</a>
+      <a class="link secondary" href="{ADMIN_SCHEDULES_PATH}">스케줄</a>
+      <a class="link secondary" href="{ADMIN_MCP_PATH}">MCP</a>
+      <a class="link secondary" href="{ADMIN_NOTION_PATH}">Notion</a>
+      <form method="post" action="{ADMIN_LOGOUT_PATH}">
+        <button class="secondary" type="submit">로그아웃</button>
+      </form>
+    </div>
+  </header>
+  <main>
+    <div class="actions">
+      <form method="post" action="{ADMIN_EVALS_PATH}/run">
+        <button type="submit">Eval 실행</button>
+      </form>
+      <form method="post" action="{ADMIN_EVALS_PATH}/red-team-candidates">
+        <button class="secondary" type="submit">Red Team 후보 생성</button>
+      </form>
+    </div>
+    <div class="metrics">
+      {_metric(pass_rate, "최근 pass")}
+      {_metric(failed_count, "최근 실패 case")}
+      {_metric(f"{draft_count} / {approved_count}", "draft / approved")}
+      {_metric("켜짐" if settings.eval_scheduler_enabled else "꺼짐", "Eval Scheduler")}
+    </div>
+    <h2>eval_runs</h2>
+    {_eval_runs_table(runs, selected_run_id=selected_run_id)}
+    <h2>eval_case_results</h2>
+    {_eval_results_table(results)}
+    <h2>trace events</h2>
+    {_eval_trace_table(trace_events)}
+    <h2>red_team_candidates</h2>
+    {_red_team_candidates_table(candidates)}
+    <h2>eval_cases</h2>
+    {_eval_cases_table(cases)}
+  </main>
+</body>
+</html>"""
+
+
 def _single_allowed_value(values: frozenset[str]) -> str:
     if "*" in values or len(values) != 1:
         return ""
@@ -1223,6 +1497,136 @@ def _single_allowed_value(values: frozenset[str]) -> str:
 
 def _day_checkbox(value: int, label: str) -> str:
     return f'<label><input type="checkbox" name="days_of_week" value="{value}">{label}</label>'
+
+
+def _eval_runs_table(runs: list[EvalRun], *, selected_run_id: str | None) -> str:
+    if not runs:
+        return '<div class="table-wrap"><div class="empty">저장된 Eval run이 없습니다.</div></div>'
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{_eval_run_link(run, selected_run_id=selected_run_id)}</td>"
+        f"<td><span class=\"status\">{_cell(run.status.value)}</span></td>"
+        f"<td>{_cell(run.suite)}</td>"
+        f"<td>{_cell(run.mode)}</td>"
+        f"<td>{_cell(f'{run.passed_count}/{run.total_count}')}</td>"
+        f"<td>{_cell(run.failed_count)}</td>"
+        f"<td>{_cell(_short_hash(run.prompt_fingerprint))}</td>"
+        f"<td>{_cell(_short_hash(run.model_fingerprint))}</td>"
+        f"<td>{_cell(_short_hash(run.provider_fingerprint))}</td>"
+        f"<td>{_cell(_format_dt(run.started_at))}</td>"
+        "</tr>"
+        for run in runs
+    )
+    return f"""<div class="table-wrap"><table>
+<thead><tr>
+<th>id</th><th>status</th><th>suite</th><th>mode</th><th>pass</th><th>failed</th>
+<th>prompt</th><th>model</th><th>provider</th><th>started</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table></div>"""
+
+
+def _eval_run_link(run: EvalRun, *, selected_run_id: str | None) -> str:
+    class_name = "selected" if run.id == selected_run_id else ""
+    return (
+        f'<a class="{class_name}" href="{ADMIN_EVALS_PATH}?run_id={escape(run.id)}">'
+        f"{_cell(run.id)}</a>"
+    )
+
+
+def _eval_results_table(results: list[EvalCaseResultRecord]) -> str:
+    if not results:
+        return '<div class="table-wrap"><div class="empty">선택한 Eval run의 case 결과가 없습니다.</div></div>'
+    rows = "\n".join(
+        "<tr>"
+        f"<td><span class=\"status\">{_cell(result.status.value)}</span></td>"
+        f"<td>{_cell(result.suite)}</td>"
+        f"<td>{_cell(result.case_id)}</td>"
+        f"<td class=\"text\">{_cell(result.name)}</td>"
+        f"<td>{_cell(result.classification)}</td>"
+        f"<td>{_cell(result.job_id)}</td>"
+        f"<td>{_cell(result.job_repo_key)}</td>"
+        f"<td class=\"text\">{_cell('; '.join(result.failures))}</td>"
+        "</tr>"
+        for result in results
+    )
+    return f"""<div class="table-wrap"><table>
+<thead><tr>
+<th>status</th><th>suite</th><th>case_id</th><th>name</th><th>classification</th>
+<th>job_id</th><th>repo</th><th>failures</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table></div>"""
+
+
+def _eval_trace_table(events: list[EvalTraceEventRecord]) -> str:
+    if not events:
+        return '<div class="table-wrap"><div class="empty">표시할 trace event가 없습니다.</div></div>'
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{_cell(event.event_index)}</td>"
+        f"<td>{_cell(event.name)}</td>"
+        f"<td class=\"text\">{_cell(event.attributes)}</td>"
+        "</tr>"
+        for event in events
+    )
+    return f"""<div class="table-wrap"><table>
+<thead><tr><th>index</th><th>name</th><th>attributes</th></tr></thead>
+<tbody>{rows}</tbody>
+</table></div>"""
+
+
+def _red_team_candidates_table(candidates: list[EvalRedTeamCandidate]) -> str:
+    if not candidates:
+        return '<div class="table-wrap"><div class="empty">저장된 Red Team 후보가 없습니다.</div></div>'
+    rows = "\n".join(
+        "<tr>"
+        f"<td><span class=\"status\">{_cell(candidate.status.value)}</span></td>"
+        f"<td>{_cell(candidate.case_id)}</td>"
+        f"<td class=\"text\">{_cell(candidate.name)}</td>"
+        f"<td>{_cell(candidate.attack_surface)}</td>"
+        f"<td class=\"text\">{_cell(candidate.input)}</td>"
+        f"<td>{_red_team_candidate_action(candidate)}</td>"
+        f"<td>{_cell(_format_dt(candidate.updated_at))}</td>"
+        "</tr>"
+        for candidate in candidates
+    )
+    return f"""<div class="table-wrap"><table>
+<thead><tr>
+<th>status</th><th>case_id</th><th>name</th><th>attack_surface</th><th>input</th><th>action</th><th>updated</th>
+</tr></thead>
+<tbody>{rows}</tbody>
+</table></div>"""
+
+
+def _red_team_candidate_action(candidate: EvalRedTeamCandidate) -> str:
+    if candidate.status == EvalRedTeamCandidateStatus.DRAFT:
+        return (
+            f'<form method="post" action="{ADMIN_EVALS_PATH}/red-team-candidates/{escape(candidate.id)}/approve">'
+            '<button type="submit">승인</button></form>'
+            f'<form method="post" action="{ADMIN_EVALS_PATH}/red-team-candidates/{escape(candidate.id)}/reject">'
+            '<button class="danger" type="submit">거절</button></form>'
+        )
+    return ""
+
+
+def _eval_cases_table(cases: list[EvalCaseDefinition]) -> str:
+    if not cases:
+        return '<div class="table-wrap"><div class="empty">저장된 Eval case snapshot이 없습니다.</div></div>'
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{_cell(case.suite)}</td>"
+        f"<td>{_cell(case.case_id)}</td>"
+        f"<td class=\"text\">{_cell(case.name)}</td>"
+        f"<td>{_cell(','.join(case.tags))}</td>"
+        f"<td>{_cell(_format_dt(case.updated_at))}</td>"
+        "</tr>"
+        for case in cases
+    )
+    return f"""<div class="table-wrap"><table>
+<thead><tr><th>suite</th><th>case_id</th><th>name</th><th>tags</th><th>updated</th></tr></thead>
+<tbody>{rows}</tbody>
+</table></div>"""
 
 
 def _metric(value: object, label: str) -> str:
@@ -1450,6 +1854,12 @@ def _cell(value: object) -> str:
     if len(text) > 500:
         text = text[:497] + "..."
     return escape(text)
+
+
+def _short_hash(value: str | None) -> str:
+    if not value:
+        return ""
+    return value[:12]
 
 
 def _format_dt(value: datetime | None) -> str:

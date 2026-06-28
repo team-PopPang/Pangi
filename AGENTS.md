@@ -171,6 +171,102 @@ FOREIGN KEY(job_id) REFERENCES agent_jobs(id)
 
 `status`는 현재 `claimed`, `submitted`, `succeeded`, `failed`를 사용한다.
 
+### `eval_cases`
+
+Eval case 정의 snapshot을 저장한다.
+
+```text
+id TEXT PRIMARY KEY
+suite TEXT NOT NULL
+case_id TEXT NOT NULL
+name TEXT NOT NULL
+tags TEXT NOT NULL
+case_json TEXT NOT NULL
+created_at TEXT NOT NULL
+updated_at TEXT NOT NULL
+UNIQUE(suite, case_id)
+```
+
+### `eval_runs`
+
+Eval suite 실행 요약과 gate fingerprint를 저장한다.
+
+```text
+id TEXT PRIMARY KEY
+suite TEXT NOT NULL
+mode TEXT NOT NULL
+status TEXT NOT NULL
+total_count INTEGER NOT NULL
+passed_count INTEGER NOT NULL
+failed_count INTEGER NOT NULL
+prompt_fingerprint TEXT
+model_fingerprint TEXT
+provider_fingerprint TEXT
+started_at TEXT NOT NULL
+finished_at TEXT NOT NULL
+created_at TEXT NOT NULL
+updated_at TEXT NOT NULL
+```
+
+`status`는 현재 `succeeded`, `failed`를 사용한다.
+
+### `eval_case_results`
+
+Eval run 안에서 각 case가 어떤 행동 경로를 탔는지 저장한다.
+
+```text
+id TEXT PRIMARY KEY
+eval_run_id TEXT NOT NULL
+suite TEXT NOT NULL
+case_id TEXT NOT NULL
+name TEXT NOT NULL
+status TEXT NOT NULL
+classification TEXT NOT NULL
+job_id TEXT
+job_repo_key TEXT
+failures TEXT NOT NULL
+slack_messages TEXT NOT NULL
+created_at TEXT NOT NULL
+FOREIGN KEY(eval_run_id) REFERENCES eval_runs(id)
+```
+
+`status`는 현재 `passed`, `failed`를 사용한다.
+
+### `eval_trace_events`
+
+case 결과에 연결되는 실행 trace event를 저장한다.
+
+```text
+id TEXT PRIMARY KEY
+eval_case_result_id TEXT NOT NULL
+event_index INTEGER NOT NULL
+name TEXT NOT NULL
+attributes TEXT NOT NULL
+created_at TEXT NOT NULL
+UNIQUE(eval_case_result_id, event_index)
+FOREIGN KEY(eval_case_result_id) REFERENCES eval_case_results(id)
+```
+
+### `eval_red_team_candidates`
+
+Red Team 후보 case와 승인 상태를 저장한다.
+
+```text
+id TEXT PRIMARY KEY
+suite TEXT NOT NULL
+case_id TEXT NOT NULL UNIQUE
+name TEXT NOT NULL
+input TEXT NOT NULL
+attack_surface TEXT NOT NULL
+status TEXT NOT NULL
+case_json TEXT NOT NULL
+created_at TEXT NOT NULL
+updated_at TEXT NOT NULL
+approved_at TEXT
+```
+
+`status`는 현재 `draft`, `approved`, `rejected`를 사용한다.
+
 ## 구현 원칙
 
 - Python/FastAPI 기반을 우선한다.

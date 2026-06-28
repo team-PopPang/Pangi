@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from pangi.config import get_settings
 from pangi.domain.models import AgentJob, JobStatus
+from pangi.evaluations.scheduler import InProcessEvalScheduler
 from pangi.infra.admin import router as admin_router
 from pangi.infra.codex import CodexExecRunner, get_chat_responder
 from pangi.infra.git import get_worktree_manager
@@ -106,6 +107,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             tick_seconds=settings.scheduler_tick_seconds,
         )
         await scheduler.start()
+    eval_scheduler: InProcessEvalScheduler | None = None
+    if settings.eval_scheduler_enabled:
+        eval_scheduler = InProcessEvalScheduler(
+            repository=repository,
+            slack_notifier=slack_client,
+            alert_channel_id=settings.eval_alert_channel_id,
+            interval_seconds=settings.eval_scheduler_interval_seconds,
+        )
+        await eval_scheduler.start()
     sweeper_task = asyncio.create_task(
         _session_sweeper(session_service=session_service, worktree_manager=worktree_manager),
         name="pangi-session-sweeper",
@@ -113,6 +123,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if eval_scheduler is not None:
+            await eval_scheduler.stop()
         if scheduler is not None:
             await scheduler.stop()
         sweeper_task.cancel()

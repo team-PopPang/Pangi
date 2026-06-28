@@ -80,6 +80,9 @@ def test_settings_parses_allowlists_repo_paths_and_default_timeout():
     assert settings.git_mcp_timeout_seconds == 20
     assert settings.git_mcp_write_enabled is False
     assert settings.git_clone_url_template is None
+    assert settings.eval_scheduler_enabled is False
+    assert settings.eval_scheduler_interval_seconds == 86400
+    assert settings.eval_alert_channel_id is None
     assert settings.enable_admin_pages is False
     assert settings.admin_password is None
 
@@ -88,6 +91,25 @@ def test_settings_uses_configured_timeout():
     settings = Settings.from_env(valid_env(PANGI_JOB_TIMEOUT_SECONDS="900"))
 
     assert settings.job_timeout_seconds == 900
+
+
+def test_settings_uses_configured_eval_scheduler_options():
+    settings = Settings.from_env(
+        valid_env(
+            PANGI_EVAL_SCHEDULER_ENABLED="1",
+            PANGI_EVAL_SCHEDULER_INTERVAL_SECONDS="120",
+            PANGI_EVAL_ALERT_CHANNEL_ID="C-EVAL",
+        )
+    )
+
+    assert settings.eval_scheduler_enabled is True
+    assert settings.eval_scheduler_interval_seconds == 120
+    assert settings.eval_alert_channel_id == "C-EVAL"
+
+
+def test_settings_rejects_invalid_eval_scheduler_interval():
+    with pytest.raises(SettingsError, match="PANGI_EVAL_SCHEDULER_INTERVAL_SECONDS"):
+        Settings.from_env(valid_env(PANGI_EVAL_SCHEDULER_INTERVAL_SECONDS="0"))
 
 
 def test_settings_uses_configured_chat_and_orchestrator_options():

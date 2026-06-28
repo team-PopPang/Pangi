@@ -40,6 +40,7 @@ DEFAULT_GIT_MCP_TIMEOUT_SECONDS = 20
 DEFAULT_GIT_CLONE_URL_TEMPLATE = "https://github.com/{org}/{repo}.git"
 DEFAULT_CODEX_SESSION_IDLE_TIMEOUT_SECONDS = 3600
 DEFAULT_SCHEDULER_TICK_SECONDS = 30
+DEFAULT_EVAL_SCHEDULER_INTERVAL_SECONDS = 86400
 ALLOW_ALL_MARKER = "*"
 JOB_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
@@ -110,6 +111,9 @@ class Settings:
     codex_session_idle_timeout_seconds: int = DEFAULT_CODEX_SESSION_IDLE_TIMEOUT_SECONDS
     scheduler_enabled: bool = False
     scheduler_tick_seconds: int = DEFAULT_SCHEDULER_TICK_SECONDS
+    eval_scheduler_enabled: bool = False
+    eval_scheduler_interval_seconds: int = DEFAULT_EVAL_SCHEDULER_INTERVAL_SECONDS
+    eval_alert_channel_id: str | None = None
     enable_admin_pages: bool = False
     admin_password: str | None = field(default=None, repr=False)
 
@@ -315,6 +319,18 @@ class Settings:
                 values.get("PANGI_SCHEDULER_TICK_SECONDS", str(DEFAULT_SCHEDULER_TICK_SECONDS)),
                 "PANGI_SCHEDULER_TICK_SECONDS",
             ),
+            eval_scheduler_enabled=_parse_bool(
+                values.get("PANGI_EVAL_SCHEDULER_ENABLED", "0"),
+                "PANGI_EVAL_SCHEDULER_ENABLED",
+            ),
+            eval_scheduler_interval_seconds=_parse_positive_int(
+                values.get(
+                    "PANGI_EVAL_SCHEDULER_INTERVAL_SECONDS",
+                    str(DEFAULT_EVAL_SCHEDULER_INTERVAL_SECONDS),
+                ),
+                "PANGI_EVAL_SCHEDULER_INTERVAL_SECONDS",
+            ),
+            eval_alert_channel_id=values.get("PANGI_EVAL_ALERT_CHANNEL_ID", "").strip() or None,
             enable_admin_pages=enable_admin_pages,
             admin_password=admin_password,
         )

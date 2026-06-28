@@ -305,6 +305,57 @@ def test_admin_can_create_schedule(monkeypatch, tmp_path):
     assert "morning note" in html
 
 
+def test_admin_can_operate_evals(monkeypatch, tmp_path):
+    repository = configure_settings(monkeypatch, tmp_path, enable_admin=True)
+    login_body = urlencode({"username": "pangi", "password": "admin-password"}).encode("utf-8")
+    _, login_headers, _ = request(
+        "POST",
+        "/pangi-admin/login",
+        body=login_body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    cookie = login_headers["set-cookie"].split(";", 1)[0]
+
+    page_status, _, page_body = request("GET", "/pangi-admin/evals", headers={"Cookie": cookie})
+    generate_status, generate_headers, _ = request(
+        "POST",
+        "/pangi-admin/evals/red-team-candidates",
+        headers={"Cookie": cookie},
+    )
+    candidate = repository.list_eval_red_team_candidates(limit=10)[0]
+    approve_status, _, _ = request(
+        "POST",
+        f"/pangi-admin/evals/red-team-candidates/{candidate.id}/approve",
+        headers={"Cookie": cookie},
+    )
+    run_status, run_headers, _ = request(
+        "POST",
+        "/pangi-admin/evals/run",
+        headers={"Cookie": cookie},
+    )
+    eval_runs = repository.list_eval_runs(limit=10)
+    eval_results = repository.list_eval_case_results(eval_run_id=eval_runs[0].id, limit=100)
+
+    assert page_status == 200
+    assert "Pangi Evals" in page_body.decode("utf-8")
+    assert generate_status == 303
+    assert generate_headers["location"] == "/pangi-admin/evals"
+    assert approve_status == 303
+    assert run_status == 303
+    assert run_headers["location"].startswith("/pangi-admin/evals?run_id=")
+    assert len(eval_runs) == 1
+    assert len(eval_results) >= 10
+
+
+def test_admin_eval_page_requires_login(monkeypatch, tmp_path):
+    configure_settings(monkeypatch, tmp_path, enable_admin=True)
+
+    status, headers, _ = request("GET", "/pangi-admin/evals")
+
+    assert status == 303
+    assert headers["location"] == "/pangi-admin/login"
+
+
 def test_admin_notion_page_requires_login(monkeypatch, tmp_path):
     configure_settings(monkeypatch, tmp_path, enable_admin=True, enable_notion=True)
 
