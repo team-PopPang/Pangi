@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-08-13T00:00:00.000Z" agent="Codex" version="26.0.0" type="device">
+  <diagram id="pangi-ab180-architecture" name="A. 요청 실행 흐름 View">
+    <mxGraphModel dx="1900" dy="1450" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1450" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="pa-title" value="View A · Pangi 요청 실행 흐름" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=34;fontStyle=1;fontColor=#17212B;" vertex="1" parent="1"><mxGeometry x="520" y="25" width="700" height="50" as="geometry"/></mxCell>
+        <mxCell id="pa-subtitle" value="질문 · 한 요청이 어떤 Component를 거쳐 응답되는가?  ·  화살표 = Runtime 호출·위임·결과 전달" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=18;fontColor=#667085;" vertex="1" parent="1"><mxGeometry x="522" y="72" width="1050" height="35" as="geometry"/></mxCell>
+
+        <mxCell id="server-boundary" value="Pangi 서버" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8F5FF;strokeColor=#D9CCF5;strokeWidth=2;verticalAlign=top;align=left;spacingTop=20;spacingLeft=22;fontSize=28;fontStyle=1;fontColor=#6F2DBD;arcSize=6;sketch=1;curveFitting=1;jiggle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="440" width="1750" height="600" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="slack" value="Slack" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A9D8F7;strokeColor=#4A9FE0;strokeWidth=4;fontSize=34;fontStyle=1;fontColor=#17212B;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="130" y="45" width="260" height="150" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="worker" value="Worker / Scheduler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A9D8F7;strokeColor=#4A9FE0;strokeWidth=4;fontSize=30;fontStyle=1;fontColor=#17212B;arcSize=16;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="75" y="260" width="370" height="130" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="input-guardrail" value="입력 가드레일" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFD7A3;strokeColor=#F4A000;strokeWidth=4;fontSize=31;fontStyle=1;fontColor=#2D2926;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="100" y="735" width="320" height="200" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="orchestrator" value="Pangi&lt;br&gt;Orchestrator&lt;br&gt;&lt;font style=&quot;font-size:18px&quot;&gt;자연어 Root AI 1회&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C7B4F4;strokeColor=#8557DF;strokeWidth=4;fontSize=31;fontStyle=1;fontColor=#2A2440;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="500" y="735" width="330" height="200" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="result-reducer" value="Result Reducer&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Subagent 결과 정규화&lt;br&gt;Evidence 병합 · 오류/모순 표시&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EEF6;strokeColor=#61758F;strokeWidth=3;fontSize=23;fontStyle=1;fontColor=#2F425A;arcSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1025" y="520" width="350" height="115" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="output-guardrail" value="출력 가드레일" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFD7A3;strokeColor=#F4A000;strokeWidth=4;fontSize=31;fontStyle=1;fontColor=#2D2926;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="735" width="300" height="200" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="markdown-slack" value="markdown-to-slack" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#AEE9BA;strokeColor=#25B85A;strokeWidth=4;fontSize=27;fontStyle=1;fontColor=#17351F;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="735" width="300" height="200" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="subagents" value="Subagents&lt;br&gt;&lt;font style=&quot;font-size:20px&quot;&gt;GitHub · Notion · Slack · Web Search · ...&lt;/font&gt;&lt;br&gt;&lt;font style=&quot;font-size:17px&quot;&gt;Agentic Retrieval · delegation depth = 1&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C7B4F4;strokeColor=#8557DF;strokeWidth=4;fontSize=30;fontStyle=1;fontColor=#2A2440;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="450" y="500" width="430" height="155" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="runtime-rule" value="&lt;b&gt;Pangi 실행 규칙&lt;/b&gt;&lt;br&gt;명시 Skill · Skill Schedule → Root AI 0회&lt;br&gt;일반 · 예약 자연어 → Root AI 1회&lt;br&gt;Subagent 재위임 금지 · Vector RAG는 추후 Pack" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#CFC5E8;strokeWidth=2;dashed=1;fontSize=17;fontColor=#5E5573;align=left;spacingLeft=16;spacingTop=10;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1350" y="475" width="390" height="170" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="model-provider" value="Model Router &amp; Egress Policy&lt;br&gt;&lt;font style=&quot;font-size:18px&quot;&gt;Data Class 검사 → OpenAI · Bedrock · ...&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF0B8;strokeColor=#E7A400;strokeWidth=4;fontSize=25;fontStyle=1;fontColor=#2D2926;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="130" y="1110" width="340" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="sqlite" value="SQLite&lt;br&gt;&lt;font style=&quot;font-size:17px&quot;&gt;Run · Skill · Schedule · Eval&lt;br&gt;API Key · IP Policy · Audit&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B8EFE4;strokeColor=#09AFC4;strokeWidth=4;fontSize=31;fontStyle=1;fontColor=#14383A;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="495" y="1110" width="340" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="mcp-servers" value="MCP Servers&lt;br&gt;&lt;font style=&quot;font-size:18px&quot;&gt;stdio · Streamable HTTP&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B8EFE4;strokeColor=#09AFC4;strokeWidth=4;fontSize=31;fontStyle=1;fontColor=#14383A;arcSize=18;sketch=1;curveFitting=1;jiggle=2;" vertex="1" parent="1">
+          <mxGeometry x="980" y="1110" width="410" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="admin-dashboard" value="Admin Dashboard&lt;br&gt;&lt;font style=&quot;font-size:18px&quot;&gt;연동 · Memory · Skill · Scheduler · Eval&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EEF6;strokeColor=#61758F;strokeWidth=3;fontSize=27;fontStyle=1;fontColor=#2F425A;arcSize=16;" vertex="1" parent="1">
+          <mxGeometry x="1480" y="1110" width="320" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-slack-worker" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=4;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="slack" target="worker">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-worker-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=4;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="worker" target="input-guardrail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-input-orchestrator" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="input-guardrail" target="orchestrator">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-orchestrator-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="orchestrator" target="output-guardrail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-output-markdown" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="output-guardrail" target="markdown-slack">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-markdown-slack" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;endArrow=classic;endFill=1;strokeColor=#1DBE63;strokeWidth=4;dashed=1;dashPattern=12 8;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="markdown-slack" target="slack">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1780" y="835"/>
+              <mxPoint x="1780" y="120"/>
+              <mxPoint x="430" y="120"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge-orchestrator-subagents" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#20A64B;strokeWidth=4;dashed=1;dashPattern=10 8;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="orchestrator" target="subagents">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-subagents-reducer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#61758F;strokeWidth=3;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="subagents" target="result-reducer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-reducer-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;endArrow=classic;endFill=1;strokeColor=#61758F;strokeWidth=3;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="result-reducer" target="output-guardrail">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-orchestrator-model" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;startArrow=classic;startFill=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;exitX=0.35;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="orchestrator" target="model-provider">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="616" y="1025"/>
+              <mxPoint x="300" y="1025"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge-subagents-model" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;endArrow=classic;endFill=1;strokeColor=#E7A400;strokeWidth=3;dashed=1;dashPattern=8 6;exitX=0.2;exitY=1;exitDx=0;exitDy=0;entryX=0.85;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="subagents" target="model-provider">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="440" y="690"/><mxPoint x="440" y="1025"/><mxPoint x="419" y="1025"/></Array></mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge-orchestrator-sqlite" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=20;html=1;startArrow=classic;startFill=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="orchestrator" target="sqlite">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge-orchestrator-mcp" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;endFill=1;strokeColor=#1687C9;strokeWidth=3;dashed=1;dashPattern=10 8;exitX=1;exitY=0.78;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="orchestrator" target="mcp-servers">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="920" y="890"/>
+              <mxPoint x="920" y="1045"/>
+              <mxPoint x="1185" y="1045"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge-dashboard-sqlite" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=classic;startFill=1;endArrow=classic;endFill=1;strokeColor=#7A8797;strokeWidth=3;dashed=1;dashPattern=6 6;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="admin-dashboard" target="sqlite">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1640" y="1320"/>
+              <mxPoint x="665" y="1320"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="edge-note-response" value="Slack 응답" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;align=center;verticalAlign=middle;fontSize=16;fontColor=#168A4A;fontStyle=1;spacing=4;" vertex="1" parent="1"><mxGeometry x="1380" y="96" width="135" height="40" as="geometry"/></mxCell>
+        <mxCell id="edge-note-delegation" value="조건부 위임" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;align=left;verticalAlign=middle;spacingLeft=10;fontSize=16;fontColor=#168A4A;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="680" y="674" width="145" height="38" as="geometry"/></mxCell>
+        <mxCell id="edge-note-model" value="Model Policy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=none;align=center;verticalAlign=middle;fontSize=14;fontColor=#9A5A00;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="330" y="995" width="120" height="28" as="geometry"/></mxCell>
+        <mxCell id="edge-note-mcp" value="허용 Tool" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=14;fontColor=#126CA1;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="930" y="1015" width="100" height="25" as="geometry"/></mxCell>
+        <mxCell id="edge-note-control" value="Control Plane" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;fontSize=14;fontColor=#667085;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1030" y="1322" width="130" height="25" as="geometry"/></mxCell>
+
+        <mxCell id="legend" value="View A · 하나의 Pangi 시스템에서 요청이 실행되는 경로" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontColor=#667085;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="70" y="1360" width="800" height="35" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="pangi-control-plane" name="B. 제어·운영 View">
+    <mxGraphModel dx="1900" dy="1450" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1450" math="0" shadow="0">
+      <root>
+        <mxCell id="cp-0"/>
+        <mxCell id="cp-1" parent="cp-0"/>
+
+        <mxCell id="cp-title" value="View B · Pangi Control Plane의 권한·실행·검증 관계" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=30;fontStyle=1;fontColor=#25324B;" vertex="1" parent="cp-1">
+          <mxGeometry x="60" y="40" width="1050" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp-source-legend" value="AB180 공개 글에서 확인" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=2;fontSize=16;fontColor=#5F3CA5;arcSize=20;" vertex="1" parent="cp-1">
+          <mxGeometry x="1370" y="45" width="210" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp-pangi-legend" value="Pangi 구현 결정" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F7FB;strokeColor=#09AFC4;strokeWidth=2;fontSize=16;fontColor=#126C79;arcSize=20;" vertex="1" parent="cp-1">
+          <mxGeometry x="1600" y="45" width="190" height="42" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cp-boundary" value="Control Plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8F5FF;strokeColor=#D9CCF5;strokeWidth=2;verticalAlign=top;align=left;spacingTop=18;spacingLeft=20;fontSize=24;fontStyle=1;fontColor=#6F2DBD;arcSize=6;" vertex="1" parent="cp-1">
+          <mxGeometry x="50" y="120" width="1800" height="390" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp-admin" value="Admin Dashboard / API&lt;br&gt;&lt;font style=&quot;font-size:17px&quot;&gt;상태 · Workflow · API Key Usage · IP 승인&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EEF6;strokeColor=#61758F;strokeWidth=3;fontSize=25;fontStyle=1;fontColor=#2F425A;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="630" y="155" width="640" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp-oauth" value="Connections &amp; OAuth&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;사용자별 Token · Scope · 재연결&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2A2440;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="90" y="320" width="300" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp-mcp-policy" value="MCP Registry &amp; Tool Policy&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Discovery · Allow/Deny · Approval&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2A2440;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="430" y="320" width="320" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp-skill" value="Skill Registry / Compiler&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;검증된 Workflow · Version · Eval Gate&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2A2440;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="790" y="320" width="320" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp-memory" value="Memory&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Scope · Revision · 생성/수정 시각&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2A2440;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="1150" y="320" width="290" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp-scheduler" value="Scheduler&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;cron/once · 자연어 요청 또는 Skill&lt;br&gt;실행 시 권한 재검사&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2A2440;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="1480" y="320" width="290" height="125" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ep-boundary" value="Execution Plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F7FBFE;strokeColor=#BED9E8;strokeWidth=2;verticalAlign=top;align=left;spacingTop=18;spacingLeft=20;fontSize=24;fontStyle=1;fontColor=#126C79;arcSize=6;" vertex="1" parent="cp-1">
+          <mxGeometry x="50" y="550" width="1800" height="420" as="geometry"/>
+        </mxCell>
+        <mxCell id="ep-request" value="Channel / RunRequest&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Slack · API · Scheduler&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A9D8F7;strokeColor=#4A9FE0;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#17212B;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="90" y="700" width="270" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="ep-input" value="Input Guardrail&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;identity · size · policy&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFD7A3;strokeColor=#F4A000;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2D2926;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="410" y="700" width="250" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="ep-entry" value="Entry Router&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;일반·예약 자연어 → Root AI 1회&lt;br&gt;명시·예약 Skill → Root AI 0회&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C7B4F4;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2A2440;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="710" y="680" width="290" height="165" as="geometry"/>
+        </mxCell>
+        <mxCell id="ep-exec" value="Execution Engine / Subagents&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Agentic Retrieval · depth=1&lt;br&gt;bounded Tool Loop · 재위임 금지&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C7B4F4;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2A2440;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="1050" y="680" width="340" height="165" as="geometry"/>
+        </mxCell>
+        <mxCell id="ep-output" value="Output Guardrail / Renderer&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Secret · 형식 · Markdown → Slack&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFD7A3;strokeColor=#F4A000;strokeWidth=3;fontSize=22;fontStyle=1;fontColor=#2D2926;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="1440" y="700" width="320" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="ep-external-boundary" value="외부 결과는 명령이 아니라 데이터&lt;br&gt;&lt;font style=&quot;font-size:15px&quot;&gt;Spotlighting · Envelope · Tool Result Redaction&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9E7;strokeColor=#E7A400;strokeWidth=2;dashed=1;fontSize=18;fontColor=#5B4A12;arcSize=12;" vertex="1" parent="cp-1">
+          <mxGeometry x="1050" y="875" width="710" height="65" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="op-eval" value="Behavior Eval &amp; Safety Gate&lt;br&gt;&lt;font style=&quot;font-size:17px&quot;&gt;Grader · Red Team · Stub Connection&lt;br&gt;Subagent / Tool / 금지 Tool / 응답 형식 검증&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=23;fontStyle=1;fontColor=#2A2440;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="90" y="1080" width="480" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-trace" value="Run Trace &amp; Audit&lt;br&gt;&lt;font style=&quot;font-size:17px&quot;&gt;Run · Step · Tool Call · Policy Decision&lt;br&gt;숨은 사고과정 대신 관측 가능한 이벤트&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F7FB;strokeColor=#09AFC4;strokeWidth=3;fontSize=23;fontStyle=1;fontColor=#14383A;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="680" y="1080" width="470" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-sqlite" value="SQLite&lt;br&gt;&lt;font style=&quot;font-size:17px&quot;&gt;상태 · Trace · Eval · Usage&lt;br&gt;Key Metadata · CIDR Policy · Audit&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F7FB;strokeColor=#09AFC4;strokeWidth=3;fontSize=25;fontStyle=1;fontColor=#14383A;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="1260" y="1080" width="330" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-ports" value="교체 가능한 Ports&lt;br&gt;&lt;font style=&quot;font-size:17px&quot;&gt;Model Provider · MCP Transport · Storage&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F7FB;strokeColor=#09AFC4;strokeWidth=3;fontSize=23;fontStyle=1;fontColor=#14383A;arcSize=14;" vertex="1" parent="cp-1">
+          <mxGeometry x="90" y="1310" width="1500" height="75" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cp-edge-admin-oauth" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#7A8797;strokeWidth=2;dashed=1;" edge="1" parent="cp-1" source="cp-admin" target="cp-oauth"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cp-edge-admin-policy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#7A8797;strokeWidth=2;dashed=1;" edge="1" parent="cp-1" source="cp-admin" target="cp-mcp-policy"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cp-edge-admin-skill" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#7A8797;strokeWidth=2;dashed=1;" edge="1" parent="cp-1" source="cp-admin" target="cp-skill"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cp-edge-admin-memory" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#7A8797;strokeWidth=2;dashed=1;" edge="1" parent="cp-1" source="cp-admin" target="cp-memory"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cp-edge-admin-scheduler" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#7A8797;strokeWidth=2;dashed=1;" edge="1" parent="cp-1" source="cp-admin" target="cp-scheduler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cp-edge-oauth-policy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#8557DF;strokeWidth=3;" edge="1" parent="cp-1" source="cp-oauth" target="cp-mcp-policy"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cp-edge-skill-entry" value="Compiled Workflow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#8557DF;strokeWidth=3;dashed=1;fontSize=15;labelBackgroundColor=#FFFFFF;" edge="1" parent="cp-1" source="cp-skill" target="ep-entry"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cp-edge-memory-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#8557DF;strokeWidth=3;dashed=1;" edge="1" parent="cp-1" source="cp-memory" target="ep-entry"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1295" y="520"/><mxPoint x="855" y="520"/><mxPoint x="855" y="650"/></Array></mxGeometry></mxCell>
+        <mxCell id="cp-edge-scheduler-request" value="Trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#8557DF;strokeWidth=3;dashed=1;fontSize=15;labelBackgroundColor=#FFFFFF;" edge="1" parent="cp-1" source="cp-scheduler" target="ep-request"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1810" y="485"/><mxPoint x="1810" y="650"/><mxPoint x="225" y="650"/></Array></mxGeometry></mxCell>
+        <mxCell id="cp-edge-policy-exec" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#8557DF;strokeWidth=3;dashed=1;" edge="1" parent="cp-1" source="cp-mcp-policy" target="ep-exec"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="590" y="500"/><mxPoint x="1220" y="500"/><mxPoint x="1220" y="650"/></Array></mxGeometry></mxCell>
+        <mxCell id="ep-edge-request-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;" edge="1" parent="cp-1" source="ep-request" target="ep-input"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ep-edge-input-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;" edge="1" parent="cp-1" source="ep-input" target="ep-entry"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ep-edge-entry-exec" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;" edge="1" parent="cp-1" source="ep-entry" target="ep-exec"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ep-edge-exec-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;" edge="1" parent="cp-1" source="ep-exec" target="ep-output"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="op-edge-eval-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#8557DF;strokeWidth=3;dashed=1;" edge="1" parent="cp-1" source="op-eval" target="ep-entry"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="620" y="1165"/><mxPoint x="620" y="1015"/><mxPoint x="855" y="1015"/><mxPoint x="855" y="870"/></Array></mxGeometry></mxCell>
+        <mxCell id="op-edge-exec-trace" value="관측 이벤트" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#09AFC4;strokeWidth=3;dashed=1;fontSize=15;labelBackgroundColor=#FFFFFF;" edge="1" parent="cp-1" source="ep-exec" target="op-trace"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="op-edge-trace-sqlite" value="persist" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#09AFC4;strokeWidth=3;fontSize=15;labelBackgroundColor=#FFFFFF;" edge="1" parent="cp-1" source="op-trace" target="op-sqlite"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="op-edge-sqlite-admin" value="query / mutate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;startArrow=classic;startFill=1;endArrow=classic;endFill=1;strokeColor=#09AFC4;strokeWidth=2;dashed=1;fontSize=15;labelBackgroundColor=#FFFFFF;" edge="1" parent="cp-1" source="op-sqlite" target="cp-admin"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1830" y="1165"/><mxPoint x="1830" y="200"/></Array></mxGeometry></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="pangi-ab180-feature-parity" name="C. AB180 기능 대응 View">
+    <mxGraphModel dx="1900" dy="1450" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1450" math="0" shadow="0">
+      <root>
+        <mxCell id="fp-0"/>
+        <mxCell id="fp-1" parent="fp-0"/>
+
+        <mxCell id="fp-title" value="View C · Pangi의 AB180 공개 기능 대응 범위" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=32;fontStyle=1;fontColor=#25324B;" vertex="1" parent="fp-1"><mxGeometry x="55" y="35" width="1200" height="60" as="geometry"/></mxCell>
+        <mxCell id="fp-subtitle" value="공개 글의 플랫폼 기능과 8개 실무 사례를 Core + 공식 Capability Pack으로 제공" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=18;fontColor=#667085;" vertex="1" parent="fp-1"><mxGeometry x="58" y="90" width="1300" height="35" as="geometry"/></mxCell>
+
+        <mxCell id="fp-value-boundary" value="사용자 경험과 조직 채택" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F9FF;strokeColor=#A8CBE8;strokeWidth=2;verticalAlign=top;align=left;spacingTop=16;spacingLeft=18;fontSize=23;fontStyle=1;fontColor=#245B85;arcSize=6;" vertex="1" parent="fp-1"><mxGeometry x="50" y="145" width="1800" height="225" as="geometry"/></mxCell>
+        <mxCell id="fp-slack" value="Slack 업무 진입점&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;질문 · Command · Approval · 결과&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A9D8F7;strokeColor=#4A9FE0;strokeWidth=3;fontSize=23;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="95" y="225" width="350" height="105" as="geometry"/></mxCell>
+        <mxCell id="fp-admin" value="Admin Dashboard&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;연동 · Memory · Skill · Schedule · Eval&lt;br&gt;API Key Usage · IP 승인&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EEF6;strokeColor=#61758F;strokeWidth=3;fontSize=23;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="500" y="215" width="480" height="125" as="geometry"/></mxCell>
+        <mxCell id="fp-analytics" value="Usage Analytics&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;DAU/MAU · 대상자 비율 · 90일 실행&lt;br&gt;내부/외부/Pilot Cohort&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#AEE9BA;strokeColor=#25B85A;strokeWidth=3;fontSize=23;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="1035" y="215" width="350" height="125" as="geometry"/></mxCell>
+        <mxCell id="fp-feedback" value="Feedback Loop&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;도움됨/문제 있음 → Synthetic Eval Case&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#AEE9BA;strokeColor=#25B85A;strokeWidth=3;fontSize=23;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="1440" y="225" width="350" height="105" as="geometry"/></mxCell>
+
+        <mxCell id="fp-reuse-boundary" value="개인화와 반복 업무" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAF7FF;strokeColor=#D9CCF5;strokeWidth=2;verticalAlign=top;align=left;spacingTop=16;spacingLeft=18;fontSize=23;fontStyle=1;fontColor=#6F2DBD;arcSize=6;" vertex="1" parent="fp-1"><mxGeometry x="50" y="400" width="1800" height="225" as="geometry"/></mxCell>
+        <mxCell id="fp-memory" value="Memory&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;개인 · 팀 · Skill · Revision&lt;br&gt;Scope · 생성/수정 시각 · Edit/Delete&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=23;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="130" y="475" width="430" height="115" as="geometry"/></mxCell>
+        <mxCell id="fp-skills" value="Skills&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Version · Command · Alias · Keyword&lt;br&gt;Prompt Viewer · Workflow · Soft Delete&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=23;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="720" y="475" width="460" height="115" as="geometry"/></mxCell>
+        <mxCell id="fp-scheduler" value="Scheduler&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;once/cron · 자연어 요청 또는 Skill&lt;br&gt;공휴일 스킵 · 실행 시 권한 재검사&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=23;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="1340" y="475" width="430" height="115" as="geometry"/></mxCell>
+
+        <mxCell id="fp-runtime-boundary" value="Agentic Retrieval Runtime" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9F1;strokeColor=#F1CC91;strokeWidth=2;verticalAlign=top;align=left;spacingTop=16;spacingLeft=18;fontSize=23;fontStyle=1;fontColor=#9A5A00;arcSize=6;" vertex="1" parent="fp-1"><mxGeometry x="50" y="655" width="1800" height="270" as="geometry"/></mxCell>
+        <mxCell id="fp-guardrails" value="입력/출력 Guardrail" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFD7A3;strokeColor=#F4A000;strokeWidth=3;fontSize=22;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="90" y="760" width="270" height="100" as="geometry"/></mxCell>
+        <mxCell id="fp-root" value="Root Orchestrator&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;자연어 logical call 1회&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C7B4F4;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="420" y="745" width="310" height="130" as="geometry"/></mxCell>
+        <mxCell id="fp-subagents" value="Domain Subagents&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;GitHub · Notion · Slack · Calendar&lt;br&gt;Data · Web Search · depth=1&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C7B4F4;strokeColor=#8557DF;strokeWidth=3;fontSize=22;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="790" y="735" width="350" height="150" as="geometry"/></mxCell>
+        <mxCell id="fp-renderer" value="Result Reducer → Guardrail&lt;br&gt;→ Markdown → Slack" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#AEE9BA;strokeColor=#25B85A;strokeWidth=3;fontSize=20;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="1170" y="750" width="300" height="120" as="geometry"/></mxCell>
+        <mxCell id="fp-model-policy" value="Model Router &amp; Egress Policy&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;Data Class · Provider · Model · Region · Redaction&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF0B8;strokeColor=#E7A400;strokeWidth=3;fontSize=22;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="1510" y="745" width="300" height="130" as="geometry"/></mxCell>
+
+        <mxCell id="fp-trust-boundary" value="권한 · 안전 · 연결 · 관측" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5FCFD;strokeColor=#A8DCE4;strokeWidth=2;verticalAlign=top;align=left;spacingTop=16;spacingLeft=18;fontSize=23;fontStyle=1;fontColor=#126C79;arcSize=6;" vertex="1" parent="fp-1"><mxGeometry x="50" y="955" width="1800" height="235" as="geometry"/></mxCell>
+        <mxCell id="fp-oauth" value="User OAuth&lt;br&gt;&lt;font style=&quot;font-size:16px&quot;&gt;사용자 권한 · Scope · Token 격리&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F7FB;strokeColor=#09AFC4;strokeWidth=3;fontSize=22;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="90" y="1040" width="330" height="110" as="geometry"/></mxCell>
+        <mxCell id="fp-catalog" value="Connection Catalog + MCP&lt;br&gt;&lt;font style=&quot;font-size:15px&quot;&gt;GitHub · Google · Grafana · Jira · Linear&lt;br&gt;Notion · Plain · Slack · Snowflake · 내부 DB&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F7FB;strokeColor=#09AFC4;strokeWidth=3;fontSize=21;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="470" y="1025" width="450" height="140" as="geometry"/></mxCell>
+        <mxCell id="fp-eval" value="Behavior Eval + Red Team Agent&lt;br&gt;&lt;font style=&quot;font-size:15px&quot;&gt;필수/금지 Tool · 응답 형식 · 공격 Case 생성&lt;br&gt;Review → Fixture → Regression Gate&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F2EAFE;strokeColor=#8557DF;strokeWidth=3;fontSize=21;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="970" y="1025" width="440" height="140" as="geometry"/></mxCell>
+        <mxCell id="fp-trace" value="SQLite Run Trace &amp; Audit&lt;br&gt;&lt;font style=&quot;font-size:15px&quot;&gt;Run · Step · Model Policy · Feedback&lt;br&gt;API Key Usage · CIDR Access Event&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F7FB;strokeColor=#09AFC4;strokeWidth=3;fontSize=22;fontStyle=1;arcSize=14;" vertex="1" parent="fp-1"><mxGeometry x="1460" y="1030" width="350" height="130" as="geometry"/></mxCell>
+
+        <mxCell id="fp-pack-boundary" value="공식 AB180 Parity Capability Packs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#98A2B3;strokeWidth=2;verticalAlign=top;align=left;spacingTop=12;spacingLeft=18;fontSize=21;fontStyle=1;fontColor=#344054;arcSize=8;" vertex="1" parent="fp-1"><mxGeometry x="50" y="1220" width="1800" height="170" as="geometry"/></mxCell>
+        <mxCell id="fp-pack-skills" value="ticket-analysis · meeting-coordinator · stale-document-finder · change-history&lt;br&gt;cost-insight-report · work-digest · usage-report · software-delivery(ensure-ticket → ticket-to-pr)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#98A2B3;strokeWidth=2;fontSize=20;fontStyle=1;fontColor=#344054;arcSize=10;" vertex="1" parent="fp-1"><mxGeometry x="110" y="1280" width="1680" height="80" as="geometry"/></mxCell>
+
+        <mxCell id="fp-edge-slack-guard" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="fp-1" source="fp-slack" target="fp-guardrails"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="580" y="350"/><mxPoint x="580" y="700"/><mxPoint x="195" y="700"/></Array></mxGeometry></mxCell>
+        <mxCell id="fp-edge-guard-root" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;" edge="1" parent="fp-1" source="fp-guardrails" target="fp-root"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fp-edge-root-agents" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;" edge="1" parent="fp-1" source="fp-root" target="fp-subagents"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fp-edge-agents-render" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#222222;strokeWidth=3;" edge="1" parent="fp-1" source="fp-subagents" target="fp-renderer"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fp-edge-root-model" value="model call policy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#E7A400;strokeWidth=2;dashed=1;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="fp-1" source="fp-root" target="fp-model-policy"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="540" y="710"/><mxPoint x="1660" y="710"/></Array></mxGeometry></mxCell>
+        <mxCell id="fp-edge-agents-model" value="subagent policy" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#E7A400;strokeWidth=2;dashed=1;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="fp-1" source="fp-subagents" target="fp-model-policy"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="965" y="690"/><mxPoint x="1660" y="690"/></Array></mxGeometry></mxCell>
+        <mxCell id="fp-edge-oauth-catalog" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#09AFC4;strokeWidth=3;" edge="1" parent="fp-1" source="fp-oauth" target="fp-catalog"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="pangi-software-architecture" name="D. 코드 의존성 View">
+    <mxGraphModel dx="1900" dy="1450" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1450" math="0" shadow="0">
+      <root>
+        <mxCell id="p4-0"/>
+        <mxCell id="p4-1" parent="p4-0"/>
+
+        <mxCell id="p4-title" value="View D · Pangi 코드 의존성과 Port 경계" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=38;fontStyle=1;fontColor=#17212B;" vertex="1" parent="p4-1"><mxGeometry x="50" y="35" width="1100" height="55" as="geometry"/></mxCell>
+        <mxCell id="p4-subtitle" value="하나의 결정 · 배포=Modular Monolith · 의존 규칙=Clean · 통합 경계=Hexagonal Ports &amp; Adapters" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=21;fontColor=#475467;" vertex="1" parent="p4-1"><mxGeometry x="52" y="92" width="1200" height="40" as="geometry"/></mxCell>
+        <mxCell id="p4-legend" value="&lt;b&gt;이 페이지가 답하는 질문&lt;/b&gt;&lt;br&gt;어느 Package가 어느 Package를 Import할 수 있는가?&lt;br&gt;&lt;font color=&quot;#6941C6&quot;&gt;보라 점선 = 소스 코드 의존 방향(항상 안쪽)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F9F5FF;strokeColor=#D6BBFB;strokeWidth=2;fontSize=16;align=left;spacingLeft=16;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="1270" y="35" width="580" height="100" as="geometry"/></mxCell>
+
+        <mxCell id="p4-inbound-boundary" value="Driving Clients / Inbound Adapters&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;외부 입력을 Application Contract로 변환&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFF8FF;strokeColor=#84CAFF;strokeWidth=2;verticalAlign=top;align=left;spacingTop=16;spacingLeft=18;fontSize=22;fontStyle=1;fontColor=#175CD3;arcSize=8;" vertex="1" parent="p4-1"><mxGeometry x="50" y="170" width="390" height="700" as="geometry"/></mxCell>
+        <mxCell id="p4-dashboard" value="React Admin Dashboard&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;별도 TS Client · OpenAPI/SSE Contract&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E90FA;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="90" y="275" width="310" height="95" as="geometry"/></mxCell>
+        <mxCell id="p4-api" value="FastAPI Routes&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;HTTP DTO · Auth · Controller 역할&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E90FA;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="90" y="395" width="310" height="95" as="geometry"/></mxCell>
+        <mxCell id="p4-slack" value="Slack Adapter&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;Event/Ack/Thread → RunRequest&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E90FA;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="90" y="515" width="310" height="95" as="geometry"/></mxCell>
+        <mxCell id="p4-cli" value="CLI · Scheduler · Eval Adapter&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;모두 같은 Inbound Port 호출&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E90FA;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="90" y="635" width="310" height="105" as="geometry"/></mxCell>
+        <mxCell id="p4-inbound-path" value="src/pangi/adapters/inbound/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D1E9FF;strokeColor=#2E90FA;strokeWidth=2;fontSize=17;fontStyle=1;fontFamily=Courier New;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="90" y="780" width="310" height="55" as="geometry"/></mxCell>
+
+        <mxCell id="p4-app-boundary" value="Application Core · Port 소유자" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F9F5FF;strokeColor=#B692F6;strokeWidth=3;verticalAlign=top;align=left;spacingTop=16;spacingLeft=18;fontSize=24;fontStyle=1;fontColor=#6941C6;arcSize=8;" vertex="1" parent="p4-1"><mxGeometry x="480" y="170" width="920" height="700" as="geometry"/></mxCell>
+        <mxCell id="p4-usecases" value="Application Use Cases&lt;br&gt;&lt;font style=&quot;font-size:16px;font-weight:normal&quot;&gt;run_request · run_skill · manage_connection · manage_schedule · run_eval · manage_memory&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E9D7FE;strokeColor=#7F56D9;strokeWidth=2;fontSize=22;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="690" y="240" width="500" height="110" as="geometry"/></mxCell>
+        <mxCell id="p4-inport" value="Inbound Ports&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;RunUseCase&lt;br&gt;SkillUseCase&lt;br&gt;AdminUseCase&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#7F56D9;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="520" y="420" width="180" height="150" as="geometry"/></mxCell>
+        <mxCell id="p4-domain" value="Pure Domain Core&lt;br&gt;&lt;font style=&quot;font-size:17px;font-weight:normal&quot;&gt;Run · Skill · Schedule · Connection&lt;br&gt;Eval · Memory&lt;br&gt;Entity · Value Object · Policy · Event&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4EBFF;strokeColor=#6941C6;strokeWidth=4;fontSize=24;fontStyle=1;arcSize=12;" vertex="1" parent="p4-1"><mxGeometry x="760" y="395" width="370" height="205" as="geometry"/></mxCell>
+        <mxCell id="p4-outport" value="Outbound Ports&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;ModelPort&lt;br&gt;ConnectionPort&lt;br&gt;StoragePort&lt;br&gt;Secret/Event Port&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#7F56D9;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="1190" y="410" width="180" height="175" as="geometry"/></mxCell>
+        <mxCell id="p4-services" value="Application Services&lt;br&gt;&lt;font style=&quot;font-size:16px;font-weight:normal&quot;&gt;Guardrails · Orchestrator · Plan Validator · Execution Engine&lt;br&gt;Result Reducer · Skill Compiler · Policy Engine · Analytics&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E9D7FE;strokeColor=#7F56D9;strokeWidth=2;fontSize=22;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="650" y="650" width="590" height="130" as="geometry"/></mxCell>
+        <mxCell id="p4-app-path" value="src/pangi/application/  →  src/pangi/domain/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DDD6FE;strokeColor=#7F56D9;strokeWidth=2;fontSize=17;fontStyle=1;fontFamily=Courier New;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="690" y="805" width="500" height="45" as="geometry"/></mxCell>
+
+        <mxCell id="p4-outbound-boundary" value="Driven / Outbound Adapters&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;Application Port의 교체 가능한 구현&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECFDF3;strokeColor=#6CE9A6;strokeWidth=2;verticalAlign=top;align=left;spacingTop=16;spacingLeft=18;fontSize=23;fontStyle=1;fontColor=#027A48;arcSize=8;" vertex="1" parent="p4-1"><mxGeometry x="1440" y="170" width="410" height="700" as="geometry"/></mxCell>
+        <mxCell id="p4-models" value="Model Providers&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;OpenAI · Bedrock · Request Mapper&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#12B76A;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="1480" y="285" width="330" height="95" as="geometry"/></mxCell>
+        <mxCell id="p4-mcp" value="MCP Clients&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;stdio · Streamable HTTP · OAuth&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#12B76A;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="1480" y="405" width="330" height="95" as="geometry"/></mxCell>
+        <mxCell id="p4-sqlite" value="SQLite Persistence&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;Repository · Unit of Work · Migration&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#12B76A;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="1480" y="525" width="330" height="95" as="geometry"/></mxCell>
+        <mxCell id="p4-secret" value="Secrets · Telemetry&lt;br&gt;&lt;font style=&quot;font-size:15px;font-weight:normal&quot;&gt;Keyring/Vault · Log · Metric · Trace&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#12B76A;strokeWidth=2;fontSize=20;fontStyle=1;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="1480" y="645" width="330" height="95" as="geometry"/></mxCell>
+        <mxCell id="p4-outbound-path" value="src/pangi/adapters/outbound/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D1FADF;strokeColor=#12B76A;strokeWidth=2;fontSize=17;fontStyle=1;fontFamily=Courier New;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="1480" y="780" width="330" height="55" as="geometry"/></mxCell>
+
+        <mxCell id="p4-bootstrap" value="Composition Root · bootstrap.py&lt;br&gt;&lt;font style=&quot;font-size:16px;font-weight:normal&quot;&gt;유일하게 모든 구현을 알고 Port ↔ Adapter를 조립&lt;br&gt;Config 검증 → Migration → Registry → Runtime 시작&lt;br&gt;&lt;b&gt;Domain/Application은 bootstrap을 Import하지 않는다.&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F79009;strokeWidth=3;fontSize=22;fontStyle=1;align=left;spacingLeft=18;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="50" y="930" width="570" height="235" as="geometry"/></mxCell>
+        <mxCell id="p4-deploy" value="배포 형식 · Modular Monolith&lt;br&gt;&lt;font style=&quot;font-size:16px;font-weight:normal&quot;&gt;하나의 Python wheel · 기본 단일 Process · SQLite&lt;br&gt;Module 경계는 Import Rule과 Port Contract로 강제&lt;br&gt;1.0에서 Network Microservice 분리는 하지 않음&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F9FF;strokeColor=#0BA5EC;strokeWidth=3;fontSize=22;fontStyle=1;align=left;spacingLeft=18;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="665" y="930" width="570" height="235" as="geometry"/></mxCell>
+        <mxCell id="p4-mvc" value="MVC인가? · 전체 시스템은 MVC 아님&lt;br&gt;&lt;font style=&quot;font-size:16px;font-weight:normal&quot;&gt;FastAPI Route는 Controller와 비슷하지만 Domain Logic 없음&lt;br&gt;React UI는 View이지만 독립 Feature/API 구조 사용&lt;br&gt;Model 하나에 DB·업무 규칙을 합치는 Active Record를 쓰지 않음&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF1F3;strokeColor=#F63D68;strokeWidth=3;fontSize=22;fontStyle=1;align=left;spacingLeft=18;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="1280" y="930" width="570" height="235" as="geometry"/></mxCell>
+
+        <mxCell id="p4-call-note" value="Runtime 호출은 바깥 → 안쪽 → 바깥(Slack/API → Use Case → Port → MCP/SQLite)으로 흐른다. 하지만 소스 Import 의존성은 Adapter → Application → Domain 방향만 허용한다." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#98A2B3;strokeWidth=2;fontSize=19;fontStyle=1;fontColor=#344054;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="50" y="1210" width="1800" height="80" as="geometry"/></mxCell>
+        <mxCell id="p4-rules" value="Import Rules  ① domain: 표준 라이브러리 중심  ② application: domain + 자신이 소유한 port  ③ adapter: application/domain  ④ adapter 간 직접 Import 금지  ⑤ bootstrap만 전체 조립" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F9F5FF;strokeColor=#B692F6;strokeWidth=2;fontSize=18;fontStyle=1;fontColor=#53389E;arcSize=10;" vertex="1" parent="p4-1"><mxGeometry x="50" y="1310" width="1800" height="75" as="geometry"/></mxCell>
+
+        <mxCell id="p4-edge-api-port" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=1;exitY=0.5;entryX=0;entryY=0.35;" edge="1" parent="p4-1" source="p4-api" target="p4-inport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-edge-slack-port" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=1;exitY=0.5;entryX=0;entryY=0.7;" edge="1" parent="p4-1" source="p4-slack" target="p4-inport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-edge-cli-port" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=1;exitY=0.5;entryX=0.5;entryY=1;" edge="1" parent="p4-1" source="p4-cli" target="p4-inport"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="455" y="688"/><mxPoint x="610" y="688"/></Array></mxGeometry></mxCell>
+        <mxCell id="p4-edge-inport-usecase" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;entryX=0;entryY=0.5;" edge="1" parent="p4-1" source="p4-inport" target="p4-usecases"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-edge-usecase-domain" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="p4-1" source="p4-usecases" target="p4-domain"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-edge-services-domain" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="p4-1" source="p4-services" target="p4-domain"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-edge-model-port" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=0;exitY=0.5;entryX=1;entryY=0.15;" edge="1" parent="p4-1" source="p4-models" target="p4-outport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-edge-mcp-port" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=0;exitY=0.5;entryX=1;entryY=0.4;" edge="1" parent="p4-1" source="p4-mcp" target="p4-outport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-edge-sqlite-port" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=0;exitY=0.5;entryX=1;entryY=0.68;" edge="1" parent="p4-1" source="p4-sqlite" target="p4-outport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="p4-edge-secret-port" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#6941C6;strokeWidth=2;dashed=1;exitX=0;exitY=0.5;entryX=0.5;entryY=1;" edge="1" parent="p4-1" source="p4-secret" target="p4-outport"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1420" y="693"/><mxPoint x="1280" y="693"/></Array></mxGeometry></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="pangi-repository-structure" name="E. Repository 파일 배치 View">
+    <mxGraphModel dx="1900" dy="1450" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1450" math="0" shadow="0">
+      <root>
+        <mxCell id="p5-0"/>
+        <mxCell id="p5-1" parent="p5-0"/>
+        <mxCell id="p5-title" value="View E · Pangi 최종 Repository / Package 배치" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=38;fontStyle=1;fontColor=#17212B;" vertex="1" parent="p5-1"><mxGeometry x="50" y="35" width="1300" height="55" as="geometry"/></mxCell>
+        <mxCell id="p5-subtitle" value="파일 위치가 책임과 의존 방향을 드러내도록 Domain · Application · Adapter · Product Asset을 분리한다." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=22;fontColor=#475467;" vertex="1" parent="p5-1"><mxGeometry x="52" y="92" width="1500" height="40" as="geometry"/></mxCell>
+
+        <mxCell id="p5-root" value="&lt;b&gt;Pangi/ · Release Root&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:16px&quot;&gt;├─ pyproject.toml / uv.lock&lt;br&gt;├─ README.md / LICENSE&lt;br&gt;├─ .gitignore&lt;br&gt;├─ src/pangi/       # Python wheel&lt;br&gt;├─ ui/              # Dashboard source&lt;br&gt;├─ tests/&lt;br&gt;├─ docs/&lt;br&gt;└─ scripts/&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#667085;strokeWidth=3;fontSize=23;align=left;verticalAlign=top;spacingTop=16;spacingLeft=18;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="50" y="165" width="380" height="350" as="geometry"/></mxCell>
+        <mxCell id="p5-entry" value="&lt;b&gt;src/pangi/ · Public / Composition&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:16px&quot;&gt;├─ __init__.py      # stable exports&lt;br&gt;├─ config.py        # typed config&lt;br&gt;├─ runtime.py       # PangiRuntime facade&lt;br&gt;├─ bootstrap.py     # composition root&lt;br&gt;├─ domain/&lt;br&gt;├─ application/&lt;br&gt;├─ adapters/&lt;br&gt;├─ plugins/&lt;br&gt;├─ builtins/&lt;br&gt;└─ web/static/      # packaged UI&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#F79009;strokeWidth=3;fontSize=23;align=left;verticalAlign=top;spacingTop=16;spacingLeft=18;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="50" y="545" width="380" height="480" as="geometry"/></mxCell>
+
+        <mxCell id="p5-domain" value="&lt;b&gt;domain/ · Pure Business Rules&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:16px&quot;&gt;├─ common/&lt;br&gt;│  ├─ ids.py · clock.py · errors.py&lt;br&gt;├─ runs/&lt;br&gt;│  ├─ entities.py · events.py · policies.py&lt;br&gt;├─ skills/&lt;br&gt;│  ├─ entities.py · graph.py · policies.py&lt;br&gt;├─ schedules/&lt;br&gt;│  ├─ entities.py · occurrence.py&lt;br&gt;├─ connections/&lt;br&gt;│  ├─ entities.py · policies.py&lt;br&gt;├─ evals/&lt;br&gt;│  ├─ entities.py · expectations.py&lt;br&gt;└─ memory/&lt;br&gt;   ├─ entities.py · applicability.py&lt;/font&gt;&lt;br&gt;&lt;font style=&quot;font-size:15px;color:#53389E&quot;&gt;외부 SDK, DB, HTTP를 Import하지 않는다.&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4EBFF;strokeColor=#7F56D9;strokeWidth=3;fontSize=23;align=left;verticalAlign=top;spacingTop=16;spacingLeft=18;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="465" y="165" width="430" height="575" as="geometry"/></mxCell>
+        <mxCell id="p5-application" value="&lt;b&gt;application/ · Use Case / Port&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:16px&quot;&gt;├─ contracts/&lt;br&gt;│  ├─ requests.py · results.py · decisions.py&lt;br&gt;├─ ports/&lt;br&gt;│  ├─ inbound.py · model.py · connection.py&lt;br&gt;│  ├─ storage.py · secrets.py · events.py&lt;br&gt;├─ use_cases/&lt;br&gt;│  ├─ run_request.py · run_skill.py&lt;br&gt;│  ├─ manage_connection.py&lt;br&gt;│  ├─ manage_schedule.py · run_eval.py&lt;br&gt;│  └─ manage_memory.py&lt;br&gt;└─ services/&lt;br&gt;   ├─ guardrails.py · orchestrator.py&lt;br&gt;   ├─ plan_validator.py · execution_engine.py&lt;br&gt;   ├─ result_reducer.py · skill_compiler.py&lt;br&gt;   └─ policy_engine.py · analytics.py&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEF4FF;strokeColor=#6172F3;strokeWidth=3;fontSize=23;align=left;verticalAlign=top;spacingTop=16;spacingLeft=18;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="930" y="165" width="475" height="680" as="geometry"/></mxCell>
+        <mxCell id="p5-adapters" value="&lt;b&gt;adapters/ · Technology Boundary&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:15px&quot;&gt;├─ inbound/&lt;br&gt;│  ├─ cli.py · slack.py · scheduler.py&lt;br&gt;│  └─ api/&lt;br&gt;│     ├─ runs · connections · skills&lt;br&gt;│     └─ schedules · evals · admin · analytics&lt;br&gt;└─ outbound/&lt;br&gt;   ├─ models/&lt;br&gt;   │  └─ openai · bedrock · request_mapper&lt;br&gt;   ├─ mcp/&lt;br&gt;   │  ├─ client · oauth · discovery&lt;br&gt;   │  └─ normalizer · tool_enforcer&lt;br&gt;   ├─ persistence/sqlite/&lt;br&gt;   │  ├─ repositories · unit_of_work&lt;br&gt;   │  └─ migrations/&lt;br&gt;   ├─ secrets/&lt;br&gt;   │  └─ keyring · file_vault&lt;br&gt;   └─ telemetry/&lt;br&gt;      └─ logs · metrics · tracing&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECFDF3;strokeColor=#12B76A;strokeWidth=3;fontSize=23;align=left;verticalAlign=top;spacingTop=16;spacingLeft=18;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="1420" y="165" width="430" height="750" as="geometry"/></mxCell>
+
+        <mxCell id="p5-product" value="&lt;b&gt;Product Assets · Plugin / UI&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:15px&quot;&gt;src/pangi/plugins/&lt;br&gt;├─ registry.py · manifests.py&lt;br&gt;└─ capability_packs.py&lt;br&gt;src/pangi/builtins/&lt;br&gt;└─ skills/ · subagents/ · evals/&lt;br&gt;src/pangi/web/static/  # packaged UI build&lt;br&gt;ui/src/&lt;br&gt;├─ app/ · components/ · features/&lt;br&gt;└─ api/ · styles/&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F9FF;strokeColor=#0BA5EC;strokeWidth=3;fontSize=22;align=left;verticalAlign=top;spacingTop=16;spacingLeft=18;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="465" y="775" width="430" height="380" as="geometry"/></mxCell>
+        <mxCell id="p5-tests" value="&lt;b&gt;Verification / Documentation&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:16px&quot;&gt;tests/&lt;br&gt;├─ unit/domain/ · unit/application/&lt;br&gt;├─ contract/ · integration/ · e2e/ · fixtures/&lt;br&gt;docs/&lt;br&gt;├─ implementation-design.md · *.drawio · *.png&lt;br&gt;scripts/&lt;br&gt;├─ build_ui · release_smoke · migration_check&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF1F3;strokeColor=#F63D68;strokeWidth=3;fontSize=22;align=left;verticalAlign=top;spacingTop=16;spacingLeft=18;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="930" y="880" width="475" height="300" as="geometry"/></mxCell>
+        <mxCell id="p5-data" value="&lt;b&gt;Runtime Data · Repository 밖&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot; style=&quot;font-size:15px&quot;&gt;PANGI_HOME/&lt;br&gt;├─ config.toml&lt;br&gt;├─ pangi.db*&lt;br&gt;├─ secrets/ · logs/&lt;br&gt;└─ artifacts/ · backups/&lt;/font&gt;&lt;br&gt;&lt;font style=&quot;font-size:14px;color:#B42318&quot;&gt;학습/실행 데이터와 Credential은 Git에 넣지 않는다.&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAEB;strokeColor=#F79009;strokeWidth=3;fontSize=22;align=left;verticalAlign=top;spacingTop=16;spacingLeft=18;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="1420" y="950" width="430" height="240" as="geometry"/></mxCell>
+
+        <mxCell id="p5-rule" value="Directory Rule · domain은 framework-free · application이 Port를 소유 · adapters가 Port를 구현 · bootstrap.py만 구현을 조립 · UI는 REST/SSE 외에 SQLite에 직접 접근하지 않음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F9F5FF;strokeColor=#B692F6;strokeWidth=3;fontSize=19;fontStyle=1;fontColor=#53389E;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="50" y="1240" width="1800" height="80" as="geometry"/></mxCell>
+        <mxCell id="p5-test-rule" value="Test 배치 · Domain Unit → Application Unit(Fake Port) → Adapter Contract → SQLite/MCP Integration → Slack/API/UI E2E 순서로 경계를 검증한다." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#98A2B3;strokeWidth=2;fontSize=18;fontStyle=1;fontColor=#344054;arcSize=10;" vertex="1" parent="p5-1"><mxGeometry x="50" y="1340" width="1800" height="65" as="geometry"/></mxCell>
+
+        <mxCell id="p5-edge-root-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;endFill=1;strokeColor=#667085;strokeWidth=2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="p5-1" source="p5-root" target="p5-entry"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
