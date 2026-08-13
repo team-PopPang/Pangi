@@ -1,0 +1,32 @@
+name: 이슈 브랜치 자동 생성 및 삭제
+
+on:
+  issues:
+    types: [assigned]
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+jobs:
+  create_issue_branch:
+    if: github.event_name == 'issues' && github.event.action == 'assigned'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create issue branch
+        uses: robvanderleek/create-issue-branch@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  delete_merged_branch:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete merged branch
+        uses: dawidd6/action-delete-branch@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branches: ${{ github.event.pull_request.head.ref }}
