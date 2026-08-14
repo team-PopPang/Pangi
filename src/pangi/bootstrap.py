@@ -9,6 +9,8 @@ from pangi.adapters.inbound.cli import CliDependencies, create_app
 from pangi.adapters.inbound.web import create_web_app
 from pangi.adapters.outbound.initialization import FileSystemInitializer
 from pangi.adapters.outbound.persistence.sqlite.factory import (
+    build_bootstrap_admin,
+    build_bootstrap_admin_for_cli,
     build_migration_admin,
     build_sqlite_database,
 )
@@ -40,6 +42,7 @@ def create_asgi_app(paths: RuntimePaths, config: PangiConfig) -> FastAPI:
     return create_web_app(
         runtime_backend=database,
         readiness_probe=LocalRuntimeReadinessProbe(database),
+        bootstrap_admin=build_bootstrap_admin(database, config),
         static_root=static_root,
     )
 
@@ -64,6 +67,7 @@ def build_cli_dependencies() -> CliDependencies:
         doctor_factory=build_doctor_service,
         migration_factory=build_migration_admin,
         runtime_control_factory=_build_runtime_control,
+        bootstrap_admin_factory=build_bootstrap_admin_for_cli,
     )
 
 

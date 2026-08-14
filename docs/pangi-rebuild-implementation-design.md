@@ -2029,9 +2029,10 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 | Table | 주요 Column | 제약 | 소유 WBS |
 | --- | --- | --- | --- |
 | `schema_migrations` | version, name, checksum, applied_at | version PK | 03 |
-| `users` | id, external_id, display_name, role, status | external_id Unique | 04 |
+| `users` | id, display_name, role, status, created_at, updated_at | 역할·상태 Enum 제약 | 04 |
+| `auth_identities` | id, user_id, provider, subject, password_hash, created_at, updated_at | provider+subject Unique, Local만 Argon2id Hash | 04 |
 | `auth_sessions` | id, user_id, token_hash, csrf_hash, expires_at, rotated_at, state | 원문 Token 미저장, 만료 필수 | 04 |
-| `bootstrap_grants` | id, token_hash, expires_at, consumed_at, consumed_by_user_id | Active Grant 최대 1개, 일회용 | 04 |
+| `bootstrap_grants` | id, token_hash, expires_at, consumed_at, consumed_by_user_id, revoked_at, created_at | Active Grant 최대 1개, 일회용 | 04 |
 | `api_idempotency_records` | principal_id, route_key, idempotency_key, request_fingerprint, response_json, state, expires_at | principal+route+key Unique | 04 |
 | `connections` | id, kind, display_name, display_qualifier, scope, owner_user_id, transport, state, config_json, secret_ref | User Scope면 owner 필수 | 09 |
 | `connection_tools` | connection_id, stable_tool_id, remote_name, schema_json, fingerprint, state | connection+stable ID Unique | 09 |
@@ -2381,11 +2382,12 @@ Dashboard Auth 우선순위:
 2. Reverse Proxy OIDC Header Adapter
 3. Local Bootstrap Admin
 
-Slack을 설치하지 않은 초기 설정을 위해 `pangi init`가 일회용 Bootstrap URL을 만든다. 첫 Admin 생성 후 URL은 폐기한다.
+Slack을 설치하지 않은 초기 설정을 위해 `pangi init`가 기본 30분짜리 일회용 Bootstrap URL을 최초 한 번만 만든다. URL은 `/bootstrap#<token>` 형식으로 Token을 HTTP 요청과 Referrer에서 제외하고, DB에는 SHA-256 Hash만 저장한다. 첫 Admin과 Local Identity 생성, Grant 소비는 같은 Transaction이며 이후 Bootstrap을 닫는다. URL 분실·만료 복구는 Admin 생성 전에만 `pangi bootstrap rotate --yes`로 명시적으로 수행한다.
 
 - Session은 HttpOnly, Secure, SameSite=Lax Cookie를 사용한다.
 - 상태 변경 API는 CSRF Token을 요구한다.
 - Local Admin Password는 Argon2id로 Hash한다.
+- User와 인증 수단은 분리하고 Local, Slack, Reverse Proxy는 `auth_identities(provider, subject)`로 연결한다.
 - API Key는 256-bit Random 값을 한 번만 보여주고 Hash만 저장한다.
 - 모든 API Key에 Scope와 만료일을 둔다.
 
@@ -3057,7 +3059,7 @@ pangi start
 pangi status
 ```
 
-`pangi init`가 출력하는 일회용 Bootstrap URL에서 첫 Admin을 만든다. 기본 Dashboard는 `http://127.0.0.1:8787`에서만 열린다. 원격 공개는 TLS Reverse Proxy를 설정한 뒤 명시적으로 Bind Address를 바꾼다.
+`pangi init`가 최초 한 번 출력하는 30분짜리 일회용 Bootstrap URL에서 첫 Admin을 만든다. URL을 잃었거나 만료됐다면 Admin 생성 전에 `pangi bootstrap rotate --yes`로 회전한다. 기본 Dashboard는 `http://127.0.0.1:8787`에서만 열린다. 원격 공개는 TLS Reverse Proxy를 설정한 뒤 명시적으로 Bind Address를 바꾼다.
 
 Foreground 검증이 끝나면 사용자 Service로 전환한다.
 

@@ -53,11 +53,11 @@ def test_plan_is_read_only_and_apply_is_idempotent(tmp_path: Path) -> None:
     second = asyncio.run(admin.apply())
 
     assert not plan.database_exists
-    assert [migration.version for migration in plan.pending] == [1]
+    assert [migration.version for migration in plan.pending] == [1, 2]
     assert paths.database_file.exists()
-    assert first.current_version == 1
-    assert [migration.version for migration in first.applied] == [1]
-    assert second.current_version == 1
+    assert first.current_version == 2
+    assert [migration.version for migration in first.applied] == [1, 2]
+    assert second.current_version == 2
     assert second.applied == ()
     assert second.backup_file is None
 
@@ -86,13 +86,20 @@ def test_sqlite_connection_profile_is_enforced(tmp_path: Path) -> None:
         finally:
             await connection.close()
 
-    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 1)
+    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 2)
 
 
 def test_applied_migration_checksum_change_is_rejected(tmp_path: Path) -> None:
     paths, config = _initialized_runtime(tmp_path)
     packaged = PackageMigrationRegistry().load()
-    asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+    first = packaged[0]
+    asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=StaticMigrationRegistry(first),
+        ).apply()
+    )
     changed = MigrationSource.from_sql(
         1,
         packaged[0].descriptor.name,
@@ -136,7 +143,13 @@ def test_pending_batch_rolls_back_all_schema_changes_on_failure(tmp_path: Path) 
 def test_existing_database_is_backed_up_before_pending_migration(tmp_path: Path) -> None:
     paths, config = _initialized_runtime(tmp_path)
     first = PackageMigrationRegistry().load()[0]
-    asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+    asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=StaticMigrationRegistry(first),
+        ).apply()
+    )
     second = MigrationSource.from_sql(
         2,
         "backup_probe",
@@ -155,9 +168,7 @@ def test_existing_database_is_backed_up_before_pending_migration(tmp_path: Path)
     assert result.backup_file is not None
     assert result.backup_file.name == "pre-migrate-v1-to-v2-20260815T000000Z.sqlite3"
     assert result.backup_file.stat().st_mode & 0o777 == 0o600
-    manifest_file = result.backup_file.with_name(
-        f"{result.backup_file.name}.manifest.json"
-    )
+    manifest_file = result.backup_file.with_name(f"{result.backup_file.name}.manifest.json")
     verification = asyncio.run(
         SqliteSnapshotStore(
             paths,
@@ -171,10 +182,91 @@ def test_existing_database_is_backed_up_before_pending_migration(tmp_path: Path)
         assert backup.execute("PRAGMA user_version").fetchone() == (1,)
 
 
+def test_packaged_auth_migration_upgrades_v1_with_verified_backup(tmp_path: Path) -> None:
+    paths, config = _initialized_runtime(tmp_path)
+    first = PackageMigrationRegistry().load()[0]
+    asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=StaticMigrationRegistry(first),
+        ).apply()
+    )
+
+    result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+
+    assert result.current_version == 2
+    assert [migration.name for migration in result.applied] == ["auth_core"]
+    assert result.backup_file is not None
+    with sqlite3.connect(paths.database_file) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+    assert {"users", "auth_identities", "auth_sessions", "bootstrap_grants"} <= tables
+    with sqlite3.connect(result.backup_file) as backup:
+        assert backup.execute("PRAGMA user_version").fetchone() == (1,)
+        assert backup.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'users'"
+        ).fetchone() is None
+
+
+def test_auth_schema_enforces_roles_identity_shape_and_single_open_grant(
+    tmp_path: Path,
+) -> None:
+    paths, config = _initialized_runtime(tmp_path)
+    asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+    timestamp = datetime(2026, 8, 15, 0, 0, tzinfo=UTC).isoformat()
+    with sqlite3.connect(paths.database_file) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
+                ("invalid-user-0001", "Invalid", "owner", "active", timestamp, timestamp),
+            )
+        connection.execute(
+            "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
+            ("member-user-00001", "Member", "member", "active", timestamp, timestamp),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO auth_identities VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "slack-identity-0001",
+                    "member-user-00001",
+                    "slack",
+                    "U123",
+                    "$argon2id$must-not-exist",
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        connection.execute(
+            "INSERT INTO bootstrap_grants "
+            "VALUES (?, ?, ?, NULL, NULL, NULL, ?)",
+            ("bootstrap-grant-001", "a" * 64, timestamp, timestamp),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO bootstrap_grants "
+                "VALUES (?, ?, ?, NULL, NULL, NULL, ?)",
+                ("bootstrap-grant-002", "b" * 64, timestamp, timestamp),
+            )
+
+
 def test_snapshot_failure_prevents_pending_migration(tmp_path: Path) -> None:
     paths, config = _initialized_runtime(tmp_path)
     first = PackageMigrationRegistry().load()[0]
-    asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+    asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=StaticMigrationRegistry(first),
+        ).apply()
+    )
     second = MigrationSource.from_sql(
         2,
         "must_not_apply",
@@ -202,6 +294,9 @@ def test_snapshot_failure_prevents_pending_migration(tmp_path: Path) -> None:
     assert list(paths.backup_dir.iterdir()) == []
     with sqlite3.connect(paths.database_file) as connection:
         assert connection.execute("PRAGMA user_version").fetchone() == (1,)
-        assert connection.execute(
-            "SELECT name FROM sqlite_master WHERE name = 'must_not_apply'"
-        ).fetchone() is None
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'must_not_apply'"
+            ).fetchone()
+            is None
+        )

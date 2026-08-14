@@ -46,6 +46,8 @@ Package 설치 후 사용자가 `pangi init`, `pangi doctor`, `pangi start`만�
 - `doctor`는 Runtime→Path→Config→SQLite→Secret→Process→외부 연결→Product Integrity 순으로 검사한다.
 - `doctor --offline --json`은 외부 호출 없이 Stable `schema_version`과 검사 ID를 반환한다.
 - CLI 출력 Layer는 Secret, Token, 원문 Prompt/Tool Result를 Text와 JSON 모두에서 제거한다.
+- Bootstrap Grant 기본 만료는 30분이며 기존 Config에는 `[auth]` 기본값을 적용한다.
+- `init`는 URL을 최초 한 번만 출력하고 자동 재발급하지 않는다. 복구는 Admin 생성 전 명시적 `bootstrap rotate --yes`만 허용한다.
 
 ## 구현 체크리스트
 
@@ -57,6 +59,7 @@ Package 설치 후 사용자가 `pangi init`, `pangi doctor`, `pangi start`만�
 - [x] `doctor` 검사 Registry, 상태와 종료 코드를 구현한다.
 - [x] `doctor --offline`, `--json`, `--strict` 계약을 구현한다.
 - [x] Bootstrap URL을 일회성으로 생성하고 첫 Admin 생성 뒤 폐기하는 Port를 정의한다.
+- [x] `pangi init`과 `pangi bootstrap rotate --yes`를 SQLite Bootstrap Adapter에 연결한다.
 
 ## 검증 체크리스트
 
@@ -66,6 +69,7 @@ Package 설치 후 사용자가 `pangi init`, `pangi doctor`, `pangi start`만�
 - [x] `doctor --offline --json` Schema와 종료 코드 0/1/2를 Contract Test로 고정한다.
 - [x] Text/JSON 출력에 Secret Pattern이 나타나지 않는지 검사한다.
 - [x] 잘못된 경로 권한, Port 충돌과 Config 오류가 안전한 다음 행동을 제공하는지 확인한다.
+- [x] Bootstrap URL 최초 1회 출력, 재실행 멱등성과 명시적 회전 확인을 Contract Test로 고정한다.
 
 ## 1차 구현 결과
 
@@ -83,6 +87,13 @@ Package 설치 후 사용자가 `pangi init`, `pangi doctor`, `pangi start`만�
 - 실제 별도 Process에서 `start → status → 종료 → status` 흐름과 Port 충돌, 안전하지 않은 경로 및 Config 오류를 검증했다.
 - 깨끗한 Runtime Data에서 `init`와 `start`만으로 설치된 Wheel의 Local Dashboard를 열 수 있어 WBS-02를 `완료`로 변경한다.
 
+## 3차 구현 결과
+
+- `[auth].bootstrap_grant_ttl_minutes`를 추가하고 기존 Schema v1 Config에는 기본 30분을 하위 호환으로 적용했다.
+- `pangi init`이 인증 Migration 뒤 원문 Token을 저장하지 않는 `/bootstrap#<token>` URL을 최초 한 번만 출력하도록 연결했다.
+- 재실행은 기존 Secret을 재노출하거나 자동 회전하지 않고, 복구가 필요할 때만 `pangi bootstrap rotate --yes`가 기존 Grant를 취소하고 새 URL을 발급한다.
+- Admin이 이미 존재하면 회전을 닫고 Text/JSON 오류에 Secret이 포함되지 않도록 기존 출력 경계를 유지했다.
+
 ## 완료 조건
 
 - 새 Host에서 `init`와 `start`만으로 Local Dashboard 시작 경로를 제공한다.
@@ -92,4 +103,4 @@ Package 설치 후 사용자가 `pangi init`, `pangi doctor`, `pangi start`만�
 
 ## 미결정 사항
 
-- Bootstrap Admin URL의 기본 만료 시간
+- 없음

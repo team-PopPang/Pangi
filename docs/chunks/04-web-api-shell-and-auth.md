@@ -43,7 +43,10 @@ FastAPI와 React Admin Shell을 같은 Origin으로 제공하고, Bootstrap Admi
 - Session Cookie는 HttpOnly/Secure/SameSite=Lax를 사용하고 상태 변경 API는 CSRF Token을 요구한다.
 - Auth 우선순위는 Slack OIDC→신뢰된 Reverse Proxy Header→일회용 Local Bootstrap이다.
 - 첫 Admin 생성 Transaction이 Bootstrap Token을 즉시 폐기한다.
-- WBS-03 Unit of Work 위에서 `users`, `auth_sessions`, `bootstrap_grants`, `api_idempotency_records`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
+- WBS-03 Unit of Work 위에서 `users`, `auth_identities`, `auth_sessions`, `bootstrap_grants`, `api_idempotency_records`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
+- User와 인증 수단은 분리한다. Local Identity만 Argon2id Password Hash를 가지며 Slack/Reverse Proxy Subject는 같은 `auth_identities` 유일성 경계를 사용한다.
+- Bootstrap Grant 기본 TTL은 30분이고 활성 Grant는 최대 하나다. URL은 `/bootstrap#<token>`을 사용하고 DB에는 SHA-256 Hash만 저장한다.
+- 최초 Admin과 Local Identity 생성, Grant 소비는 같은 Transaction이다. `init`는 Secret을 한 번만 발급하며 복구는 Admin 생성 전 `bootstrap rotate --yes`로만 수행한다.
 - Member, Skill Author, Admin, System 역할을 API Dependency에서 검사하고 Resource Owner 조건은 Use Case가 재검사한다.
 - 모든 오류는 Stable Code, 안전한 Message, Request ID와 제한된 Details를 가진 Envelope로 변환한다.
 - React Router/TanStack Query/OpenAPI 생성 Type을 기본으로 하고 CI에서 Schema Drift를 검사한다.
@@ -61,9 +64,10 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 ## 구현 체크리스트
 
 - [x] ASGI App Factory와 Composition Root를 만든다.
-- [ ] Request ID, 오류 변환, 인증, CSRF와 Idempotency Middleware를 구현한다.
+- [x] Request ID와 Bootstrap API용 최소 Error Envelope를 구현한다.
+- [ ] 전체 오류 변환, 인증, CSRF와 Idempotency Middleware를 구현한다.
 - [ ] Session Store와 Role 기반 API Dependency를 구현한다.
-- [ ] Local Bootstrap Admin 생성과 Token 폐기를 구현한다.
+- [x] 인증 Core Migration과 Local Bootstrap Admin 생성·Token 폐기를 구현한다.
 - [ ] Slack/Reverse Proxy OIDC Adapter Protocol을 정의한다.
 - [x] 최소 React/Vite SPA Shell과 Visual Token 기반을 구현한다.
 - [ ] 전체 Sidebar와 공통 Layout을 구현한다.
@@ -74,11 +78,11 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 
 ## 검증 체크리스트
 
-- [ ] Bootstrap Token 재사용과 만료를 거부하는지 확인한다.
+- [x] Bootstrap Token 재사용, 회전된 Token과 만료를 동일한 안전 오류로 거부하는지 확인한다.
 - [ ] 역할별 API 허용/거부와 Resource Owner 검사를 테스트한다.
 - [ ] CSRF 없는 상태 변경 요청을 거부하는지 확인한다.
 - [ ] 같은 Idempotency Key 요청이 중복 Mutation을 만들지 않는지 확인한다.
-- [ ] Error Envelope에 Stack Trace, 내부 Path와 Secret이 없는지 검사한다.
+- [x] Bootstrap Error Envelope에 Stack Trace, 내부 Path와 Secret이 없는지 검사한다.
 - [ ] OpenAPI와 Frontend Type Drift Test를 실행한다.
 - [x] SPA Route, Asset Cache와 Live/Ready를 E2E로 확인한다.
 - [ ] SSE 연결을 E2E로 확인한다.
@@ -92,7 +96,18 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 - React/Vite 기반 빈 Admin Shell, Fingerprinted Asset, Non-API SPA Fallback과 API/Asset 404 경계를 Wheel Package Data에 포함했다.
 - Same-origin 기본값을 유지하고 CSP, Frame 차단, `nosniff`, Referrer Policy와 Asset Cache Header를 적용했다.
 - 실제 Process의 `start/status/종료`, ASGI Lifespan, Live/Ready, SPA/Asset와 설치 자원 계약을 검증했다.
-- Bootstrap 인증, 공통 API 보안 계약, 전체 Admin Layout, OpenAPI Type과 SSE가 남아 있으므로 WBS-04 상태는 `진행 중`으로 유지한다.
+- Bootstrap 이후의 실제 로그인·Session, 공통 API 보안 계약, 전체 Admin Layout, OpenAPI Type과 SSE가 남아 있으므로 WBS-04 상태는 `진행 중`으로 유지한다.
+
+## 2차 구현 결과
+
+- v2 Migration에 `users`, `auth_identities`, `auth_sessions`, `bootstrap_grants`를 추가하고 Role/Status, Provider Subject 유일성, Local Argon2id Hash, Foreign Key와 활성 Grant 단일성 제약을 DB에서 강제했다.
+- Bootstrap Service가 256-bit Random Token을 URL Fragment로 한 번만 반환하고 DB에는 SHA-256 Hash와 기본 30분 만료만 저장한다.
+- `pangi init`의 최초 발급과 멱등 재실행, `pangi bootstrap rotate --yes`의 명시적 복구를 연결하고 Admin 생성 뒤 Bootstrap을 닫았다.
+- `/api/v1/bootstrap/admin`이 Grant 검증, Local Admin/Identity 생성과 Grant 소비를 WBS-03 Unit of Work 하나에서 처리한다. 실패 시 전체 변경을 Rollback한다.
+- `/bootstrap` UI가 Fragment Token을 메모리로 옮긴 뒤 주소에서 즉시 제거하고 성공 후 Token과 Password 상태를 폐기한다.
+- Bootstrap API에 Request ID, Same-origin 검사와 Secret을 포함하지 않는 최소 Error Envelope를 적용했다.
+- Migration v1→v2, DB 제약, Grant 발급·회전·만료·재사용, Transaction Rollback, API 오류와 원문 Secret 비저장을 자동 테스트로 고정했다.
+- 실제 Login, Session Cookie, CSRF, Role Dependency와 외부 OIDC가 남아 있으므로 WBS-04 상태는 `진행 중`이다.
 
 ## 완료 조건
 
