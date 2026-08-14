@@ -45,6 +45,7 @@
 - Output Guardrail은 Secret Pattern, Token Prefix, HTML, Mention, 길이, Link Scheme, Stack Trace와 Evidence를 검사한다.
 - 외부 Text는 Source/Trust Metadata를 가진 Envelope로 감싸며 내부 지시로 승격하지 않는다.
 - Audit은 Append-only이며 원문 Token/Prompt/Tool Result 대신 Version, Fingerprint와 Redacted Diff를 저장한다.
+- WBS-03 Unit of Work 위에서 `audit_events`의 Migration, Append-only 제약과 Repository를 이 WBS가 소유한다.
 - Security Header, Session Rotation과 Localhost 기본 Bind는 Web Middleware에서 강제한다.
 
 ## 구현 체크리스트

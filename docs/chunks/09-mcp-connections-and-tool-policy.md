@@ -42,6 +42,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - HTTP는 기본 HTTPS, stdio는 절대 경로/등록 Alias와 Argument Array만 허용한다.
 - OAuth는 Authorization Code+PKCE S256, State/Nonce/Redirect/Resource Audience를 검증한다.
 - SQLite에는 `secret_ref`만 저장하고 실제 값은 Keyring/Secret Manager/암호화 Vault에 둔다.
+- WBS-03 Unit of Work 위에서 `connections`, `connection_tools`, `tool_policies`, `tool_invocations`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
 - Discovery 결과는 Canonical JSON SHA-256 Fingerprint로 식별하고 변경 시 참조 Skill을 `needs_review`로 바꾼다.
 - 새 Tool은 `deny`로 등록하고 Principal/Owner/Permission/Approval/Schema/Budget을 통과한 호출만 MCP Client로 보낸다.
 - Result는 Byte/Timeout Limit 뒤 표준 `ToolResult`와 비신뢰 Data Envelope로 정규화한다.

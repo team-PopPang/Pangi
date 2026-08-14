@@ -25,3 +25,7 @@ class MigrationIntegrityError(MigrationError):
 
 class MigrationApplyError(MigrationError):
     """A pending migration batch failed and was rolled back."""
+
+
+class UnitOfWorkStateError(StorageError):
+    """A unit of work was nested, reused, or completed more than once."""

@@ -43,6 +43,7 @@ FastAPI와 React Admin Shell을 같은 Origin으로 제공하고, Bootstrap Admi
 - Session Cookie는 HttpOnly/Secure/SameSite=Lax를 사용하고 상태 변경 API는 CSRF Token을 요구한다.
 - Auth 우선순위는 Slack OIDC→신뢰된 Reverse Proxy Header→일회용 Local Bootstrap이다.
 - 첫 Admin 생성 Transaction이 Bootstrap Token을 즉시 폐기한다.
+- WBS-03 Unit of Work 위에서 `users`, `auth_sessions`, `bootstrap_grants`, `api_idempotency_records`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
 - Member, Skill Author, Admin, System 역할을 API Dependency에서 검사하고 Resource Owner 조건은 Use Case가 재검사한다.
 - 모든 오류는 Stable Code, 안전한 Message, Request ID와 제한된 Details를 가진 Envelope로 변환한다.
 - React Router/TanStack Query/OpenAPI 생성 Type을 기본으로 하고 CI에서 Schema Drift를 검사한다.

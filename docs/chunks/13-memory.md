@@ -45,6 +45,7 @@
 - 권한 확대나 System Policy 충돌 문장은 제외하고 선택/제외 이유를 Trace에 남긴다.
 - Active Content/Scope 변경은 `If-Match`/Revision을 검사해 새 Draft를 만들고 승인 후 교체한다.
 - Secret Pattern은 저장 전에 거부하며 삭제는 Soft Delete와 Audit를 사용한다.
+- WBS-03 Unit of Work 위에서 `memory_items`의 Migration, Revision/Soft Delete 제약과 Repository를 이 WBS가 소유한다.
 - UI Preview는 어떤 Prompt 단계에 어떤 Summary가 들어가는지 안전하게 표시한다.
 
 ## 구현 체크리스트

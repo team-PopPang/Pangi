@@ -44,6 +44,7 @@ Once/Cron Schedule이 자연어 `request` 또는 고정 Version `skill` 중 하�
 - Request Text는 최대 8KB, 생성/실행 Guardrail을 거치며 DB에는 Ciphertext/Key Version/Fingerprint만 저장한다.
 - Skill Target은 불변 Version과 Schema 검증 Input을 저장하고 Root 호출 없이 실행한다.
 - Tick은 Due Schedule을 읽고 현지 날짜/고정 Holiday Version을 검사한 뒤 `schedule_id+scheduled_for` Unique Row를 Transaction에서 Insert한다.
+- WBS-03 Unit of Work 위에서 `holiday_calendars`, `holiday_calendar_versions`, `schedules`, `schedule_runs`의 Migration, XOR/Unique 제약과 Repository를 이 WBS가 소유한다.
 - 공휴일은 `skipped_holiday` 한 건을 남기고 Run을 만들지 않으며 다음 시각을 계산한다.
 - Misfire `skip|run_once`, Coalesce와 DST 규칙을 결정적으로 적용한다.
 - 실행 직전 현재 Role/Connection/Tool Policy를 재검사하고 Schedule 생성 시점 권한을 복제하지 않는다.

@@ -38,6 +38,7 @@
 ## 기술 설계
 
 - `runs.state=queued`를 Queue로 사용하고 요청 저장 Transaction이 첫 Event를 함께 기록한다.
+- WBS-03 Unit of Work 위에서 `runs`, `run_steps`, `run_events`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
 - Worker는 `BEGIN IMMEDIATE`에서 가장 오래된 Queue Row를 `running`으로 Claim하고 Worker ID, Lease, Heartbeat를 저장한다.
 - Run 상태 전이는 Domain Policy가 허용한 Edge만 사용하고 Repository Update에 Expected Revision을 포함한다.
 - Required Step 실패는 Run 실패, Optional Step 실패는 Warning을 가진 Partial Result로 구분한다.

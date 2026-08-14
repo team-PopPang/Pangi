@@ -43,6 +43,7 @@ Root, Subagent, Skill, Eval이 사용하는 모델 호출을 Provider Adapter �
 - Region, Zero-retention, Raw Content 허용 여부와 Redaction 요구를 검사한 뒤 Adapter를 선택한다.
 - 허용 후보가 없으면 임의 Provider Fallback 없이 `model_policy_denied`로 실패한다.
 - 원문 Prompt 대신 Policy/Fingerprint/Data Class/Redaction Count/Token/Duration을 저장한다.
+- WBS-03 Unit of Work 위에서 `model_policies`, `model_invocations`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
 - Transport Retry는 같은 Logical Call의 `provider_request_count`만 증가시키며 결과 뒤 Semantic Retry는 허용하지 않는다.
 - Policy 변경은 영향받는 Prompt/Skill/Subagent와 필수 Eval Suite를 계산한 뒤 활성화한다.
 

@@ -1,12 +1,51 @@
-"""Storage administration ports owned by the application layer."""
+"""Storage lifecycle ports owned by the application layer."""
 
-from typing import Protocol
+from types import TracebackType
+from typing import Protocol, Self
 
 from pangi.application.contracts.storage import MigrationApplyResult, MigrationPlan
 
 
 class StorageOperationError(RuntimeError):
     """Safe expected failure exposed by a storage administration adapter."""
+
+
+class UnitOfWork(Protocol):
+    """Framework-free transaction lifecycle shared by repository ports."""
+
+    async def __aenter__(self) -> Self:
+        """Start one transaction."""
+
+        ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Rollback an unfinished transaction and release it."""
+
+        ...
+
+    async def commit(self) -> None:
+        """Persist the active transaction exactly once."""
+
+        ...
+
+    async def rollback(self) -> None:
+        """Discard the active transaction exactly once."""
+
+        ...
+
+
+class UnitOfWorkFactory(Protocol):
+    """Create isolated unit-of-work instances for application use cases."""
+
+    def create(self) -> UnitOfWork:
+        """Create a new, not-yet-entered unit of work."""
+
+        ...
 
 
 class MigrationAdmin(Protocol):
