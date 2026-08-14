@@ -19,12 +19,15 @@ classifiers = [
 ]
 dependencies = [
   "aiosqlite>=0.20,<1",
+  "fastapi>=0.115,<1",
   "pydantic>=2.12,<3",
   "typer>=0.20,<1",
+  "uvicorn>=0.34,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "httpx2>=2,<3",
   "mypy>=1.15,<2",
   "pytest>=8.3,<10",
   "ruff>=0.11,<1",
@@ -48,7 +51,9 @@ pangi = [
   "py.typed",
   "adapters/outbound/persistence/sqlite/migrations/*.sql",
   "builtins/resources/*.json",
+  "web/static/*.html",
   "web/static/*.json",
+  "web/static/assets/*",
 ]
 
 [tool.pytest.ini_options]

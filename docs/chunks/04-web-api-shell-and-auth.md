@@ -49,17 +49,28 @@ FastAPI와 React Admin Shell을 같은 Origin으로 제공하고, Bootstrap Admi
 - React Router/TanStack Query/OpenAPI 생성 Type을 기본으로 하고 CI에서 Schema Drift를 검사한다.
 - WBS-03의 SQLite Runtime 시작 상태와 Doctor 결과를 `/health/ready`에 연결하되 DB 구현 타입을 API 계약에 노출하지 않는다.
 
+## 내부 구현 단계
+
+WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 구현한다.
+
+1. **ASGI Runtime과 빈 Admin Shell**: FastAPI/Uvicorn, SQLite Lifespan, Live/Ready, CLI `start/status`, 최소 React/Vite Shell과 정적 Asset 경계를 만든다.
+2. **인증 영속성과 Bootstrap Admin**: User, Session, Bootstrap Grant Migration/Repository와 일회성 Local Admin 생성을 만든다.
+3. **공통 API 보안 계약**: Request ID, Error Envelope, 역할, CSRF, Idempotency, Cursor Pagination과 OIDC Adapter Protocol을 만든다.
+4. **Admin UI 계약과 SSE**: 전체 Sidebar/Layout, OpenAPI 생성 Type, API Client, SSE Transport와 Schema Drift Gate를 완성한다.
+
 ## 구현 체크리스트
 
-- [ ] ASGI App Factory와 Composition Root를 만든다.
+- [x] ASGI App Factory와 Composition Root를 만든다.
 - [ ] Request ID, 오류 변환, 인증, CSRF와 Idempotency Middleware를 구현한다.
 - [ ] Session Store와 Role 기반 API Dependency를 구현한다.
 - [ ] Local Bootstrap Admin 생성과 Token 폐기를 구현한다.
 - [ ] Slack/Reverse Proxy OIDC Adapter Protocol을 정의한다.
-- [ ] SPA Shell, Sidebar, 공통 Layout와 Visual Token을 구현한다.
+- [x] 최소 React/Vite SPA Shell과 Visual Token 기반을 구현한다.
+- [ ] 전체 Sidebar와 공통 Layout을 구현한다.
 - [ ] OpenAPI 생성 Type과 Frontend API Client를 연결한다.
-- [ ] `/health/live`, `/health/ready`와 SSE 공통 Transport를 만든다.
-- [ ] Fingerprinted Asset과 SPA Fallback Cache 정책을 설정한다.
+- [x] `/health/live`와 `/health/ready`를 만든다.
+- [ ] SSE 공통 Transport를 만든다.
+- [x] Fingerprinted Asset과 SPA Fallback Cache 정책을 설정한다.
 
 ## 검증 체크리스트
 
@@ -69,7 +80,19 @@ FastAPI와 React Admin Shell을 같은 Origin으로 제공하고, Bootstrap Admi
 - [ ] 같은 Idempotency Key 요청이 중복 Mutation을 만들지 않는지 확인한다.
 - [ ] Error Envelope에 Stack Trace, 내부 Path와 Secret이 없는지 검사한다.
 - [ ] OpenAPI와 Frontend Type Drift Test를 실행한다.
-- [ ] SPA Route, Asset Cache, Live/Ready와 SSE 연결을 E2E로 확인한다.
+- [x] SPA Route, Asset Cache와 Live/Ready를 E2E로 확인한다.
+- [ ] SSE 연결을 E2E로 확인한다.
+
+## 1차 구현 결과
+
+- FastAPI ASGI App Factory가 WBS-03의 SQLite Database를 Lifespan으로 시작하고 종료·실패 시 Connection과 Process Lock을 정리한다.
+- Doctor의 실행 전 Port 검사와 분리된 Readiness 계약을 만들고 SQLite Runtime과 Package Asset 상태를 `/health/ready`에 연결했다.
+- `/health/live`는 Pangi 제품 식별자와 Schema Version을 제공하고 `pangi status`가 이를 검증해 다른 Process의 열린 Port를 오인하지 않는다.
+- Uvicorn 단일 Process 전경 실행을 `pangi start`에 연결하고 Migration 실패나 두 번째 SQLite Process가 Ready 이전에 실패하도록 유지했다.
+- React/Vite 기반 빈 Admin Shell, Fingerprinted Asset, Non-API SPA Fallback과 API/Asset 404 경계를 Wheel Package Data에 포함했다.
+- Same-origin 기본값을 유지하고 CSP, Frame 차단, `nosniff`, Referrer Policy와 Asset Cache Header를 적용했다.
+- 실제 Process의 `start/status/종료`, ASGI Lifespan, Live/Ready, SPA/Asset와 설치 자원 계약을 검증했다.
+- Bootstrap 인증, 공통 API 보안 계약, 전체 Admin Layout, OpenAPI Type과 SSE가 남아 있으므로 WBS-04 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 

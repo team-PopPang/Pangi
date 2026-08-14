@@ -1,15 +1,24 @@
 """Composition root for wiring application ports to concrete adapters."""
 
+from importlib import resources
 from pathlib import Path
 
+from fastapi import FastAPI
+
 from pangi.adapters.inbound.cli import CliDependencies, create_app
+from pangi.adapters.inbound.web import create_web_app
 from pangi.adapters.outbound.initialization import FileSystemInitializer
-from pangi.adapters.outbound.persistence.sqlite.factory import build_migration_admin
-from pangi.adapters.outbound.runtime_control import UnavailableRuntimeControl
+from pangi.adapters.outbound.persistence.sqlite.factory import (
+    build_migration_admin,
+    build_sqlite_database,
+)
+from pangi.adapters.outbound.runtime_control import UvicornRuntimeControl
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
+from pangi.adapters.outbound.runtime_readiness import LocalRuntimeReadinessProbe
 from pangi.adapters.outbound.system_checks import build_doctor_service
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.ports.runtime import RuntimeBackend
+from pangi.config import PangiConfig
 from pangi.runtime import PangiRuntime
 
 
@@ -23,6 +32,29 @@ def _resolve_cli_paths(project_local: bool, config_path: Path | None) -> Runtime
     return resolve_runtime_paths(project_local=project_local, explicit_config=config_path)
 
 
+def create_asgi_app(paths: RuntimePaths, config: PangiConfig) -> FastAPI:
+    """Compose the local SQLite runtime and packaged Admin Web adapter."""
+
+    database = build_sqlite_database(paths, config)
+    static_root = Path(str(resources.files("pangi.web").joinpath("static")))
+    return create_web_app(
+        runtime_backend=database,
+        readiness_probe=LocalRuntimeReadinessProbe(database),
+        static_root=static_root,
+    )
+
+
+def _build_runtime_control(
+    paths: RuntimePaths,
+    config: PangiConfig,
+) -> UvicornRuntimeControl:
+    return UvicornRuntimeControl(
+        app=create_asgi_app(paths, config),
+        host=config.server.host,
+        port=config.server.port,
+    )
+
+
 def build_cli_dependencies() -> CliDependencies:
     """Compose the currently available CLI use cases and local adapters."""
 
@@ -31,7 +63,7 @@ def build_cli_dependencies() -> CliDependencies:
         initializer=FileSystemInitializer(),
         doctor_factory=build_doctor_service,
         migration_factory=build_migration_admin,
-        runtime_control=UnavailableRuntimeControl(),
+        runtime_control_factory=_build_runtime_control,
     )
 
 

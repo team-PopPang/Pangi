@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -41,6 +43,21 @@ class ServerConfig(_StrictModel):
 
     host: str = Field(default="127.0.0.1", min_length=1, max_length=255)
     port: int = Field(default=8787, ge=1, le=65535)
+
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, value: str) -> str:
+        try:
+            ip_address(value)
+        except ValueError:
+            labels = value.split(".")
+            valid_hostname = len(value) <= 253 and all(
+                re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+                for label in labels
+            )
+            if not valid_hostname:
+                raise ValueError("host must be an IP address or DNS hostname") from None
+        return value
 
 
 class RuntimeConfig(_StrictModel):
