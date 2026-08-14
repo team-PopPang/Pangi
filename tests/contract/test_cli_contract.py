@@ -32,7 +32,7 @@ def _app(tmp_path: Path):
                 initializer=FileSystemInitializer(),
                 doctor_factory=build_doctor_service,
                 migration_factory=build_migration_admin,
-                runtime_control=UnavailableRuntimeControl(),
+                runtime_control_factory=lambda _paths, _config: UnavailableRuntimeControl(),
         )
     )
 
@@ -166,11 +166,27 @@ def test_start_and_status_fail_explicitly_until_runtime_is_composed(tmp_path: Pa
     start = runner.invoke(app, ["start"])
     status = runner.invoke(app, ["status", "--json"])
 
-    assert start.exit_code == 2
+    assert start.exit_code == 1
     assert "WBS 03 and WBS 04" in start.output
     assert "Traceback" not in start.output
     assert status.exit_code == 1
     assert json.loads(status.output)["state"] == "unavailable"
+
+
+def test_status_returns_code_two_for_invalid_server_config(tmp_path: Path) -> None:
+    source = tmp_path / "install.toml"
+    source.write_text(PangiConfig().to_toml(), "utf-8")
+    runner = CliRunner()
+    app = _app(tmp_path)
+    runner.invoke(app, ["init", "--config", str(source), "--non-interactive", "--json"])
+    target = tmp_path / "runtime" / "pangi.toml"
+    target.write_text(target.read_text("utf-8").replace("127.0.0.1", "host/path"), "utf-8")
+
+    status = runner.invoke(app, ["status", "--json"])
+
+    assert status.exit_code == 2
+    assert json.loads(status.output)["exit_code"] == 2
+    assert "Traceback" not in status.output
 
 
 def test_migrate_plan_apply_and_repeat_have_stable_json(tmp_path: Path) -> None:

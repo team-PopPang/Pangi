@@ -13,6 +13,10 @@ __pycache__/
 build/
 dist/
 
+# Admin UI
+ui/node_modules/
+ui/.vite/
+
 # Pangi runtime data
 .pangi/
 pangi-data/

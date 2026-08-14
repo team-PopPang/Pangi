@@ -1,5 +1,11 @@
 {
-  "schema_version": 1,
-  "assets": []
+  "index.html": {
+    "file": "assets/index-vPReA291.js",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "css": [
+      "assets/index-C8WU3t7I.css"
+    ]
+  }
 }
-

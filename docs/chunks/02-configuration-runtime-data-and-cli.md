@@ -53,7 +53,7 @@ Package 설치 후 사용자가 `pangi init`, `pangi doctor`, `pangi start`만�
 - [x] Config/Data/Log/Backup/Vault 경로 Resolver를 구현한다.
 - [x] `pangi init`의 Preview, 확인, 멱등 생성과 Non-interactive Mode를 구현한다.
 - [x] Project-local `.gitignore` Marker Block 갱신을 구현한다.
-- [ ] `pangi start`, `status`, `version`, `config path/validate`를 연결한다.
+- [x] `pangi start`, `status`, `version`, `config path/validate`를 연결한다.
 - [x] `doctor` 검사 Registry, 상태와 종료 코드를 구현한다.
 - [x] `doctor --offline`, `--json`, `--strict` 계약을 구현한다.
 - [x] Bootstrap URL을 일회성으로 생성하고 첫 Admin 생성 뒤 폐기하는 Port를 정의한다.
@@ -65,7 +65,7 @@ Package 설치 후 사용자가 `pangi init`, `pangi doctor`, `pangi start`만�
 - [x] Project-local Mode에서 `.pangi/`가 정확히 한 번 Ignore되는지 확인한다.
 - [x] `doctor --offline --json` Schema와 종료 코드 0/1/2를 Contract Test로 고정한다.
 - [x] Text/JSON 출력에 Secret Pattern이 나타나지 않는지 검사한다.
-- [ ] 잘못된 경로 권한, Port 충돌과 Config 오류가 안전한 다음 행동을 제공하는지 확인한다.
+- [x] 잘못된 경로 권한, Port 충돌과 Config 오류가 안전한 다음 행동을 제공하는지 확인한다.
 
 ## 1차 구현 결과
 
@@ -74,6 +74,14 @@ Package 설치 후 사용자가 `pangi init`, `pangi doctor`, `pangi start`만�
 - Read-only Doctor가 로컬 Runtime, Path, Config, Process, Package 무결성을 검사하고 미구현 Adapter는 `SKIP`으로 반환한다.
 - `start`, `status` 명령과 Runtime/Bootstrap Port는 정의했지만 실제 Dashboard·DB Adapter가 없으면 명시적으로 unavailable을 반환한다.
 - 실제 Dashboard 실행과 Port 충돌·권한 실패의 전체 검증이 남아 있으므로 WBS 상태는 `진행 중`으로 유지한다.
+
+## 2차 구현 결과
+
+- `pangi start`를 WBS-04의 FastAPI/Uvicorn 전경 Runtime과 WBS-03의 SQLite 수명주기에 연결했다.
+- `pangi status`가 설정 경로와 Project-local Mode를 해석하고 단순 Port가 아니라 Pangi Live 응답의 제품 식별자와 Schema를 검증한다.
+- 실행 중은 종료 코드 0, 중지 상태는 1, 잘못된 Config는 2로 구분하고 기존 Text/JSON Redaction 경계를 유지했다.
+- 실제 별도 Process에서 `start → status → 종료 → status` 흐름과 Port 충돌, 안전하지 않은 경로 및 Config 오류를 검증했다.
+- 깨끗한 Runtime Data에서 `init`와 `start`만으로 설치된 Wheel의 Local Dashboard를 열 수 있어 WBS-02를 `완료`로 변경한다.
 
 ## 완료 조건
 

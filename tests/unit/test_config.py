@@ -52,6 +52,12 @@ def test_invalid_timezone_and_port_are_rejected() -> None:
         )
 
 
+@pytest.mark.parametrize("host", ["https://example.com", "host/path", "bad host"])
+def test_invalid_server_host_is_rejected(host: str) -> None:
+    with pytest.raises(ValidationError, match="IP address or DNS hostname"):
+        PangiConfig.model_validate({"server": {"host": host}})
+
+
 def test_missing_config_raises_safe_error(tmp_path: Path) -> None:
     with pytest.raises(PangiConfigError, match="configuration file not found"):
         PangiConfig.load(tmp_path / "missing.toml")

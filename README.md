@@ -20,7 +20,7 @@ uv run pytest
 
 ## 첫 실행 기반
 
-현재 WBS 02의 설정·Runtime Data 초기화와 WBS 03의 SQLite Migration 기반을 사용할 수 있다.
+현재 WBS 02의 설정·Runtime Data·CLI, WBS 03의 SQLite 기반과 WBS 04의 첫 Web Runtime을 사용할 수 있다.
 
 ```bash
 uv run pangi init --yes
@@ -28,6 +28,7 @@ uv run pangi config validate
 uv run pangi migrate plan
 uv run pangi migrate apply --yes
 uv run pangi doctor --offline
+uv run pangi start
 ```
 
-`pangi start`와 `pangi status`의 명령 계약은 준비됐지만 실제 Dashboard Runtime은 WBS 03의 후속 Schema·Repository와 WBS 04에서 연결한다.
+`pangi start`는 기본적으로 `http://127.0.0.1:8787`에서 빈 Admin Shell과 `/health/live`, `/health/ready`를 제공한다. 실행 상태는 다른 Terminal에서 `uv run pangi status --json`으로 확인한다. Bootstrap 인증과 관리 기능은 WBS 04의 후속 단계에서 연결한다.

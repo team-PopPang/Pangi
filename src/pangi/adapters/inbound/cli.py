@@ -23,6 +23,7 @@ from pangi.config import PangiConfig, PangiConfigError
 PathResolver = Callable[[bool, Path | None], RuntimePaths]
 DoctorFactory = Callable[[RuntimePaths, PangiConfig], DoctorService]
 MigrationFactory = Callable[[RuntimePaths, PangiConfig], MigrationAdmin]
+RuntimeControlFactory = Callable[[RuntimePaths, PangiConfig], RuntimeControl]
 
 
 class RuntimeInitializer(Protocol):
@@ -43,7 +44,7 @@ class CliDependencies:
     initializer: RuntimeInitializer
     doctor_factory: DoctorFactory
     migration_factory: MigrationFactory
-    runtime_control: RuntimeControl
+    runtime_control_factory: RuntimeControlFactory
 
 
 def _safe_error(
@@ -392,20 +393,33 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
     ) -> None:
         try:
             paths = dependencies.resolve_paths(project_local, path)
-            PangiConfig.load(paths.config_file)
-            dependencies.runtime_control.start()
-        except (PangiConfigError, RuntimeUnavailableError, RuntimeError) as error:
+            config = PangiConfig.load(paths.config_file)
+            dependencies.runtime_control_factory(paths, config).start()
+        except PangiConfigError as error:
             _safe_error(str(error))
+        except (RuntimeUnavailableError, RuntimeError) as error:
+            _safe_error(str(error), code=1)
 
     @app.command("status")
     def status_command(
+        path: Annotated[Path | None, typer.Option("--config")] = None,
+        project_local: Annotated[bool, typer.Option("--project-local")] = False,
         json_output: Annotated[bool, typer.Option("--json")] = False,
     ) -> None:
-        status = dependencies.runtime_control.status()
+        try:
+            paths = dependencies.resolve_paths(project_local, path)
+            config = PangiConfig.load(paths.config_file)
+            status = dependencies.runtime_control_factory(paths, config).status()
+        except (PangiConfigError, RuntimeError) as error:
+            _safe_error(
+                str(error),
+                json_output=json_output,
+                command="status",
+            )
         payload = {"schema_version": 1, "command": "status", **status.as_dict()}
         text = f"{status.state.value}: {redact_text(status.detail)}"
         typer.echo(render_json(payload) if json_output else text)
-        if status.state is RuntimeState.UNAVAILABLE:
+        if status.state is not RuntimeState.RUNNING:
             raise typer.Exit(1)
 
     app.add_typer(config_app, name="config")
