@@ -71,11 +71,15 @@ class RuntimeConfig(_StrictModel):
 class StorageConfig(_StrictModel):
     """Local SQLite profile supported by the 1.0 runtime."""
 
-    url: Literal["sqlite:///{data_dir}/pangi.sqlite3"] = (
-        "sqlite:///{data_dir}/pangi.sqlite3"
-    )
+    url: Literal["sqlite:///{data_dir}/pangi.sqlite3"] = "sqlite:///{data_dir}/pangi.sqlite3"
     journal_mode: Literal["delete"] = "delete"
     busy_timeout_ms: int = Field(default=5000, ge=100, le=60000)
+
+
+class AuthConfig(_StrictModel):
+    """Local first-run authentication settings."""
+
+    bootstrap_grant_ttl_minutes: int = Field(default=30, ge=5, le=1440)
 
 
 class PangiConfig(_StrictModel):
@@ -86,6 +90,7 @@ class PangiConfig(_StrictModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
 
     @classmethod
     def load(cls, path: str | Path) -> Self:
@@ -136,6 +141,9 @@ class PangiConfig(_StrictModel):
                 f"url = {quote(self.storage.url)}",
                 f"journal_mode = {quote(self.storage.journal_mode)}",
                 f"busy_timeout_ms = {self.storage.busy_timeout_ms}",
+                "",
+                "[auth]",
+                f"bootstrap_grant_ttl_minutes = {self.auth.bootstrap_grant_ttl_minutes}",
                 "",
             )
         )

@@ -16,7 +16,8 @@ body {
 }
 
 button,
-a {
+a,
+input {
   font: inherit;
 }
 
@@ -51,6 +52,82 @@ a {
   color: #fff;
   background: var(--primary);
   font-weight: 700;
+}
+
+.bootstrap-content {
+  max-width: 760px;
+}
+
+.bootstrap-card {
+  display: grid;
+  gap: 20px;
+  padding: 28px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.bootstrap-card label {
+  display: grid;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bootstrap-card input {
+  width: 100%;
+  padding: 11px 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid #cfd4dc;
+  border-radius: var(--radius-control);
+  outline: none;
+}
+
+.bootstrap-card input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgb(61 82 109 / 12%);
+}
+
+.bootstrap-card button {
+  justify-self: start;
+  padding: 11px 18px;
+  color: #fff;
+  background: var(--primary);
+  border: 0;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.bootstrap-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.field-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.form-message {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.form-message.success {
+  color: #1e604b;
+  background: #edf9f4;
+}
+
+.form-message.error {
+  color: #9d2f2f;
+  background: #fff0f0;
 }
 
 .brand-mark {

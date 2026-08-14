@@ -19,6 +19,7 @@ classifiers = [
 ]
 dependencies = [
   "aiosqlite>=0.20,<1",
+  "argon2-cffi>=23.1,<26",
   "fastapi>=0.115,<1",
   "pydantic>=2.12,<3",
   "typer>=0.20,<1",

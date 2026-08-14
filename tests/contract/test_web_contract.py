@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pangi.adapters.inbound.web import create_web_app
+from pangi.application.contracts.bootstrap import BootstrapAdminResult
 from pangi.application.contracts.readiness import (
     ReadinessCheckResult,
     ReadinessReport,
@@ -35,12 +36,25 @@ class RuntimeReadiness:
         self._runtime = runtime
 
     def report(self) -> ReadinessReport:
-        state = (
-            ReadinessState.READY if self._runtime.started else ReadinessState.NOT_READY
-        )
+        state = ReadinessState.READY if self._runtime.started else ReadinessState.NOT_READY
         return ReadinessReport(
             checks=(ReadinessCheckResult("runtime", state, "safe runtime status"),)
         )
+
+
+class RecordingBootstrapAdmin:
+    async def issue_url(self, *, rotate: bool = False):
+        raise AssertionError("Web adapter must not issue Bootstrap URLs")
+
+    async def create_admin(
+        self,
+        *,
+        token: str,
+        local_id: str,
+        display_name: str,
+        password: str,
+    ) -> BootstrapAdminResult:
+        return BootstrapAdminResult("user-identifier-1", local_id, display_name)
 
 
 def _static_root(tmp_path: Path) -> Path:
@@ -57,6 +71,7 @@ def test_health_spa_assets_and_security_headers_are_stable(tmp_path: Path) -> No
     app = create_web_app(
         runtime_backend=runtime,
         readiness_probe=RuntimeReadiness(runtime),
+        bootstrap_admin=RecordingBootstrapAdmin(),
         static_root=_static_root(tmp_path),
     )
 
@@ -100,6 +115,7 @@ def test_lifespan_closes_backend_when_startup_fails(tmp_path: Path) -> None:
     app = create_web_app(
         runtime_backend=runtime,
         readiness_probe=RuntimeReadiness(runtime),
+        bootstrap_admin=RecordingBootstrapAdmin(),
         static_root=_static_root(tmp_path),
     )
 

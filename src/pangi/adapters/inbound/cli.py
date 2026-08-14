@@ -12,9 +12,14 @@ import typer
 
 from pangi._version import __version__
 from pangi.adapters.inbound.output import redact_text, render_json
+from pangi.application.contracts.bootstrap import BootstrapIssueResult, BootstrapIssueStatus
 from pangi.application.contracts.initialization import InitActionKind, InitPlan, InitResult
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.runtime_status import RuntimeState
+from pangi.application.ports.bootstrap_admin import (
+    BootstrapAdminPort,
+    BootstrapOperationError,
+)
 from pangi.application.ports.runtime_control import RuntimeControl, RuntimeUnavailableError
 from pangi.application.ports.storage import MigrationAdmin, StorageOperationError
 from pangi.application.services.doctor import DoctorService
@@ -24,6 +29,7 @@ PathResolver = Callable[[bool, Path | None], RuntimePaths]
 DoctorFactory = Callable[[RuntimePaths, PangiConfig], DoctorService]
 MigrationFactory = Callable[[RuntimePaths, PangiConfig], MigrationAdmin]
 RuntimeControlFactory = Callable[[RuntimePaths, PangiConfig], RuntimeControl]
+BootstrapAdminFactory = Callable[[RuntimePaths, PangiConfig], BootstrapAdminPort]
 
 
 class RuntimeInitializer(Protocol):
@@ -45,6 +51,7 @@ class CliDependencies:
     doctor_factory: DoctorFactory
     migration_factory: MigrationFactory
     runtime_control_factory: RuntimeControlFactory
+    bootstrap_admin_factory: BootstrapAdminFactory
 
 
 def _safe_error(
@@ -86,7 +93,11 @@ def _plan_payload(plan: InitPlan) -> dict[str, object]:
     }
 
 
-def _result_payload(result: InitResult, paths: RuntimePaths) -> dict[str, object]:
+def _result_payload(
+    result: InitResult,
+    paths: RuntimePaths,
+    bootstrap: BootstrapIssueResult,
+) -> dict[str, object]:
     status = "initialized" if result.created or result.modified else "already_initialized"
     return {
         "schema_version": 1,
@@ -96,6 +107,7 @@ def _result_payload(result: InitResult, paths: RuntimePaths) -> dict[str, object
         "created": [str(path) for path in result.created],
         "modified": [str(path) for path in result.modified],
         "preserved": [str(path) for path in result.preserved],
+        "bootstrap": bootstrap.as_dict(),
     }
 
 
@@ -112,6 +124,7 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
     )
     config_app = typer.Typer(help="Inspect and validate configuration", add_completion=False)
     migrate_app = typer.Typer(help="Plan and apply SQLite migrations", add_completion=False)
+    bootstrap_app = typer.Typer(help="Recover first-run Admin access", add_completion=False)
 
     @app.callback()
     def root(
@@ -205,8 +218,7 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
             paths = dependencies.resolve_paths(project_local, None)
             plan = dependencies.initializer.plan(paths)
             preserves_config = any(
-                action.kind is InitActionKind.PRESERVE_EXISTING
-                and action.path == paths.config_file
+                action.kind is InitActionKind.PRESERVE_EXISTING and action.path == paths.config_file
                 for action in plan.actions
             )
             if preserves_config:
@@ -233,7 +245,11 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
 
         try:
             result = dependencies.initializer.apply(plan, config.to_toml())
-        except (OSError, RuntimeError) as error:
+            installed_config = PangiConfig.load(paths.config_file)
+            bootstrap = asyncio.run(
+                dependencies.bootstrap_admin_factory(paths, installed_config).issue_url()
+            )
+        except (OSError, PangiConfigError, BootstrapOperationError, StorageOperationError) as error:
             _safe_error(
                 str(error),
                 code=1,
@@ -241,10 +257,79 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
                 command="init",
             )
         if json_output:
-            typer.echo(render_json(_result_payload(result, paths)))
+            typer.echo(render_json(_result_payload(result, paths, bootstrap)))
             return
         typer.echo(f"Initialized: {paths.root}")
         typer.echo(f"Config: {paths.config_file}")
+        if bootstrap.bootstrap_url is not None and bootstrap.expires_at is not None:
+            typer.echo(f"Bootstrap URL: {bootstrap.bootstrap_url}")
+            typer.echo(f"Expires: {bootstrap.expires_at.isoformat()}")
+        elif bootstrap.status is BootstrapIssueStatus.ADMIN_EXISTS:
+            typer.echo("Bootstrap: Admin already configured")
+        else:
+            typer.echo(
+                "Bootstrap: Grant already issued; use 'pangi bootstrap rotate --yes' to recover"
+            )
+
+    @bootstrap_app.command("rotate")
+    def bootstrap_rotate_command(
+        path: Annotated[Path | None, typer.Option("--config")] = None,
+        project_local: Annotated[bool, typer.Option("--project-local")] = False,
+        assume_yes: Annotated[
+            bool,
+            typer.Option("--yes", help="Revoke the previous Grant and issue a new one"),
+        ] = False,
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+    ) -> None:
+        if not assume_yes:
+            _safe_error(
+                "bootstrap rotation requires --yes",
+                json_output=json_output,
+                command="bootstrap.rotate",
+            )
+        try:
+            paths = dependencies.resolve_paths(project_local, path)
+            config = PangiConfig.load(paths.config_file)
+            result = asyncio.run(
+                dependencies.bootstrap_admin_factory(paths, config).issue_url(rotate=True)
+            )
+        except (BootstrapOperationError, StorageOperationError, OSError) as error:
+            _safe_error(
+                str(error),
+                code=1,
+                json_output=json_output,
+                command="bootstrap.rotate",
+            )
+        except (PangiConfigError, RuntimeError) as error:
+            _safe_error(
+                str(error),
+                json_output=json_output,
+                command="bootstrap.rotate",
+            )
+        if result.status is BootstrapIssueStatus.ADMIN_EXISTS:
+            _safe_error(
+                "Bootstrap is already configured",
+                code=1,
+                json_output=json_output,
+                command="bootstrap.rotate",
+            )
+        if result.bootstrap_url is None or result.expires_at is None:
+            _safe_error(
+                "Bootstrap Grant could not be issued",
+                code=1,
+                json_output=json_output,
+                command="bootstrap.rotate",
+            )
+        payload = {
+            "schema_version": 1,
+            "command": "bootstrap.rotate",
+            **result.as_dict(),
+        }
+        if json_output:
+            typer.echo(render_json(payload))
+            return
+        typer.echo(f"Bootstrap URL: {result.bootstrap_url}")
+        typer.echo(f"Expires: {result.expires_at.isoformat()}")
 
     @app.command("doctor")
     def doctor_command(
@@ -424,4 +509,5 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
 
     app.add_typer(config_app, name="config")
     app.add_typer(migrate_app, name="migrate")
+    app.add_typer(bootstrap_app, name="bootstrap")
     return app
