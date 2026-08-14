@@ -29,3 +29,11 @@ class MigrationApplyError(MigrationError):
 
 class UnitOfWorkStateError(StorageError):
     """A unit of work was nested, reused, or completed more than once."""
+
+
+class SnapshotError(StorageError):
+    """A database snapshot operation failed safely."""
+
+
+class SnapshotIntegrityError(SnapshotError):
+    """A snapshot or its manifest failed integrity verification."""

@@ -2116,7 +2116,13 @@ erDiagram
 
 ### 14.6 Backup, Retention, Export
 
-`pangi backup create`는 SQLite Backup API를 사용한다. 실행 중 DB 파일만 복사하지 않는다.
+WBS-03의 DB Snapshot은 SQLite Backup API를 사용한다. 실행 중 DB 파일만 복사하지 않는다. Runtime Snapshot은 단일 Runtime Connection과 Write Coordinator를 사용해 활성 Transaction이 끝난 뒤 생성한다.
+
+DB Snapshot 생성 순서는 임시 Snapshot→`quick_check`→SHA-256/크기 계산→Canonical Manifest→원자적 Commit이다. Snapshot과 Manifest는 `0600`이며 실패·취소 시 부분 파일을 제거한다. Manifest에는 형식 Version, 종류, 생성 시각, Package Version, Snapshot 파일명, 크기, SHA-256, SQLite/Schema Version과 적용 Migration을 기록한다. 절대 경로, Config 본문, Host 정보와 Secret은 기록하지 않는다.
+
+DB Snapshot 검증은 Manifest Shape, 경로 이탈·Symlink, 권한, Hash·크기, `quick_check`, Schema Version과 Migration 이력을 읽기 전용으로 확인한다. 손상 여부와 현재 Package 호환성은 별도 상태로 보고한다.
+
+WBS-19의 `pangi backup create`는 검증된 DB Snapshot에 아래 운영 자료를 더해 전체 Backup Bundle을 만든다. List/Verify/Restore, Snapshot 삭제와 Backup Retention도 WBS-19가 소유한다.
 
 Backup 포함:
 
@@ -2139,6 +2145,8 @@ Secret은 기본 Backup에서 제외한다. `--include-secrets`는 Master Key와
 - User가 Pin한 Run: 자동 삭제 제외
 
 원본 MCP Result와 Slack 원문은 기본 저장하지 않는다. Tool Result Summary와 Evidence Link만 저장한다.
+
+기능 Table의 만료 Query, Batch 삭제와 Pin/Soft Delete 예외는 해당 Table 소유 WBS가 구현한다. 공통 운영 Job과 Backup Artifact Retention은 WBS-19가 조율한다.
 
 ## 15. Memory 설계
 

@@ -41,6 +41,7 @@ Backend와 빌드된 Admin UI를 하나의 wheel로 배포하고, Service 설치
 
 - Release CI는 UI Lock Install→Type/Test→Vite Build→Package Asset 복사→Python Test→Wheel Build→새 환경 Install/Doctor/Smoke 순으로 실행한다.
 - Package Environment, Config, Data, Secret Store와 Backup Directory를 별도 경로로 유지한다.
+- WBS-03의 검증된 DB Snapshot/Manifest를 재사용하고 Config·Skill·Eval·Asset Manifest를 더해 전체 운영 Backup Bundle을 만든다.
 - Service 설치는 생성 파일/실행 계정을 Preview하고 User Mode를 기본으로 한다.
 - Upgrade는 Release Signature/Hash와 Compatibility를 검증하고 Drain→Snapshot→Package 교체→Migration→Doctor/Smoke→Ready 순으로 진행한다.
 - Migration/Smoke 실패 시 Code 재설치 또는 호환되지 않는 경우 Snapshot Restore를 선택한다.
@@ -54,7 +55,7 @@ Backend와 빌드된 Admin UI를 하나의 wheel로 배포하고, Service 설치
 - [ ] Wheel Hash, SBOM과 Built-in/Pack Manifest Fingerprint를 생성한다.
 - [ ] 새 환경 `standard`/`ab180-parity` Install Smoke Job을 만든다.
 - [ ] systemd User/LaunchAgent Install/Start/Stop/Logs/Uninstall을 구현한다.
-- [ ] Backup Create/List/Verify/Restore와 Manifest를 구현한다.
+- [ ] WBS-03 DB Snapshot 기반으로 Backup Create/List/Verify/Restore, Bundle Manifest와 Snapshot 삭제·Retention을 구현한다.
 - [ ] Upgrade Check, Drain, Backup, Package 교체, Migration, Doctor/Smoke와 Ready를 구현한다.
 - [ ] Rollback Compatibility와 Snapshot Restore를 구현한다.
 - [ ] Uninstall 보존과 안전한 Purge 확인 절차를 구현한다.

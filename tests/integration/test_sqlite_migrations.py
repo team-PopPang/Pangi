@@ -5,6 +5,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+import aiosqlite
 import pytest
 
 from pangi import PangiConfig
@@ -17,12 +18,14 @@ from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdm
 from pangi.adapters.outbound.persistence.sqlite.errors import (
     MigrationApplyError,
     MigrationIntegrityError,
+    SnapshotError,
 )
 from pangi.adapters.outbound.persistence.sqlite.registry import (
     MigrationSource,
     PackageMigrationRegistry,
     StaticMigrationRegistry,
 )
+from pangi.adapters.outbound.persistence.sqlite.snapshots import SqliteSnapshotStore
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.application.contracts.paths import RuntimePaths
 
@@ -152,6 +155,53 @@ def test_existing_database_is_backed_up_before_pending_migration(tmp_path: Path)
     assert result.backup_file is not None
     assert result.backup_file.name == "pre-migrate-v1-to-v2-20260815T000000Z.sqlite3"
     assert result.backup_file.stat().st_mode & 0o777 == 0o600
+    manifest_file = result.backup_file.with_name(
+        f"{result.backup_file.name}.manifest.json"
+    )
+    verification = asyncio.run(
+        SqliteSnapshotStore(
+            paths,
+            registry=StaticMigrationRegistry(first, second),
+        ).verify(manifest_file)
+    )
+    assert verification.package_compatible
+    assert verification.artifact.manifest.migration_target_version == 2
     with sqlite3.connect(result.backup_file) as backup:
         assert backup.execute("PRAGMA quick_check").fetchone() == ("ok",)
         assert backup.execute("PRAGMA user_version").fetchone() == (1,)
+
+
+def test_snapshot_failure_prevents_pending_migration(tmp_path: Path) -> None:
+    paths, config = _initialized_runtime(tmp_path)
+    first = PackageMigrationRegistry().load()[0]
+    asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+    second = MigrationSource.from_sql(
+        2,
+        "must_not_apply",
+        "CREATE TABLE must_not_apply (id INTEGER PRIMARY KEY);\n",
+    )
+    registry = StaticMigrationRegistry(first, second)
+
+    async def fail_backup(
+        _source: aiosqlite.Connection,
+        _target: aiosqlite.Connection,
+    ) -> None:
+        raise RuntimeError("injected snapshot failure")
+
+    snapshots = SqliteSnapshotStore(paths, registry=registry, backup=fail_backup)
+    admin = SqliteMigrationAdmin(
+        paths,
+        config.storage,
+        registry=registry,
+        snapshot_store=snapshots,
+    )
+
+    with pytest.raises(SnapshotError, match="creation failed"):
+        asyncio.run(admin.apply())
+
+    assert list(paths.backup_dir.iterdir()) == []
+    with sqlite3.connect(paths.database_file) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (1,)
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'must_not_apply'"
+        ).fetchone() is None
