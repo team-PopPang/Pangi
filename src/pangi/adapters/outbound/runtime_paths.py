@@ -32,14 +32,17 @@ def _absolute_environment_path(
 
 
 def _paths_under_root(root: Path, mode: PathMode) -> RuntimePaths:
+    data_dir = root / "data"
     return RuntimePaths(
         mode=mode,
         root=root,
         config_file=root / "pangi.toml",
-        data_dir=root / "data",
+        data_dir=data_dir,
         log_dir=root / "logs",
         backup_dir=root / "backups",
         vault_dir=root / "vault",
+        database_file=data_dir / "pangi.sqlite3",
+        process_lock_file=data_dir / "pangi.lock",
     )
 
 
@@ -95,6 +98,8 @@ def resolve_runtime_paths(
             log_dir=state_root / "logs",
             backup_dir=data_root / "backups",
             vault_dir=data_root / "vault",
+            database_file=data_root / "pangi.sqlite3",
+            process_lock_file=data_root / "pangi.lock",
         )
     elif current_platform == "darwin":
         application_support = home / "Library" / "Application Support" / "Pangi"
@@ -106,6 +111,8 @@ def resolve_runtime_paths(
             log_dir=home / "Library" / "Logs" / "Pangi",
             backup_dir=application_support / "backups",
             vault_dir=application_support / "vault",
+            database_file=application_support / "data" / "pangi.sqlite3",
+            process_lock_file=application_support / "data" / "pangi.lock",
         )
     else:
         raise UnsupportedPlatformError(
@@ -123,5 +130,7 @@ def resolve_runtime_paths(
         log_dir=paths.log_dir,
         backup_dir=paths.backup_dir,
         vault_dir=paths.vault_dir,
+        database_file=paths.database_file,
+        process_lock_file=paths.process_lock_file,
         project_root=paths.project_root,
     )

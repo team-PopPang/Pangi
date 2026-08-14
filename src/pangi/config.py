@@ -51,6 +51,16 @@ class RuntimeConfig(_StrictModel):
     run_timeout_seconds: int = Field(default=180, ge=1, le=3600)
 
 
+class StorageConfig(_StrictModel):
+    """Local SQLite profile supported by the 1.0 runtime."""
+
+    url: Literal["sqlite:///{data_dir}/pangi.sqlite3"] = (
+        "sqlite:///{data_dir}/pangi.sqlite3"
+    )
+    journal_mode: Literal["delete"] = "delete"
+    busy_timeout_ms: int = Field(default=5000, ge=100, le=60000)
+
+
 class PangiConfig(_StrictModel):
     """Versioned configuration loaded from a strict TOML document."""
 
@@ -58,6 +68,7 @@ class PangiConfig(_StrictModel):
     instance: InstanceConfig = Field(default_factory=InstanceConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
 
     @classmethod
     def load(cls, path: str | Path) -> Self:
@@ -103,6 +114,11 @@ class PangiConfig(_StrictModel):
                 f"max_concurrent_runs = {self.runtime.max_concurrent_runs}",
                 f"max_subagents_per_run = {self.runtime.max_subagents_per_run}",
                 f"run_timeout_seconds = {self.runtime.run_timeout_seconds}",
+                "",
+                "[storage]",
+                f"url = {quote(self.storage.url)}",
+                f"journal_mode = {quote(self.storage.journal_mode)}",
+                f"busy_timeout_ms = {self.storage.busy_timeout_ms}",
                 "",
             )
         )

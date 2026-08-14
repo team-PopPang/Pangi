@@ -2773,16 +2773,16 @@ Runtime Data는 Repository 내부가 아니라 OS별 `PANGI_HOME`에 둔다.
 ```text
 PANGI_HOME/
   pangi.toml
-  pangi.db
-  pangi.db-wal
-  pangi.db-shm
+  data/
+    pangi.sqlite3
+    pangi.lock
   secrets/
   logs/
   artifacts/
   backups/
 ```
 
-`pangi.db*`, Secret, Log, 실행 Artifact, Eval 임시 결과, 사용자 Memory와 업무 데이터는 Git 추적 대상이 아니다. `.gitignore`는 개발 중 실수 방지용이고, 기본 설치는 애초에 이 데이터를 Repository 밖에 생성한다.
+`pangi.sqlite3*`, `pangi.lock`, Secret, Log, 실행 Artifact, Eval 임시 결과, 사용자 Memory와 업무 데이터는 Git 추적 대상이 아니다. `.gitignore`는 개발 중 실수 방지용이고, 기본 설치는 애초에 이 데이터를 Repository 밖에 생성한다.
 
 ### 18.2 Dependency 방향
 
