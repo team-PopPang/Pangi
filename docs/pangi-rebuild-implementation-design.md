@@ -2024,47 +2024,55 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 
 ### 14.3 Table
 
-| Table | 주요 Column | 제약 |
-| --- | --- | --- |
-| `schema_migrations` | version, name, checksum, applied_at | version PK |
-| `users` | id, external_id, display_name, role, status | external_id Unique |
-| `connections` | id, kind, display_name, display_qualifier, scope, owner_user_id, transport, state, config_json, secret_ref | User Scope면 owner 필수 |
-| `connection_tools` | connection_id, stable_tool_id, remote_name, schema_json, fingerprint, state | connection+stable ID Unique |
-| `tool_policies` | connection_id, stable_tool_id, effect, permission, approval, limits_json | Tool당 Active 1개 |
-| `skills` | id, namespace, name, active_version_id, state, deleted_at | namespace+name Unique, Soft Delete |
-| `skill_versions` | id, skill_id, semver, manifest_json, compiled_json, fingerprint, state, eval_run_id | skill+semver Unique |
-| `holiday_calendars` | id, calendar_key, display_name, region, active_version_id | calendar_key Unique |
-| `holiday_calendar_versions` | id, calendar_id, version, dates_json, source, source_fingerprint, state | calendar+version Unique, 불변 |
-| `schedules` | id, owner_user_id, kind, cron, timezone, target_type, request_text_ciphertext, request_key_version, request_fingerprint, skill_version_id, input_json, holiday_policy, holiday_calendar_version_id, next_run_at, revision, state | Target XOR, revision 증가 |
-| `schedule_runs` | id, schedule_id, scheduled_for, run_id, state, skip_reason | schedule+scheduled_for Unique |
-| `runs` | id, request_id, principal_id, trigger, state, mode, skill_version_id, idempotency_key, worker_id, lease_expires_at, heartbeat_at, timestamps | idempotency_key Unique |
-| `run_steps` | id, run_id, node_id, type, state, attempt, depends_on_json, timestamps, error_code | run+node+attempt Unique |
-| `run_events` | run_id, event_index, type, visibility, step_id, attributes_json, created_at | run+index Unique |
-| `model_policies` | id, name, version, rules_json, fingerprint, state, eval_run_id | Active Version 불변 |
-| `model_invocations` | run_id, step_id, role, provider, model, region, policy_id, data_classes_json, source_kinds_json, redaction_count, input_fingerprint, logical_calls, provider_requests, token, duration, state | 원문 Prompt 미저장 |
-| `tool_invocations` | run_id, step_id, connection_id, stable_tool_id, redacted_arguments, result_summary, duration, state | Secret 미저장 |
-| `external_mutations` | id, idempotency_key, run_id, step_id, connection_id, stable_tool_id, remote_resource_id, remote_url, state, timestamps | idempotency_key Unique |
-| `eval_suites` | id, name, state, config_json | name Unique |
-| `eval_cases` | id, suite_id, case_key, definition_json, fingerprint, critical | suite+key Unique |
-| `eval_runs` | id, suite_id, candidate_fingerprint, baseline_run_id, state, counts, timestamps | Immutable Result |
-| `eval_results` | eval_run_id, case_id, state, failures_json, trace_json | run+case Unique |
-| `red_team_case_drafts` | id, candidate_fingerprint, attack_surface, definition_json, state, reviewer_id, timestamps | 승인 후 Eval Case 승격 |
-| `memory_items` | id, owner_scope, owner_id, title, content, tags_json, applies_to_json, state, expires_at, created_at, updated_at, deleted_at | 수동 승인만 Active, Soft Delete |
-| `api_keys` | id, owner_user_id, name, key_prefix, key_hash, scopes_json, expires_at, last_used_at, state, created_at, revoked_at | 원문 Key 미저장, Prefix Unique |
-| `api_key_usage_daily` | date, api_key_id, endpoint_group, success_count, failure_count, last_used_at | key+date+endpoint Unique |
-| `ip_allowlist_entries` | id, cidr, label, applies_to, state, created_by, created_at, updated_at | 정규화 CIDR Unique |
-| `ip_access_events` | id, source_ip_hash, matched_entry_id, surface, decision, reason_code, created_at | 원문 IP Retention 제한 |
-| `run_feedback` | id, run_id, user_id, sentiment, category, comment, state, promoted_eval_case_id, timestamps | user+run Unique |
-| `analytics_cohorts` | id, cohort_key, version, display_name, membership_source, rule_json, state | cohort_key+version Unique |
-| `eligible_user_snapshots` | date, timezone, source, source_version, eligible_users | date+timezone+source_version Unique |
-| `usage_daily` | date, timezone, cohort_version_id, dimension_type, dimension_id, active_users, eligible_users, runs, runs_90d, success, failed, feedback_positive, feedback_negative | 집계 Dimension Unique |
-| `capability_packs` | name, version, manifest_json, fingerprint, state, health_json | name Unique |
-| `audit_events` | id, actor_id, action, resource_type, resource_id, metadata_json, created_at | Append-only |
+아래 목록은 논리 Schema Catalog다. WBS-03이 모든 Table을 선행 생성하지 않는다. WBS-03은 `schema_migrations`, Migration Engine, Runtime Connection과 Unit of Work를 소유하고, 각 기능 WBS가 자기 Domain Model과 Table 제약, Migration, Repository를 같은 구현 단위로 소유한다.
+
+| Table | 주요 Column | 제약 | 소유 WBS |
+| --- | --- | --- | --- |
+| `schema_migrations` | version, name, checksum, applied_at | version PK | 03 |
+| `users` | id, external_id, display_name, role, status | external_id Unique | 04 |
+| `auth_sessions` | id, user_id, token_hash, csrf_hash, expires_at, rotated_at, state | 원문 Token 미저장, 만료 필수 | 04 |
+| `bootstrap_grants` | id, token_hash, expires_at, consumed_at, consumed_by_user_id | Active Grant 최대 1개, 일회용 | 04 |
+| `api_idempotency_records` | principal_id, route_key, idempotency_key, request_fingerprint, response_json, state, expires_at | principal+route+key Unique | 04 |
+| `connections` | id, kind, display_name, display_qualifier, scope, owner_user_id, transport, state, config_json, secret_ref | User Scope면 owner 필수 | 09 |
+| `connection_tools` | connection_id, stable_tool_id, remote_name, schema_json, fingerprint, state | connection+stable ID Unique | 09 |
+| `tool_policies` | connection_id, stable_tool_id, effect, permission, approval, limits_json | Tool당 Active 1개 | 09 |
+| `skills` | id, namespace, name, active_version_id, state, deleted_at | namespace+name Unique, Soft Delete | 11 |
+| `skill_versions` | id, skill_id, semver, manifest_json, compiled_json, fingerprint, state, eval_run_id | skill+semver Unique | 11 |
+| `holiday_calendars` | id, calendar_key, display_name, region, active_version_id | calendar_key Unique | 14 |
+| `holiday_calendar_versions` | id, calendar_id, version, dates_json, source, source_fingerprint, state | calendar+version Unique, 불변 | 14 |
+| `schedules` | id, owner_user_id, kind, cron, timezone, target_type, request_text_ciphertext, request_key_version, request_fingerprint, skill_version_id, input_json, holiday_policy, holiday_calendar_version_id, next_run_at, revision, state | Target XOR, revision 증가 | 14 |
+| `schedule_runs` | id, schedule_id, scheduled_for, run_id, state, skip_reason | schedule+scheduled_for Unique | 14 |
+| `runs` | id, request_id, principal_id, trigger, state, mode, skill_version_id, idempotency_key, worker_id, lease_expires_at, heartbeat_at, timestamps | idempotency_key Unique | 05 |
+| `run_steps` | id, run_id, node_id, type, state, attempt, depends_on_json, timestamps, error_code | run+node+attempt Unique | 05 |
+| `run_events` | run_id, event_index, type, visibility, step_id, attributes_json, created_at | run+index Unique | 05 |
+| `model_policies` | id, name, version, rules_json, fingerprint, state, eval_run_id | Active Version 불변 | 07 |
+| `model_invocations` | run_id, step_id, role, provider, model, region, policy_id, data_classes_json, source_kinds_json, redaction_count, input_fingerprint, logical_calls, provider_requests, token, duration, state | 원문 Prompt 미저장 | 07 |
+| `tool_invocations` | run_id, step_id, connection_id, stable_tool_id, redacted_arguments, result_summary, duration, state | Secret 미저장 | 09 |
+| `external_mutations` | id, idempotency_key, run_id, step_id, connection_id, stable_tool_id, remote_resource_id, remote_url, state, timestamps | idempotency_key Unique | 20 |
+| `eval_suites` | id, name, state, config_json | name Unique | 15 |
+| `eval_cases` | id, suite_id, case_key, definition_json, fingerprint, critical | suite+key Unique | 15 |
+| `eval_runs` | id, suite_id, candidate_fingerprint, baseline_run_id, state, counts, timestamps | Immutable Result | 15 |
+| `eval_results` | eval_run_id, case_id, state, failures_json, trace_json | run+case Unique | 15 |
+| `red_team_case_drafts` | id, candidate_fingerprint, attack_surface, definition_json, state, reviewer_id, timestamps | 승인 후 Eval Case 승격 | 15 |
+| `memory_items` | id, owner_scope, owner_id, title, content, tags_json, applies_to_json, state, expires_at, created_at, updated_at, deleted_at | 수동 승인만 Active, Soft Delete | 13 |
+| `api_keys` | id, owner_user_id, name, key_prefix, key_hash, scopes_json, expires_at, last_used_at, state, created_at, revoked_at | 원문 Key 미저장, Prefix Unique | 18 |
+| `api_key_usage_daily` | date, api_key_id, endpoint_group, success_count, failure_count, last_used_at | key+date+endpoint Unique | 18 |
+| `ip_allowlist_entries` | id, cidr, label, applies_to, state, created_by, created_at, updated_at | 정규화 CIDR Unique | 18 |
+| `ip_access_events` | id, source_ip_hash, matched_entry_id, surface, decision, reason_code, created_at | 원문 IP Retention 제한 | 18 |
+| `run_feedback` | id, run_id, user_id, sentiment, category, comment, state, promoted_eval_case_id, timestamps | user+run Unique | 17 |
+| `analytics_cohorts` | id, cohort_key, version, display_name, membership_source, rule_json, state | cohort_key+version Unique | 17 |
+| `eligible_user_snapshots` | date, timezone, source, source_version, eligible_users | date+timezone+source_version Unique | 17 |
+| `usage_daily` | date, timezone, cohort_version_id, dimension_type, dimension_id, active_users, eligible_users, runs, runs_90d, success, failed, feedback_positive, feedback_negative | 집계 Dimension Unique | 17 |
+| `capability_packs` | name, version, manifest_json, fingerprint, state, health_json | name Unique | 20 |
+| `audit_events` | id, actor_id, action, resource_type, resource_id, metadata_json, created_at | Append-only | 06 |
 
 ### 14.4 관계
 
 ```mermaid
 erDiagram
+    USERS ||--o{ AUTH_SESSIONS : authenticates
+    USERS o|--o{ BOOTSTRAP_GRANTS : consumes
+    USERS ||--o{ API_IDEMPOTENCY_RECORDS : owns
     USERS o|--o{ CONNECTIONS : owns
     CONNECTIONS ||--o{ CONNECTION_TOOLS : exposes
     CONNECTION_TOOLS ||--|| TOOL_POLICIES : guarded_by
@@ -2097,6 +2105,9 @@ erDiagram
 
 - SQL Migration은 Package Resource로 넣는다.
 - 번호와 Checksum은 변경하지 않는다.
+- 기능 Table Migration과 Repository는 해당 기능 WBS가 Domain 계약과 함께 추가한다.
+- 기능 WBS는 새 Table의 Unique, Check, XOR, Foreign Key와 삭제 정책을 Migration 및 Integration Test에 함께 선언한다.
+- WBS 간 Foreign Key가 필요하면 참조 대상 WBS를 선행 작업으로 두고 두 청크의 계약을 같은 변경에서 갱신한다.
 - Startup은 적용되지 않은 Migration이 있으면 Backup 후 Transaction으로 적용한다.
 - Destructive Migration은 같은 Release에서 실행하지 않는다.
 - Column 제거는 최소 두 Minor Version 동안 Read Compatibility를 유지한 뒤 수행한다.

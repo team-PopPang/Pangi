@@ -43,6 +43,7 @@ Schema/Behavior/Safety/Output을 Trace에서 결정적으로 평가하고, Criti
 - Semantic Grader는 참고 점수이며 모든 Critical Assertion은 결정적이다.
 - Prompt/Model/Skill/Tool Schema/Policy/Guardrail/Reducer/Renderer 변경은 영향 Suite를 실행해야 활성화할 수 있다.
 - Generator는 안전한 Fingerprint/Summary/Schema만 받아 `RedTeamCaseDraft`를 만들고 Reviewer 승인 뒤 Versioned YAML로 승격한다.
+- WBS-03 Unit of Work 위에서 `eval_suites`, `eval_cases`, `eval_runs`, `eval_results`, `red_team_case_drafts`의 Migration, 불변 제약과 Repository를 이 WBS가 소유한다.
 - Candidate 실패 기록에는 Redacted Trace만 남기고 실제 Secret/원문 데이터를 금지한다.
 
 ## 구현 체크리스트

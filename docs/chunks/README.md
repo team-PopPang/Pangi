@@ -30,7 +30,7 @@
 | --- | --- | --- | --- | --- |
 | 01 | [Foundation과 Package 경계](01-foundation-and-package-boundaries.md) | 저장소 Skeleton, Dependency 방향과 Public API 경계를 고정한다. | 없음 | 완료 |
 | 02 | [설정·Runtime Data·CLI](02-configuration-runtime-data-and-cli.md) | 설정, 데이터 경로, `init/start/status/doctor`의 첫 실행 경로를 만든다. | 01 | 진행 중 |
-| 03 | [SQLite 영속성과 Migration](03-sqlite-persistence-and-migrations.md) | 단일 Process SQLite Profile, Schema, Repository와 Migration을 만든다. | 01, 02 | 진행 중 |
+| 03 | [SQLite 영속성과 Migration](03-sqlite-persistence-and-migrations.md) | 단일 Process SQLite Profile, Unit of Work와 Migration 기반을 만든다. | 01, 02 | 진행 중 |
 | 04 | [Web/API Shell과 인증](04-web-api-shell-and-auth.md) | FastAPI, Admin SPA Shell, Bootstrap 인증과 공통 API 계약을 만든다. | 01, 02, 03 | 예정 |
 | 05 | [Run 상태·Queue·Event](05-run-state-queue-and-events.md) | Run 계약, 영속 Queue, Lease, Event와 복구 흐름을 만든다. | 03, 04 | 예정 |
 | 06 | [Guardrail·보안·Audit](06-guardrails-security-and-audit.md) | 입력·Tool·출력 경계와 Audit 정책을 코드로 강제한다. | 02, 03, 05 | 예정 |

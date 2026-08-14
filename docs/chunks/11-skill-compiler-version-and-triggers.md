@@ -44,6 +44,7 @@
 - Compiler는 Schema, Unique ID, DAG, Reachability, Node/Depth Limit, Tool Argument, Permission, Input/Output와 Resource Fingerprint를 검사한다.
 - Compiler 출력은 Stable Ordering을 가진 Canonical JSON이며 Runtime 실행 입력과 UI Graph의 단일 원본이다.
 - 게시 Version은 불변이고 수정은 새 Draft Version을 만든다.
+- WBS-03 Unit of Work 위에서 `skills`, `skill_versions`의 Migration, 불변/활성 Unique 제약과 Repository를 이 WBS가 소유한다.
 - Active Version은 Skill당 하나이며 Tool/Prompt/Policy Fingerprint 변경 시 `needs_review`로 실행을 차단한다.
 - Command/Alias는 전역 Unique, Keyword는 후보 검색 Hint일 뿐 실행 권한이 아니다.
 

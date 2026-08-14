@@ -45,6 +45,7 @@ Run/Step/Model/Tool/Schedule의 운영 상태를 Metric·Log·Trace로 관찰하
 - Aggregate Job은 Instance 현지 날짜, 동일 Idempotency 중복 제거와 Eval/System 제외 규칙을 사용한다.
 - Eligible Population은 날짜/Timezone/Source Version Snapshot으로 고정해 과거 분모를 현재 사용자 수로 바꾸지 않는다.
 - Cohort는 명시적 Attribute/Group/Membership으로 Versioning하고 조회 시 최소 집계 크기를 적용한다.
+- WBS-03 Unit of Work 위에서 `run_feedback`, `analytics_cohorts`, `eligible_user_snapshots`, `usage_daily`의 Migration, 집계 Unique 제약과 Repository를 이 WBS가 소유한다.
 - Feedback은 Run/Fingerprint와 연결하고 Reviewer가 고객/Secret을 제거한 Synthetic Fixture로 승격한다.
 
 ## 구현 체크리스트

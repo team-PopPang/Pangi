@@ -45,6 +45,7 @@ AB180 공개 사례 8개를 Core에 결합하지 않고 공식 Capability Pack�
 - 연결이 없으면 `connection_required` 상태와 Action을 표시하고 Core 시작은 유지한다.
 - Software Delivery는 Ticket 확인→필요 시 승인형 생성→조사→Plan 승인→격리 Worktree Patch/Test→Diff 승인→사용자 GitHub OAuth Push→Draft PR 순서다.
 - Ticket Idempotency는 Principal/요청 Fingerprint/Repository로 계산하고 Remote ID/URL을 `external_mutations`에 영속화한다.
+- WBS-03 Unit of Work 위에서 `capability_packs`, `external_mutations`의 Migration, Idempotency 제약과 Repository를 이 WBS가 소유한다.
 - Sandbox는 등록 Command Template, Resource Limit, 기본 Network 차단과 Run별 Worktree를 사용한다.
 - `ab180-parity` Release Gate는 8개 Suite의 Critical Case 100%와 공통 Root/Depth/권한/Evidence/Egress 불변식을 요구한다.
 

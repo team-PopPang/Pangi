@@ -43,6 +43,7 @@ Admin의 외부 API 접근을 Scope/만료가 있는 API Key와 표면별 CIDR A
 - Key는 `pangi_<environment>_<random>` 형식이며 생성 시 원문을 한 번 반환하고 Argon2/안전한 KDF Hash와 Prefix만 저장한다.
 - 인증 Pipeline은 Hash Match→State→Expiry→Scope→IP Policy 순으로 검사하고 성공 시에만 `last_used_at`을 갱신한다.
 - 사용 기록은 Key ID/Date/Endpoint Group/성공·실패/마지막 사용으로 집계하고 Raw 요청·응답/Header를 저장하지 않는다.
+- WBS-03 Unit of Work 위에서 `api_keys`, `api_key_usage_daily`, `ip_allowlist_entries`, `ip_access_events`의 Migration, 보안 제약과 Repository를 이 WBS가 소유한다.
 - CIDR은 표준 Network Address로 정규화하고 Host Bit 교정 Preview를 제공한다.
 - `X-Forwarded-For`는 Socket Peer가 `trusted_proxy_cidrs`에 포함될 때만 해석한다.
 - Policy 변경은 현재 Client/OAuth Callback/Health/API Consumer 영향과 Fingerprint를 계산하고 재인증 뒤 적용한다.
