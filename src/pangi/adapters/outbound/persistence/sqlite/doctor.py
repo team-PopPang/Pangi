@@ -19,6 +19,7 @@ from pangi.adapters.outbound.persistence.sqlite.filesystem import (
     detect_filesystem_type,
 )
 from pangi.adapters.outbound.persistence.sqlite.locking import process_lock_available
+from pangi.adapters.outbound.persistence.sqlite.snapshots import SqliteSnapshotStore
 from pangi.application.contracts.diagnostics import DiagnosticResult, DiagnosticStatus
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.services.doctor import DoctorCheck
@@ -31,6 +32,7 @@ _CHECK_IDS = (
     "sqlite.quick_check",
     "sqlite.schema",
     "sqlite.migrations",
+    "sqlite.backup",
     "sqlite.process_lock",
     "sqlite.disk",
 )
@@ -183,6 +185,34 @@ async def inspect_sqlite(
             if plan.pending
             else "package and database migrations match",
             "pangi migrate apply --yes" if plan.pending else None,
+        )
+
+    try:
+        snapshot_store = SqliteSnapshotStore(paths)
+        latest_manifest, has_legacy = snapshot_store.latest_manifest()
+        if latest_manifest is None:
+            results["sqlite.backup"] = _result(
+                "sqlite.backup",
+                DiagnosticStatus.WARN if has_legacy else DiagnosticStatus.SKIP,
+                "unverified legacy SQLite backup exists"
+                if has_legacy
+                else "no SQLite snapshot has been created",
+            )
+        else:
+            verification = await snapshot_store.verify(latest_manifest)
+            compatible = verification.package_compatible
+            results["sqlite.backup"] = _result(
+                "sqlite.backup",
+                DiagnosticStatus.PASS if compatible else DiagnosticStatus.WARN,
+                "latest SQLite snapshot is verified"
+                if compatible
+                else "latest SQLite snapshot is verified but needs compatibility review",
+            )
+    except (OSError, StorageError):
+        results["sqlite.backup"] = _result(
+            "sqlite.backup",
+            DiagnosticStatus.FAIL,
+            "latest SQLite snapshot failed integrity verification",
         )
 
     try:

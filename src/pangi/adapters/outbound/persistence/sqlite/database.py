@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextvars import ContextVar, Token
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiosqlite
@@ -12,10 +13,16 @@ from pangi.adapters.outbound.persistence.sqlite.connection import SqliteConnecti
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
 from pangi.adapters.outbound.persistence.sqlite.errors import UnitOfWorkStateError
 from pangi.adapters.outbound.persistence.sqlite.locking import ProcessFileLock
+from pangi.adapters.outbound.persistence.sqlite.snapshots import SqliteSnapshotStore
 from pangi.adapters.outbound.persistence.sqlite.write_coordinator import (
     SqliteWriteCoordinator,
 )
 from pangi.application.contracts.paths import RuntimePaths
+from pangi.application.contracts.snapshots import (
+    SnapshotArtifact,
+    SnapshotKind,
+    SnapshotVerification,
+)
 from pangi.application.ports.storage import MigrationAdmin
 from pangi.config import StorageConfig
 
@@ -35,6 +42,7 @@ class SqliteDatabase:
         *,
         migration_admin: MigrationAdmin | None = None,
         connection_factory: SqliteConnectionFactory | None = None,
+        snapshot_store: SqliteSnapshotStore | None = None,
     ) -> None:
         self.paths = paths
         self.config = config
@@ -49,6 +57,9 @@ class SqliteDatabase:
             else connection_factory
         )
         self._writes = SqliteWriteCoordinator()
+        self._snapshots = (
+            SqliteSnapshotStore(paths) if snapshot_store is None else snapshot_store
+        )
         self._lifecycle_lock = asyncio.Lock()
         self._transaction_context: ContextVar[bool] = ContextVar(
             f"pangi_sqlite_transaction_{id(self)}",
@@ -115,6 +126,20 @@ class SqliteDatabase:
         )
 
         return SqliteUnitOfWork(self)
+
+    async def create_snapshot(self) -> SnapshotArtifact:
+        """Create a verified snapshot after all active writes have finished."""
+
+        if self._transaction_context.get():
+            raise UnitOfWorkStateError("cannot snapshot SQLite inside an active unit of work")
+        async with self._writes.serialized():
+            connection = self._require_connection()
+            return await self._snapshots.create(connection, kind=SnapshotKind.RUNTIME)
+
+    async def verify_snapshot(self, manifest_file: Path) -> SnapshotVerification:
+        """Verify a database snapshot without requiring a running database."""
+
+        return await self._snapshots.verify(manifest_file)
 
     def _require_connection(self) -> aiosqlite.Connection:
         connection = self._connection

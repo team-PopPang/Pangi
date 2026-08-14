@@ -47,6 +47,7 @@ FastAPI와 React Admin Shell을 같은 Origin으로 제공하고, Bootstrap Admi
 - Member, Skill Author, Admin, System 역할을 API Dependency에서 검사하고 Resource Owner 조건은 Use Case가 재검사한다.
 - 모든 오류는 Stable Code, 안전한 Message, Request ID와 제한된 Details를 가진 Envelope로 변환한다.
 - React Router/TanStack Query/OpenAPI 생성 Type을 기본으로 하고 CI에서 Schema Drift를 검사한다.
+- WBS-03의 SQLite Runtime 시작 상태와 Doctor 결과를 `/health/ready`에 연결하되 DB 구현 타입을 API 계약에 노출하지 않는다.
 
 ## 구현 체크리스트
 

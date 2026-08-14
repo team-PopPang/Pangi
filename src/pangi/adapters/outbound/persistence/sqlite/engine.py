@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -19,19 +18,19 @@ from pangi.adapters.outbound.persistence.sqlite.connection import (
 from pangi.adapters.outbound.persistence.sqlite.errors import (
     MigrationApplyError,
     MigrationIntegrityError,
-    StorageSafetyError,
 )
-from pangi.adapters.outbound.persistence.sqlite.filesystem import ensure_local_filesystem
 from pangi.adapters.outbound.persistence.sqlite.locking import ProcessFileLock
 from pangi.adapters.outbound.persistence.sqlite.registry import (
     MigrationRegistry,
     MigrationSource,
     PackageMigrationRegistry,
 )
+from pangi.adapters.outbound.persistence.sqlite.snapshots import SqliteSnapshotStore
 from pangi.adapters.outbound.persistence.sqlite.write_coordinator import (
     SqliteWriteCoordinator,
 )
 from pangi.application.contracts.paths import RuntimePaths
+from pangi.application.contracts.snapshots import SnapshotKind
 from pangi.application.contracts.storage import (
     MigrationApplyResult,
     MigrationDescriptor,
@@ -71,6 +70,7 @@ class SqliteMigrationAdmin:
         *,
         registry: MigrationRegistry | None = None,
         now: Now = _utc_now,
+        snapshot_store: SqliteSnapshotStore | None = None,
     ) -> None:
         self.paths = paths
         self.config = config
@@ -78,6 +78,11 @@ class SqliteMigrationAdmin:
         self._connections = SqliteConnectionFactory(paths, config)
         self._writes = SqliteWriteCoordinator()
         self._now = now
+        self._snapshots = (
+            SqliteSnapshotStore(paths, registry=self._registry, now=now)
+            if snapshot_store is None
+            else snapshot_store
+        )
 
     async def _read_applied(
         self,
@@ -145,48 +150,16 @@ class SqliteMigrationAdmin:
         return MigrationPlan(self.paths.database_file, True, applied, pending)
 
     async def _create_backup(self, plan: MigrationPlan) -> Path:
-        backup_dir = self.paths.backup_dir
-        if backup_dir.is_symlink() or not backup_dir.is_dir():
-            raise StorageSafetyError("SQLite backup directory is missing or unsafe")
-        ensure_local_filesystem(backup_dir)
-        timestamp = self._now().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-        stem = f"pre-migrate-v{plan.current_version}-to-v{plan.target_version}-{timestamp}"
-        candidate = backup_dir / f"{stem}.sqlite3"
-        counter = 1
-        while candidate.exists() or candidate.is_symlink():
-            candidate = backup_dir / f"{stem}-{counter}.sqlite3"
-            counter += 1
-
-        descriptor = os.open(
-            candidate,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-            0o600,
-        )
-        os.close(descriptor)
-        source: aiosqlite.Connection | None = None
-        target: aiosqlite.Connection | None = None
+        source = await self._connections.open(read_only=True)
         try:
-            source = await self._connections.open(read_only=True)
-            target = await aiosqlite.connect(candidate)
-            await source.backup(target)
-            cursor = await target.execute("PRAGMA quick_check")
-            row = await cursor.fetchone()
-            await cursor.close()
-            if row is None or str(row[0]).lower() != "ok":
-                raise MigrationApplyError("pre-migration backup integrity check failed")
-            await target.close()
-            target = None
+            artifact = await self._snapshots.create(
+                source,
+                kind=SnapshotKind.PRE_MIGRATION,
+                migration_target_version=plan.target_version,
+            )
+            return artifact.snapshot_file
+        finally:
             await source.close()
-            source = None
-            candidate.chmod(0o600)
-            return candidate
-        except BaseException:
-            if target is not None:
-                await target.close()
-            if source is not None:
-                await source.close()
-            candidate.unlink(missing_ok=True)
-            raise
 
     async def apply(self) -> MigrationApplyResult:
         async with self._writes.serialized():
