@@ -23,21 +23,38 @@ def test_default_config_round_trips_through_toml(tmp_path: Path) -> None:
     assert loaded.storage.journal_mode == "delete"
     assert loaded.storage.busy_timeout_ms == 5000
     assert loaded.auth.bootstrap_grant_ttl_minutes == 30
+    assert loaded.auth.session_ttl_minutes == 720
+    assert loaded.auth.session_rotation_minutes == 30
+    assert loaded.auth.login_attempt_limit == 5
+    assert loaded.auth.login_attempt_window_seconds == 300
 
 
 def test_auth_section_is_optional_for_existing_schema_v1_config(tmp_path: Path) -> None:
     config_path = tmp_path / "legacy.toml"
-    config_path.write_text(
-        PangiConfig().to_toml().replace(
-            "\n[auth]\nbootstrap_grant_ttl_minutes = 30\n",
+    auth_block = "\n".join(
+        (
             "",
-        ),
+            "[auth]",
+            "bootstrap_grant_ttl_minutes = 30",
+            "session_ttl_minutes = 720",
+            "session_rotation_minutes = 30",
+            "login_attempt_limit = 5",
+            "login_attempt_window_seconds = 300",
+            "",
+        )
+    )
+    config_path.write_text(
+        PangiConfig().to_toml().replace(auth_block, "\n"),
         "utf-8",
     )
 
     loaded = PangiConfig.load(config_path)
 
     assert loaded.auth.bootstrap_grant_ttl_minutes == 30
+    assert loaded.auth.session_ttl_minutes == 720
+    assert loaded.auth.session_rotation_minutes == 30
+    assert loaded.auth.login_attempt_limit == 5
+    assert loaded.auth.login_attempt_window_seconds == 300
 
 
 def test_unknown_keys_are_rejected_without_echoing_values(tmp_path: Path) -> None:

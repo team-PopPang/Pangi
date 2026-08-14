@@ -80,6 +80,10 @@ class AuthConfig(_StrictModel):
     """Local first-run authentication settings."""
 
     bootstrap_grant_ttl_minutes: int = Field(default=30, ge=5, le=1440)
+    session_ttl_minutes: int = Field(default=720, ge=5, le=10080)
+    session_rotation_minutes: int = Field(default=30, ge=5, le=1440)
+    login_attempt_limit: int = Field(default=5, ge=1, le=50)
+    login_attempt_window_seconds: int = Field(default=300, ge=60, le=3600)
 
 
 class PangiConfig(_StrictModel):
@@ -144,6 +148,10 @@ class PangiConfig(_StrictModel):
                 "",
                 "[auth]",
                 f"bootstrap_grant_ttl_minutes = {self.auth.bootstrap_grant_ttl_minutes}",
+                f"session_ttl_minutes = {self.auth.session_ttl_minutes}",
+                f"session_rotation_minutes = {self.auth.session_rotation_minutes}",
+                f"login_attempt_limit = {self.auth.login_attempt_limit}",
+                f"login_attempt_window_seconds = {self.auth.login_attempt_window_seconds}",
                 "",
             )
         )

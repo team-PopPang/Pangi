@@ -21,6 +21,43 @@ input {
   font: inherit;
 }
 
+.public-shell {
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.public-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.auth-content {
+  width: min(100%, 640px);
+  margin: 64px auto 0;
+}
+
+.auth-content.compact {
+  width: min(100%, 460px);
+}
+
+.auth-header {
+  margin-bottom: 28px;
+}
+
+.loading-state {
+  display: grid;
+  min-height: 100vh;
+  margin: 0;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
@@ -54,11 +91,7 @@ input {
   font-weight: 700;
 }
 
-.bootstrap-content {
-  max-width: 760px;
-}
-
-.bootstrap-card {
+.auth-card {
   display: grid;
   gap: 20px;
   padding: 28px;
@@ -67,7 +100,7 @@ input {
   border-radius: var(--radius-card);
 }
 
-.bootstrap-card label {
+.auth-card label {
   display: grid;
   gap: 8px;
   color: var(--text);
@@ -75,7 +108,7 @@ input {
   font-weight: 600;
 }
 
-.bootstrap-card input {
+.auth-card input {
   width: 100%;
   padding: 11px 12px;
   color: var(--text);
@@ -85,12 +118,12 @@ input {
   outline: none;
 }
 
-.bootstrap-card input:focus {
+.auth-card input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgb(61 82 109 / 12%);
 }
 
-.bootstrap-card button {
+.auth-card button {
   justify-self: start;
   padding: 11px 18px;
   color: #fff;
@@ -101,7 +134,7 @@ input {
   font-weight: 700;
 }
 
-.bootstrap-card button:disabled {
+.auth-card button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -123,6 +156,11 @@ input {
 .form-message.success {
   color: #1e604b;
   background: #edf9f4;
+}
+
+.form-message a {
+  color: inherit;
+  font-weight: 700;
 }
 
 .form-message.error {
@@ -165,6 +203,38 @@ input {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.session-summary {
+  display: grid;
+  gap: 4px;
+  margin-top: auto;
+  padding: 14px 12px;
+  color: var(--text);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  font-size: 13px;
+}
+
+.session-summary span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.logout-button {
+  justify-self: start;
+  margin-top: 8px;
+  padding: 0;
+  color: var(--primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.session-summary + .sidebar-note {
+  margin-top: 0;
 }
 
 .content {
@@ -254,6 +324,14 @@ h2 {
 }
 
 @media (max-width: 767px) {
+  .public-shell {
+    padding: 20px;
+  }
+
+  .auth-content {
+    margin-top: 44px;
+  }
+
   .app-shell {
     display: block;
   }

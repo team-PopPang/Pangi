@@ -2384,8 +2384,12 @@ Dashboard Auth 우선순위:
 
 Slack을 설치하지 않은 초기 설정을 위해 `pangi init`가 기본 30분짜리 일회용 Bootstrap URL을 최초 한 번만 만든다. URL은 `/bootstrap#<token>` 형식으로 Token을 HTTP 요청과 Referrer에서 제외하고, DB에는 SHA-256 Hash만 저장한다. 첫 Admin과 Local Identity 생성, Grant 소비는 같은 Transaction이며 이후 Bootstrap을 닫는다. URL 분실·만료 복구는 Admin 생성 전에만 `pangi bootstrap rotate --yes`로 명시적으로 수행한다.
 
-- Session은 HttpOnly, Secure, SameSite=Lax Cookie를 사용한다.
-- 상태 변경 API는 CSRF Token을 요구한다.
+- HTTPS Session은 `__Host-` Prefix, HttpOnly, Secure, SameSite=Lax, Path=/, Domain 없음 Cookie를 사용한다.
+- 기본 `http://127.0.0.1` 설치에서는 Host-only, HttpOnly, SameSite=Lax Cookie 예외를 사용한다. Loopback이 아닌 평문 HTTP에서는 Login과 Session 사용을 거부하고 신뢰 Proxy 설정 전에는 Forwarded Header를 신뢰하지 않는다.
+- Session은 기본 12시간의 절대 만료를 가진다. 생성 또는 마지막 회전 뒤 30분이 지나면 명시적 회전을 권장하며 회전은 Session·CSRF Token을 함께 바꾸고 절대 만료를 연장하지 않는다.
+- Session과 CSRF 원문은 Browser에만 전달하고 DB에는 SHA-256 Hash만 저장한다.
+- 상태 변경 API는 동일 출처, CSRF Cookie와 `X-CSRF-Token`을 모두 검증한다.
+- Local Login 실패는 Socket Peer IP 전체와 정규화 Local ID 조합 각각 기본 5회/5분으로 제한한다. 사용자 부재·Password 불일치·비활성 상태는 동일한 외부 오류를 사용한다.
 - Local Admin Password는 Argon2id로 Hash한다.
 - User와 인증 수단은 분리하고 Local, Slack, Reverse Proxy는 `auth_identities(provider, subject)`로 연결한다.
 - API Key는 256-bit Random 값을 한 번만 보여주고 Hash만 저장한다.
@@ -2506,7 +2510,19 @@ Feedback 원문에서 고객 데이터와 Secret을 Eval Fixture로 복사하지
 
 ## 17. API 설계
 
-모든 변경 API는 `Idempotency-Key`를 지원한다. List API는 Cursor Pagination을 사용한다.
+모든 기능 변경 API는 `Idempotency-Key`를 지원한다. 인증·Bootstrap Lifecycle API는 Secret 응답을 재생 저장하지 않고 Token 회전·폐기·일회성 Grant의 자체 상태 전이로 Replay를 차단한다. List API는 Cursor Pagination을 사용한다.
+
+### 17.0 인증과 Runtime
+
+| Method | Path | 역할 |
+| --- | --- | --- |
+| POST | `/api/v1/bootstrap/admin` | 일회성 Grant로 최초 Local Admin 생성 |
+| POST | `/api/v1/auth/login` | Local Password 검증과 영속 Session 발급 |
+| GET | `/api/v1/auth/session` | 현재 Principal, 만료와 회전 권장 상태 조회 |
+| POST | `/api/v1/auth/session/rotate` | CSRF 검증 뒤 Session·CSRF Token 동시 회전 |
+| POST | `/api/v1/auth/logout` | CSRF 검증 뒤 현재 Session 폐기 |
+| GET | `/health/live` | Pangi Process 식별과 Liveness |
+| GET | `/health/ready` | SQLite Runtime과 Package Asset Readiness |
 
 ### 17.1 Connection
 

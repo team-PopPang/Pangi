@@ -1,10 +1,13 @@
 """SQLite adapter composition helpers."""
 
+from pangi.adapters.outbound.login_attempts import InMemoryLoginAttemptLimiter
 from pangi.adapters.outbound.passwords import Argon2idPasswordHasher
 from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
+from pangi.adapters.outbound.persistence.sqlite.sessions import SqliteAuthSessionStore
 from pangi.application.contracts.paths import RuntimePaths
+from pangi.application.services.auth import AuthSessionService
 from pangi.application.services.bootstrap_admin import BootstrapAdminService
 from pangi.config import PangiConfig
 
@@ -32,6 +35,26 @@ def build_bootstrap_admin(
         Argon2idPasswordHasher(),
         public_base_url=f"http://{config.server.host}:{config.server.port}",
         grant_ttl_minutes=config.auth.bootstrap_grant_ttl_minutes,
+    )
+
+
+def build_auth_sessions(
+    database: SqliteDatabase,
+    config: PangiConfig,
+) -> AuthSessionService:
+    """Build Local Login and persistent Session use cases."""
+
+    password_verifier = Argon2idPasswordHasher()
+    return AuthSessionService(
+        SqliteAuthSessionStore(database),
+        password_verifier,
+        InMemoryLoginAttemptLimiter(
+            attempt_limit=config.auth.login_attempt_limit,
+            window_seconds=config.auth.login_attempt_window_seconds,
+        ),
+        dummy_password_hash=password_verifier.hash("pangi-invalid-login-placeholder"),
+        session_ttl_minutes=config.auth.session_ttl_minutes,
+        rotation_minutes=config.auth.session_rotation_minutes,
     )
 
 
