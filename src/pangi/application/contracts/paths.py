@@ -25,6 +25,8 @@ class RuntimePaths:
     log_dir: Path
     backup_dir: Path
     vault_dir: Path
+    database_file: Path
+    process_lock_file: Path
     project_root: Path | None = None
 
     def as_dict(self) -> dict[str, str]:
@@ -38,5 +40,6 @@ class RuntimePaths:
             "logs": str(self.log_dir),
             "backups": str(self.backup_dir),
             "vault": str(self.vault_dir),
+            "database": str(self.database_file),
+            "process_lock": str(self.process_lock_file),
         }
-

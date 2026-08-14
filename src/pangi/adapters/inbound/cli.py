@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Protocol
+from typing import Annotated, NoReturn, Protocol
 
 import typer
 
@@ -15,11 +16,13 @@ from pangi.application.contracts.initialization import InitActionKind, InitPlan,
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.runtime_status import RuntimeState
 from pangi.application.ports.runtime_control import RuntimeControl, RuntimeUnavailableError
+from pangi.application.ports.storage import MigrationAdmin, StorageOperationError
 from pangi.application.services.doctor import DoctorService
 from pangi.config import PangiConfig, PangiConfigError
 
 PathResolver = Callable[[bool, Path | None], RuntimePaths]
 DoctorFactory = Callable[[RuntimePaths, PangiConfig], DoctorService]
+MigrationFactory = Callable[[RuntimePaths, PangiConfig], MigrationAdmin]
 
 
 class RuntimeInitializer(Protocol):
@@ -39,6 +42,7 @@ class CliDependencies:
     resolve_paths: PathResolver
     initializer: RuntimeInitializer
     doctor_factory: DoctorFactory
+    migration_factory: MigrationFactory
     runtime_control: RuntimeControl
 
 
@@ -48,7 +52,7 @@ def _safe_error(
     code: int = 2,
     json_output: bool = False,
     command: str = "pangi",
-) -> None:
+) -> NoReturn:
     safe_message = redact_text(message)
     if json_output:
         typer.echo(
@@ -106,6 +110,7 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
         pretty_exceptions_enable=False,
     )
     config_app = typer.Typer(help="Inspect and validate configuration", add_completion=False)
+    migrate_app = typer.Typer(help="Plan and apply SQLite migrations", add_completion=False)
 
     @app.callback()
     def root(
@@ -268,6 +273,118 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
             typer.echo(f"Exit code: {report.exit_code(strict=strict)}")
         raise typer.Exit(report.exit_code(strict=strict))
 
+    @migrate_app.command("plan")
+    def migrate_plan_command(
+        path: Annotated[Path | None, typer.Option("--config")] = None,
+        project_local: Annotated[bool, typer.Option("--project-local")] = False,
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+    ) -> None:
+        try:
+            paths = dependencies.resolve_paths(project_local, path)
+            config = PangiConfig.load(paths.config_file)
+            plan = asyncio.run(dependencies.migration_factory(paths, config).plan())
+        except (PangiConfigError, RuntimeError) as error:
+            if isinstance(error, StorageOperationError):
+                _safe_error(
+                    str(error),
+                    code=1,
+                    json_output=json_output,
+                    command="migrate.plan",
+                )
+            _safe_error(str(error), json_output=json_output, command="migrate.plan")
+        except OSError as error:
+            _safe_error(
+                str(error),
+                code=1,
+                json_output=json_output,
+                command="migrate.plan",
+            )
+        payload = {
+            "schema_version": 1,
+            "command": "migrate.plan",
+            "status": "pending" if plan.pending else "up_to_date",
+            **plan.as_dict(),
+        }
+        if json_output:
+            typer.echo(render_json(payload))
+            return
+        typer.echo(f"Database: {plan.database_file}")
+        typer.echo(f"Current version: {plan.current_version}")
+        typer.echo(f"Target version: {plan.target_version}")
+        if plan.pending:
+            typer.echo("Pending migrations:")
+            for migration in plan.pending:
+                typer.echo(f"- {migration.version:04d} {migration.name}")
+        else:
+            typer.echo("No pending migrations")
+
+    @migrate_app.command("apply")
+    def migrate_apply_command(
+        path: Annotated[Path | None, typer.Option("--config")] = None,
+        project_local: Annotated[bool, typer.Option("--project-local")] = False,
+        assume_yes: Annotated[bool, typer.Option("--yes")] = False,
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+    ) -> None:
+        if json_output and not assume_yes:
+            _safe_error(
+                "--json requires --yes",
+                json_output=True,
+                command="migrate.apply",
+            )
+        try:
+            paths = dependencies.resolve_paths(project_local, path)
+            config = PangiConfig.load(paths.config_file)
+            admin = dependencies.migration_factory(paths, config)
+            plan = asyncio.run(admin.plan())
+        except (PangiConfigError, RuntimeError) as error:
+            if isinstance(error, StorageOperationError):
+                _safe_error(
+                    str(error),
+                    code=1,
+                    json_output=json_output,
+                    command="migrate.apply",
+                )
+            _safe_error(str(error), json_output=json_output, command="migrate.apply")
+        except OSError as error:
+            _safe_error(
+                str(error),
+                code=1,
+                json_output=json_output,
+                command="migrate.apply",
+            )
+        if plan.pending and not assume_yes:
+            typer.echo(f"Pending migrations: {len(plan.pending)}")
+            if plan.backup_required:
+                typer.echo("A verified pre-migration backup will be created")
+            if not typer.confirm("Apply this migration plan?"):
+                typer.echo("Migration cancelled")
+                return
+        try:
+            result = asyncio.run(admin.apply())
+        except (OSError, StorageOperationError) as error:
+            _safe_error(
+                str(error),
+                code=1,
+                json_output=json_output,
+                command="migrate.apply",
+            )
+        payload = {
+            "schema_version": 1,
+            "command": "migrate.apply",
+            "status": "migrated" if result.applied else "up_to_date",
+            **result.as_dict(),
+        }
+        if json_output:
+            typer.echo(render_json(payload))
+            return
+        if result.applied:
+            typer.echo(f"Applied {len(result.applied)} migration(s)")
+            typer.echo(f"Current version: {result.current_version}")
+            if result.backup_file is not None:
+                typer.echo(f"Backup: {result.backup_file}")
+        else:
+            typer.echo("Database is already up to date")
+
     @app.command("start")
     def start_command(
         path: Annotated[Path | None, typer.Option("--config")] = None,
@@ -292,4 +409,5 @@ def create_app(dependencies: CliDependencies) -> typer.Typer:
             raise typer.Exit(1)
 
     app.add_typer(config_app, name="config")
+    app.add_typer(migrate_app, name="migrate")
     return app

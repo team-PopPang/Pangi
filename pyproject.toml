@@ -18,6 +18,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+  "aiosqlite>=0.20,<1",
   "pydantic>=2.12,<3",
   "typer>=0.20,<1",
 ]
@@ -45,6 +46,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 pangi = [
   "py.typed",
+  "adapters/outbound/persistence/sqlite/migrations/*.sql",
   "builtins/resources/*.json",
   "web/static/*.json",
 ]

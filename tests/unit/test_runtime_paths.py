@@ -23,6 +23,8 @@ def test_explicit_home_has_priority_over_environment(tmp_path: Path) -> None:
     assert paths.mode is PathMode.EXPLICIT
     assert paths.config_file == explicit / "pangi.toml"
     assert paths.data_dir == explicit / "data"
+    assert paths.database_file == explicit / "data" / "pangi.sqlite3"
+    assert paths.process_lock_file == explicit / "data" / "pangi.lock"
 
 
 def test_pangi_home_precedes_os_defaults(tmp_path: Path) -> None:

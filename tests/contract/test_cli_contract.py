@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from pangi import PangiConfig
 from pangi.adapters.inbound.cli import CliDependencies, create_app
 from pangi.adapters.outbound.initialization import GITIGNORE_START, FileSystemInitializer
+from pangi.adapters.outbound.persistence.sqlite.factory import build_migration_admin
 from pangi.adapters.outbound.runtime_control import UnavailableRuntimeControl
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.adapters.outbound.system_checks import build_doctor_service
@@ -28,9 +29,10 @@ def _app(tmp_path: Path):
     return create_app(
         CliDependencies(
             resolve_paths=resolver,
-            initializer=FileSystemInitializer(),
-            doctor_factory=build_doctor_service,
-            runtime_control=UnavailableRuntimeControl(),
+                initializer=FileSystemInitializer(),
+                doctor_factory=build_doctor_service,
+                migration_factory=build_migration_admin,
+                runtime_control=UnavailableRuntimeControl(),
         )
     )
 
@@ -103,11 +105,13 @@ def test_doctor_offline_json_schema_and_exit_code(tmp_path: Path) -> None:
         app,
         ["init", "--config", str(source), "--non-interactive", "--json"],
     )
+    migration = runner.invoke(app, ["migrate", "apply", "--yes", "--json"])
 
     result = runner.invoke(app, ["doctor", "--offline", "--json"])
     payload = json.loads(result.output)
 
     assert result.exit_code == 0
+    assert migration.exit_code == 0
     assert payload["schema_version"] == 1
     assert payload["exit_code"] == 0
     assert {check["status"] for check in payload["checks"]} <= {
@@ -130,6 +134,25 @@ def test_doctor_json_returns_code_two_when_config_is_missing(tmp_path: Path) -> 
     assert "Traceback" not in result.output
 
 
+def test_doctor_reports_pending_sqlite_migration_with_next_action(tmp_path: Path) -> None:
+    source = tmp_path / "install.toml"
+    source.write_text(PangiConfig().to_toml(), "utf-8")
+    runner = CliRunner()
+    app = _app(tmp_path)
+    runner.invoke(
+        app,
+        ["init", "--config", str(source), "--non-interactive", "--json"],
+    )
+
+    result = runner.invoke(app, ["doctor", "--offline", "--json"])
+    payload = json.loads(result.output)
+    migration = next(check for check in payload["checks"] if check["id"] == "sqlite.migrations")
+
+    assert result.exit_code == 1
+    assert migration["status"] == "FAIL"
+    assert migration["next_command"] == "pangi migrate apply --yes"
+
+
 def test_start_and_status_fail_explicitly_until_runtime_is_composed(tmp_path: Path) -> None:
     source = tmp_path / "install.toml"
     source.write_text(PangiConfig().to_toml(), "utf-8")
@@ -148,3 +171,46 @@ def test_start_and_status_fail_explicitly_until_runtime_is_composed(tmp_path: Pa
     assert "Traceback" not in start.output
     assert status.exit_code == 1
     assert json.loads(status.output)["state"] == "unavailable"
+
+
+def test_migrate_plan_apply_and_repeat_have_stable_json(tmp_path: Path) -> None:
+    source = tmp_path / "install.toml"
+    source.write_text(PangiConfig().to_toml(), "utf-8")
+    runner = CliRunner()
+    app = _app(tmp_path)
+    runner.invoke(
+        app,
+        ["init", "--config", str(source), "--non-interactive", "--json"],
+    )
+
+    plan = runner.invoke(app, ["migrate", "plan", "--json"])
+    first = runner.invoke(app, ["migrate", "apply", "--yes", "--json"])
+    second = runner.invoke(app, ["migrate", "apply", "--yes", "--json"])
+
+    assert plan.exit_code == 0
+    assert json.loads(plan.output)["status"] == "pending"
+    assert json.loads(plan.output)["current_version"] == 0
+    assert json.loads(plan.output)["target_version"] == 1
+    assert first.exit_code == 0
+    assert json.loads(first.output)["status"] == "migrated"
+    assert json.loads(first.output)["current_version"] == 1
+    assert second.exit_code == 0
+    assert json.loads(second.output)["status"] == "up_to_date"
+    assert json.loads(second.output)["applied"] == []
+
+
+def test_migrate_apply_json_requires_explicit_yes(tmp_path: Path) -> None:
+    source = tmp_path / "install.toml"
+    source.write_text(PangiConfig().to_toml(), "utf-8")
+    runner = CliRunner()
+    app = _app(tmp_path)
+    runner.invoke(
+        app,
+        ["init", "--config", str(source), "--non-interactive", "--json"],
+    )
+
+    result = runner.invoke(app, ["migrate", "apply", "--json"])
+
+    assert result.exit_code == 2
+    assert json.loads(result.output)["exit_code"] == 2
+    assert "requires --yes" in result.output

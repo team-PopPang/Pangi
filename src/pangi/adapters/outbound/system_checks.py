@@ -10,6 +10,7 @@ from importlib import resources
 from pathlib import Path
 
 from pangi._version import __version__
+from pangi.adapters.outbound.persistence.sqlite.doctor import build_sqlite_doctor_checks
 from pangi.application.contracts.diagnostics import DiagnosticResult, DiagnosticStatus
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.services.doctor import DoctorCheck, DoctorService
@@ -117,7 +118,7 @@ def build_doctor_service(paths: RuntimePaths, config: PangiConfig) -> DoctorServ
         DoctorCheck("paths.backups", lambda: _path_check("paths.backups", paths.backup_dir)),
         DoctorCheck("paths.vault", lambda: _path_check("paths.vault", paths.vault_dir)),
         DoctorCheck("config.schema", config_schema),
-        DoctorCheck("sqlite.unavailable", lambda: _skip("sqlite.unavailable", "WBS 03 pending")),
+        *build_sqlite_doctor_checks(paths, config),
         DoctorCheck(
             "secrets.unavailable",
             lambda: _skip("secrets.unavailable", "Secret Store adapter is not configured"),
