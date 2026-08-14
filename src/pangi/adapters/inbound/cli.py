@@ -1,24 +1,295 @@
-"""Dependency-light bootstrap CLI."""
+"""Stable command-line adapter with injected application dependencies."""
 
-import argparse
-from collections.abc import Sequence
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated, Protocol
+
+import typer
 
 from pangi._version import __version__
+from pangi.adapters.inbound.output import redact_text, render_json
+from pangi.application.contracts.initialization import InitActionKind, InitPlan, InitResult
+from pangi.application.contracts.paths import RuntimePaths
+from pangi.application.contracts.runtime_status import RuntimeState
+from pangi.application.ports.runtime_control import RuntimeControl, RuntimeUnavailableError
+from pangi.application.services.doctor import DoctorService
+from pangi.config import PangiConfig, PangiConfigError
+
+PathResolver = Callable[[bool, Path | None], RuntimePaths]
+DoctorFactory = Callable[[RuntimePaths, PangiConfig], DoctorService]
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the command parser without importing optional adapters."""
+class RuntimeInitializer(Protocol):
+    def plan(self, paths: RuntimePaths) -> InitPlan:
+        """Create a mutation-free initialization plan."""
 
-    parser = argparse.ArgumentParser(prog="pangi", description="Pangi agent runtime")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    return parser
+        ...
+
+    def apply(self, plan: InitPlan, config_text: str) -> InitResult:
+        """Apply a previously validated plan without overwriting user files."""
+
+        ...
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the minimal CLI entry point."""
+@dataclass(frozen=True, slots=True)
+class CliDependencies:
+    resolve_paths: PathResolver
+    initializer: RuntimeInitializer
+    doctor_factory: DoctorFactory
+    runtime_control: RuntimeControl
 
-    parser = build_parser()
-    parser.parse_args(argv)
-    parser.print_help()
-    return 0
 
+def _safe_error(
+    message: str,
+    *,
+    code: int = 2,
+    json_output: bool = False,
+    command: str = "pangi",
+) -> None:
+    safe_message = redact_text(message)
+    if json_output:
+        typer.echo(
+            render_json(
+                {
+                    "schema_version": 1,
+                    "command": command,
+                    "status": "ERROR",
+                    "exit_code": code,
+                    "error": {"message": safe_message},
+                }
+            )
+        )
+    else:
+        typer.echo(f"Error: {safe_message}", err=True)
+    raise typer.Exit(code)
+
+
+def _plan_payload(plan: InitPlan) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "command": "init",
+        "status": "ERROR" if plan.conflicts else "planned",
+        "exit_code": 1 if plan.conflicts else 0,
+        "paths": plan.paths.as_dict(),
+        "actions": [
+            {"kind": action.kind.value, "path": str(action.path)} for action in plan.actions
+        ],
+        "conflicts": list(plan.conflicts),
+    }
+
+
+def _result_payload(result: InitResult, paths: RuntimePaths) -> dict[str, object]:
+    status = "initialized" if result.created or result.modified else "already_initialized"
+    return {
+        "schema_version": 1,
+        "command": "init",
+        "status": status,
+        "paths": paths.as_dict(),
+        "created": [str(path) for path in result.created],
+        "modified": [str(path) for path in result.modified],
+        "preserved": [str(path) for path in result.preserved],
+    }
+
+
+def create_app(dependencies: CliDependencies) -> typer.Typer:
+    """Build an explicit Typer application suitable for production and tests."""
+
+    app = typer.Typer(
+        name="pangi",
+        help="Pangi agent runtime",
+        no_args_is_help=True,
+        invoke_without_command=True,
+        add_completion=False,
+        pretty_exceptions_enable=False,
+    )
+    config_app = typer.Typer(help="Inspect and validate configuration", add_completion=False)
+
+    @app.callback()
+    def root(
+        version_flag: Annotated[
+            bool,
+            typer.Option("--version", help="Show the Pangi version and exit", is_eager=True),
+        ] = False,
+    ) -> None:
+        if version_flag:
+            typer.echo(f"pangi {__version__}")
+            raise typer.Exit()
+
+    @app.command("version")
+    def version_command(
+        json_output: Annotated[bool, typer.Option("--json", help="Emit stable JSON")] = False,
+    ) -> None:
+        payload = {"schema_version": 1, "command": "version", "version": __version__}
+        typer.echo(render_json(payload) if json_output else f"pangi {__version__}")
+
+    @config_app.command("path")
+    def config_path_command(
+        project_local: Annotated[
+            bool,
+            typer.Option("--project-local", help="Resolve paths under .pangi"),
+        ] = False,
+        json_output: Annotated[bool, typer.Option("--json", help="Emit stable JSON")] = False,
+    ) -> None:
+        try:
+            paths = dependencies.resolve_paths(project_local, None)
+        except RuntimeError as error:
+            _safe_error(str(error))
+        payload = {"schema_version": 1, "command": "config.path", "paths": paths.as_dict()}
+        if json_output:
+            typer.echo(render_json(payload))
+            return
+        for name, value in paths.as_dict().items():
+            typer.echo(f"{name}: {value}")
+
+    @config_app.command("validate")
+    def config_validate_command(
+        path: Annotated[
+            Path | None,
+            typer.Option("--path", help="Validate this config instead of the resolved path"),
+        ] = None,
+        project_local: Annotated[bool, typer.Option("--project-local")] = False,
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+    ) -> None:
+        try:
+            paths = dependencies.resolve_paths(project_local, path)
+            config = PangiConfig.load(paths.config_file)
+        except (OSError, PangiConfigError, RuntimeError) as error:
+            _safe_error(
+                str(error),
+                json_output=json_output,
+                command="config.validate",
+            )
+        payload = {
+            "schema_version": 1,
+            "command": "config.validate",
+            "status": "valid",
+            "config_schema_version": config.schema_version,
+            "path": str(paths.config_file),
+        }
+        typer.echo(render_json(payload) if json_output else f"Valid: {paths.config_file}")
+
+    @app.command("init")
+    def init_command(
+        source_config: Annotated[
+            Path | None,
+            typer.Option("--config", help="Source TOML for the new installation"),
+        ] = None,
+        project_local: Annotated[bool, typer.Option("--project-local")] = False,
+        non_interactive: Annotated[bool, typer.Option("--non-interactive")] = False,
+        assume_yes: Annotated[bool, typer.Option("--yes", help="Apply the displayed plan")] = False,
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+    ) -> None:
+        if non_interactive and source_config is None:
+            _safe_error(
+                "--non-interactive requires --config",
+                json_output=json_output,
+                command="init",
+            )
+        if json_output and not (non_interactive or assume_yes):
+            _safe_error(
+                "--json requires --non-interactive or --yes",
+                json_output=True,
+                command="init",
+            )
+        try:
+            config = PangiConfig.load(source_config) if source_config else PangiConfig()
+            paths = dependencies.resolve_paths(project_local, None)
+            plan = dependencies.initializer.plan(paths)
+            preserves_config = any(
+                action.kind is InitActionKind.PRESERVE_EXISTING
+                and action.path == paths.config_file
+                for action in plan.actions
+            )
+            if preserves_config:
+                PangiConfig.load(paths.config_file)
+        except (OSError, PangiConfigError, RuntimeError) as error:
+            _safe_error(str(error), json_output=json_output, command="init")
+
+        if plan.conflicts:
+            if json_output:
+                typer.echo(render_json(_plan_payload(plan)))
+            else:
+                typer.echo("Initialization conflicts:", err=True)
+                for conflict in plan.conflicts:
+                    typer.echo(f"- {redact_text(conflict)}", err=True)
+            raise typer.Exit(1)
+
+        if not json_output:
+            typer.echo("Initialization plan:")
+            for action in plan.actions:
+                typer.echo(f"- {action.kind.value}: {action.path}")
+        if not (non_interactive or assume_yes) and not typer.confirm("Apply this plan?"):
+            typer.echo("Initialization cancelled")
+            return
+
+        try:
+            result = dependencies.initializer.apply(plan, config.to_toml())
+        except (OSError, RuntimeError) as error:
+            _safe_error(
+                str(error),
+                code=1,
+                json_output=json_output,
+                command="init",
+            )
+        if json_output:
+            typer.echo(render_json(_result_payload(result, paths)))
+            return
+        typer.echo(f"Initialized: {paths.root}")
+        typer.echo(f"Config: {paths.config_file}")
+
+    @app.command("doctor")
+    def doctor_command(
+        path: Annotated[Path | None, typer.Option("--config")] = None,
+        project_local: Annotated[bool, typer.Option("--project-local")] = False,
+        offline: Annotated[bool, typer.Option("--offline")] = False,
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+        strict: Annotated[bool, typer.Option("--strict")] = False,
+    ) -> None:
+        try:
+            paths = dependencies.resolve_paths(project_local, path)
+            config = PangiConfig.load(paths.config_file)
+        except (PangiConfigError, RuntimeError) as error:
+            _safe_error(
+                str(error),
+                json_output=json_output,
+                command="doctor",
+            )
+        report = dependencies.doctor_factory(paths, config).run(offline=offline)
+        if json_output:
+            typer.echo(render_json(report.as_dict(strict=strict)))
+        else:
+            typer.echo(f"Pangi Doctor {report.pangi_version}")
+            for check in report.checks:
+                summary = redact_text(check.summary)
+                typer.echo(f"{check.status.value:<4}  {check.check_id:<24} {summary}")
+            typer.echo(f"Exit code: {report.exit_code(strict=strict)}")
+        raise typer.Exit(report.exit_code(strict=strict))
+
+    @app.command("start")
+    def start_command(
+        path: Annotated[Path | None, typer.Option("--config")] = None,
+        project_local: Annotated[bool, typer.Option("--project-local")] = False,
+    ) -> None:
+        try:
+            paths = dependencies.resolve_paths(project_local, path)
+            PangiConfig.load(paths.config_file)
+            dependencies.runtime_control.start()
+        except (PangiConfigError, RuntimeUnavailableError, RuntimeError) as error:
+            _safe_error(str(error))
+
+    @app.command("status")
+    def status_command(
+        json_output: Annotated[bool, typer.Option("--json")] = False,
+    ) -> None:
+        status = dependencies.runtime_control.status()
+        payload = {"schema_version": 1, "command": "status", **status.as_dict()}
+        text = f"{status.state.value}: {redact_text(status.detail)}"
+        typer.echo(render_json(payload) if json_output else text)
+        if status.state is RuntimeState.UNAVAILABLE:
+            raise typer.Exit(1)
+
+    app.add_typer(config_app, name="config")
+    return app

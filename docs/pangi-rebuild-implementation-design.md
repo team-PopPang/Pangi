@@ -2772,7 +2772,7 @@ Runtime Data는 Repository 내부가 아니라 OS별 `PANGI_HOME`에 둔다.
 
 ```text
 PANGI_HOME/
-  config.toml
+  pangi.toml
   pangi.db
   pangi.db-wal
   pangi.db-shm
@@ -2988,6 +2988,8 @@ Wizard:
 11. `doctor`와 Capability Pack Smoke Eval 실행
 
 기본 Data Directory는 OS Application Data 경로다. Project-local Mode를 선택한 경우에만 `.pangi/`를 만든다.
+
+경로 선택 우선순위는 명시적 CLI 경로, `PANGI_HOME`, OS 기본 경로 순서다. Linux는 XDG Config/Data/State 경로를 사용하고 macOS는 Application Support와 Logs 경로를 사용한다. Config 파일 이름은 모든 Mode에서 `pangi.toml`로 통일한다. Project-local Mode를 명시하면 `<project>/.pangi`가 다른 기본 경로보다 우선한다.
 
 생성 파일:
 

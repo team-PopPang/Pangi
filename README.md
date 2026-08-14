@@ -17,3 +17,15 @@ uv run ruff check .
 uv run mypy src
 uv run pytest
 ```
+
+## 첫 실행 기반
+
+현재 WBS 02의 설정, Runtime Data 초기화와 Read-only Doctor를 사용할 수 있다.
+
+```bash
+uv run pangi init --yes
+uv run pangi config validate
+uv run pangi doctor --offline
+```
+
+`pangi start`와 `pangi status`의 명령 계약은 준비됐지만 실제 Dashboard와 DB Runtime은 WBS 03·04에서 연결한다.
