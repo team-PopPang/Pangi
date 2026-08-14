@@ -1,7 +1,6 @@
-"""Run the Pangi CLI with ``python -m pangi``."""
+"""Run the composed Pangi CLI with ``python -m pangi``."""
 
-from pangi.adapters.inbound.cli import main
+from pangi.bootstrap import main
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
