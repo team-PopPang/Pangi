@@ -46,22 +46,30 @@ Pangi를 Greenfield Python Package로 시작하고 Domain, Application, Adapter,
 
 ## 구현 체크리스트
 
-- [ ] `src` Layout과 Python 3.11+ Package Metadata를 만든다.
-- [ ] Domain, Application, Adapter, Plugin, Built-in Package Skeleton을 만든다.
-- [ ] `PangiRuntime` Facade와 Public Contract의 최소 Import Surface를 정의한다.
-- [ ] Provider, Channel, SecretStore, Subagent Entry Point Group을 선언한다.
-- [ ] Capability Pack Manifest의 Core 호환 Version 검증 지점을 만든다.
-- [ ] UI Source와 Package에 포함될 정적 Asset 경로를 분리한다.
-- [ ] Legacy Code와 Runtime Data를 Package에 포함하지 않도록 Ignore/Build 규칙을 둔다.
-- [ ] Architecture Dependency Test를 추가한다.
+- [x] `src` Layout과 Python 3.11+ Package Metadata를 만든다.
+- [x] Domain, Application, Adapter, Plugin, Built-in Package Skeleton을 만든다.
+- [x] `PangiRuntime` Facade와 Public Contract의 최소 Import Surface를 정의한다.
+- [x] Provider, Channel, SecretStore, Subagent Entry Point Group을 선언한다.
+- [x] Capability Pack Manifest의 Core 호환 Version 검증 지점을 만든다.
+- [x] UI Source와 Package에 포함될 정적 Asset 경로를 분리한다.
+- [x] Legacy Code와 Runtime Data를 Package에 포함하지 않도록 Ignore/Build 규칙을 둔다.
+- [x] Architecture Dependency Test를 추가한다.
 
 ## 검증 체크리스트
 
-- [ ] 깨끗한 가상 환경에서 wheel Build와 Install Smoke Test를 실행한다.
-- [ ] `import pangi`가 선택 의존성 없이 성공하는지 확인한다.
-- [ ] Domain/Application에서 금지된 Framework Import가 실패하는 테스트를 실행한다.
-- [ ] 내부 Adapter Module이 안정 Public API로 노출되지 않는지 확인한다.
-- [ ] 설치하지 않은 Capability Pack이 Registry와 시작 시간에 영향을 주지 않는지 확인한다.
+- [x] 깨끗한 가상 환경에서 wheel Build와 Install Smoke Test를 실행한다.
+- [x] `import pangi`가 선택 의존성 없이 성공하는지 확인한다.
+- [x] Domain/Application에서 금지된 Framework Import가 실패하는 테스트를 실행한다.
+- [x] 내부 Adapter Module이 안정 Public API로 노출되지 않는지 확인한다.
+- [x] 설치하지 않은 Capability Pack이 Registry와 시작 시간에 영향을 주지 않는지 확인한다.
+
+## 구현 결과
+
+- PEP 621 Metadata와 `uv.lock`을 기준으로 작업 배포 이름 `pangi-agent`, Python `>=3.11`, 런타임 의존성 0개인 wheel을 구성했다.
+- 안정 루트 API는 `PangiRuntime`, `__version__`으로 제한하고 구체 Adapter 조립은 `bootstrap.py`에 뒀다.
+- `pangi.providers`, `pangi.channels`, `pangi.secret_stores`, `pangi.subagents`를 지연 발견하는 Registry와 Capability Pack 호환성 Policy 경계를 추가했다.
+- Built-in JSON Resource, UI Source, wheel 정적 Asset, Runtime Data 경로를 서로 분리했다.
+- Ruff, strict mypy, Pytest Architecture/Unit/Smoke Test와 깨끗한 Python 3.11 wheel 설치 검증을 통과했다.
 
 ## 완료 조건
 
@@ -73,5 +81,4 @@ Pangi를 Greenfield Python Package로 시작하고 Domain, Application, Adapter,
 ## 미결정 사항
 
 - 최종 PyPI 또는 Private Registry 배포 이름
-- Lint/Type Checker의 최종 선택과 Version
 - Public API의 1.0 안정화 시점

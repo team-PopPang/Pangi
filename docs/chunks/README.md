@@ -28,7 +28,7 @@
 
 | WBS | Work Package | 요약 | 선행 작업 | 상태 |
 | --- | --- | --- | --- | --- |
-| 01 | [Foundation과 Package 경계](01-foundation-and-package-boundaries.md) | 저장소 Skeleton, Dependency 방향과 Public API 경계를 고정한다. | 없음 | 예정 |
+| 01 | [Foundation과 Package 경계](01-foundation-and-package-boundaries.md) | 저장소 Skeleton, Dependency 방향과 Public API 경계를 고정한다. | 없음 | 완료 |
 | 02 | [설정·Runtime Data·CLI](02-configuration-runtime-data-and-cli.md) | 설정, 데이터 경로, `init/start/status/doctor`의 첫 실행 경로를 만든다. | 01 | 예정 |
 | 03 | [SQLite 영속성과 Migration](03-sqlite-persistence-and-migrations.md) | 단일 Process SQLite Profile, Schema, Repository와 Migration을 만든다. | 01, 02 | 예정 |
 | 04 | [Web/API Shell과 인증](04-web-api-shell-and-auth.md) | FastAPI, Admin SPA Shell, Bootstrap 인증과 공통 API 계약을 만든다. | 01, 02, 03 | 예정 |

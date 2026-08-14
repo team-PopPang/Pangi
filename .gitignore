@@ -1,2 +1,20 @@
 # macOS
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.venv-*/
+build/
+dist/
+
+# Pangi runtime data
+.pangi/
+pangi-data/
+*.pangi.sqlite3
+*.pangi.sqlite3-*
