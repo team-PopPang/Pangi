@@ -9,6 +9,7 @@ from pangi.adapters.inbound.cli import CliDependencies, create_app
 from pangi.adapters.inbound.web import create_web_app
 from pangi.adapters.outbound.initialization import FileSystemInitializer
 from pangi.adapters.outbound.persistence.sqlite.factory import (
+    build_auth_sessions,
     build_bootstrap_admin,
     build_bootstrap_admin_for_cli,
     build_migration_admin,
@@ -43,6 +44,7 @@ def create_asgi_app(paths: RuntimePaths, config: PangiConfig) -> FastAPI:
         runtime_backend=database,
         readiness_probe=LocalRuntimeReadinessProbe(database),
         bootstrap_admin=build_bootstrap_admin(database, config),
+        auth_sessions=build_auth_sessions(database, config),
         static_root=static_root,
     )
 

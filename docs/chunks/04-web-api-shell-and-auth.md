@@ -40,7 +40,10 @@ FastAPI와 React Admin Shell을 같은 Origin으로 제공하고, Bootstrap Admi
 ## 기술 설계
 
 - API와 Dashboard는 같은 Origin을 기본으로 하고 CORS는 비활성화한다.
-- Session Cookie는 HttpOnly/Secure/SameSite=Lax를 사용하고 상태 변경 API는 CSRF Token을 요구한다.
+- HTTPS Session Cookie는 `__Host-` Prefix, HttpOnly/Secure/SameSite=Lax를 사용한다. 기본 Loopback HTTP 설치에서는 Host-only·HttpOnly·SameSite=Lax Cookie 예외를 사용하고 Loopback이 아닌 평문 HTTP 로그인을 거부한다.
+- Session의 기본 절대 만료는 12시간이다. 생성·마지막 회전 후 30분이 지나면 명시적 회전을 권장하며 회전 시 Session·CSRF Token을 함께 바꾸고 이전 Token을 즉시 폐기한다.
+- 상태 변경 API는 동일 출처, CSRF Cookie와 `X-CSRF-Token`을 함께 검증한다.
+- Local Login은 Socket Peer IP 전체와 정규화 Local ID 조합 각각에 기본 5회/5분 실패 제한을 적용하며 신뢰 프록시 설정 전에는 Forwarded Header를 사용하지 않는다.
 - Auth 우선순위는 Slack OIDC→신뢰된 Reverse Proxy Header→일회용 Local Bootstrap이다.
 - 첫 Admin 생성 Transaction이 Bootstrap Token을 즉시 폐기한다.
 - WBS-03 Unit of Work 위에서 `users`, `auth_identities`, `auth_sessions`, `bootstrap_grants`, `api_idempotency_records`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
@@ -65,8 +68,9 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 
 - [x] ASGI App Factory와 Composition Root를 만든다.
 - [x] Request ID와 Bootstrap API용 최소 Error Envelope를 구현한다.
-- [ ] 전체 오류 변환, 인증, CSRF와 Idempotency Middleware를 구현한다.
-- [ ] Session Store와 Role 기반 API Dependency를 구현한다.
+- [x] 전체 오류 변환, Local 인증과 CSRF 경계를 구현한다.
+- [ ] 실제 기능 Mutation과 연결된 Idempotency Middleware를 구현한다.
+- [x] Session Store와 Role 기반 API Dependency를 구현한다.
 - [x] 인증 Core Migration과 Local Bootstrap Admin 생성·Token 폐기를 구현한다.
 - [ ] Slack/Reverse Proxy OIDC Adapter Protocol을 정의한다.
 - [x] 최소 React/Vite SPA Shell과 Visual Token 기반을 구현한다.
@@ -79,8 +83,9 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 ## 검증 체크리스트
 
 - [x] Bootstrap Token 재사용, 회전된 Token과 만료를 동일한 안전 오류로 거부하는지 확인한다.
-- [ ] 역할별 API 허용/거부와 Resource Owner 검사를 테스트한다.
-- [ ] CSRF 없는 상태 변경 요청을 거부하는지 확인한다.
+- [x] 역할별 API Dependency의 허용/거부를 테스트한다.
+- [ ] 실제 기능 Use Case에서 Resource Owner 검사를 테스트한다.
+- [x] CSRF 또는 동일 출처 근거가 없는 상태 변경 요청을 거부하는지 확인한다.
 - [ ] 같은 Idempotency Key 요청이 중복 Mutation을 만들지 않는지 확인한다.
 - [x] Bootstrap Error Envelope에 Stack Trace, 내부 Path와 Secret이 없는지 검사한다.
 - [ ] OpenAPI와 Frontend Type Drift Test를 실행한다.
@@ -109,6 +114,19 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 - Migration v1→v2, DB 제약, Grant 발급·회전·만료·재사용, Transaction Rollback, API 오류와 원문 Secret 비저장을 자동 테스트로 고정했다.
 - 실제 Login, Session Cookie, CSRF, Role Dependency와 외부 OIDC가 남아 있으므로 WBS-04 상태는 `진행 중`이다.
 
+## 3차 구현 결과
+
+- Local Identity의 Argon2id Password를 검증하고 존재하지 않는 사용자도 Dummy Hash를 검증해 응답 차이를 줄였다. 잘못된 사용자·비밀번호·비활성 사용자는 같은 `invalid_credentials` 오류를 반환한다.
+- 단일 Process 기준 로그인 실패를 Socket Peer IP 전체와 정규화 Local ID 조합 각각 기본 5회/5분으로 제한하고 제한 상태에서는 비싼 Password 검증 전에 거부한다.
+- 기존 `auth_sessions`에 Session·CSRF Token의 SHA-256 Hash만 저장하고 생성, 기본 12시간 만료, 명시적 회전과 폐기를 WBS-03 Unit of Work로 직렬화했다.
+- `POST /api/v1/auth/login`, `GET /api/v1/auth/session`, `POST /api/v1/auth/session/rotate`, `POST /api/v1/auth/logout`을 추가했다. 회전은 절대 만료를 연장하지 않고 두 Token을 함께 교체하며 이전 Token을 즉시 무효화한다.
+- HTTPS에서는 `__Host-` Secure Cookie를 사용한다. 기본 `127.0.0.1` HTTP에서는 Host-only Cookie 예외와 CSRF·동일 출처 검증을 유지하고 Loopback이 아닌 평문 HTTP 로그인을 거부한다.
+- API 404·405·422, 인증·권한 오류와 예기치 않은 500을 Request ID가 있는 공통 Error Envelope로 변환하고 예상하지 못한 오류는 Secret 없이 Request ID로 기록한다.
+- `member`, `skill_author`, `admin`, `system`을 검사하는 FastAPI Dependency 기반을 추가하고 비활성 사용자는 기존 Session도 사용할 수 없게 했다.
+- `/login` UI, 인증된 Shell Gate, 회전 권장 Session의 단일 회전 요청과 Logout을 연결했다. Bootstrap 성공 화면은 실제 Login 경로를 안내한다.
+- Session 생성·만료·회전·폐기, 비활성 사용자, 로그인 제한, Cookie 속성, CSRF·Origin, 역할 Dependency와 Error Envelope를 자동 테스트로 고정했다.
+- 실제 기능 API와 연결할 Idempotency·Cursor, Resource Owner 검사, Slack/Reverse Proxy OIDC와 전체 Admin Layout은 후속 범위이므로 WBS-04 상태는 `진행 중`이다.
+
 ## 완료 조건
 
 - `pangi start`가 빈 Admin Shell과 Live/Ready Endpoint를 제공한다.
@@ -118,6 +136,5 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 
 ## 미결정 사항
 
-- 기본 Session 만료 시간과 Rotation 주기
 - Reverse Proxy OIDC Header의 최초 지원 목록
 - Admin Shell의 Browser 지원 범위

@@ -28,6 +28,12 @@ class IdentityProvider(StrEnum):
     REVERSE_PROXY = "reverse_proxy"
 
 
+class SessionState(StrEnum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+
+
 @dataclass(frozen=True, slots=True)
 class BootstrapGrant:
     id: str
@@ -43,6 +49,16 @@ class LocalAdmin:
     subject: str
     display_name: str
     password_hash: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AuthSession:
+    id: str
+    user_id: str
+    token_hash: str
+    csrf_hash: str
+    expires_at: datetime
     created_at: datetime
 
 
