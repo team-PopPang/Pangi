@@ -20,6 +20,15 @@
 
 - [Pangi 재설계 구현 설계서](../pangi-rebuild-implementation-design.md): Section 7.3~7.6, 8.1, 8.4, 14.3~14.4, 17.4, 22.3, 23
 
+## 내부 구현 단계
+
+WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현한다.
+
+1. **Run Core 계약과 Schema**: Principal, RunRequest, Run/Step/Event, 상태 전이와 기능 Table Migration을 고정한다.
+2. **Run 생성과 조회**: Run·첫 Event 원자 저장, Idempotency, Cursor와 Owner 검사를 구현한다.
+3. **영속 Queue와 복구**: Worker Claim, Semaphore, Lease, Heartbeat, Cancel과 Startup Recovery를 구현한다.
+4. **Run API와 Event 전달**: 상세·검색·취소 API, SSE 재연결과 Queue 운영 Metric을 연결한다.
+
 ## 범위
 
 - `Principal`, `RunRequest`, Run/Step/Event Domain Model
@@ -41,18 +50,21 @@
 - `runs.state=queued`를 Queue로 사용하고 요청 저장 Transaction이 첫 Event를 함께 기록한다.
 - WBS-03 Unit of Work 위에서 `runs`, `run_steps`, `run_events`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
 - `api_idempotency_records`를 같은 Unit of Work에 두고 `principal_id + route_key + idempotency_key`로 Run 생성 Replay를 판별한다. 인증·Bootstrap Lifecycle API에는 적용하지 않는다.
+- `runs.idempotency_key`는 추적용 값이며 전역 Unique로 만들지 않는다. Replay 유일성은 `api_idempotency_records`의 복합 Key만 소유한다.
+- Restart 뒤 Queue가 실행 입력을 복구할 수 있도록 정규화된 Request Text와 Attachment 참조를 저장한다. Slack Event 원본 JSON, Attachment 본문, Provider Prompt와 Tool Result 원문은 저장하지 않는다.
 - Run 검색은 Stable Sort Key를 포함한 불투명 Cursor를 사용하고 Run 상세·취소·Event 조회는 역할 검사 뒤 Owner 조건을 다시 검사한다.
 - Worker는 `BEGIN IMMEDIATE`에서 가장 오래된 Queue Row를 `running`으로 Claim하고 Worker ID, Lease, Heartbeat를 저장한다.
 - Run 상태 전이는 Domain Policy가 허용한 Edge만 사용하고 Repository Update에 Expected Revision을 포함한다.
-- Required Step 실패는 Run 실패, Optional Step 실패는 Warning을 가진 Partial Result로 구분한다.
+- Required Step 실패는 Run 실패, Optional Step 실패는 별도 `partial` Run 상태를 만들지 않고 Warning을 가진 `completed` 결과로 구분한다.
 - 중단된 Non-idempotent Step은 자동 재실행하지 않고 실패로 종료한다.
 - Event는 `run_id + index`로 순서를 보장하고 Public/Admin/Internal Visibility를 적용한다.
 - Event Attribute는 구조화 Summary와 Fingerprint만 저장하고 Chain-of-Thought, Prompt와 Tool Result 원문을 금지한다.
 
 ## 구현 체크리스트
 
-- [ ] Principal, RunRequest, Run, RunStep과 RunEvent 계약을 정의한다.
-- [ ] Run/Step State Machine과 오류 코드를 구현한다.
+- [x] Principal, RunRequest, Run, RunStep과 RunEvent 계약을 정의한다.
+- [x] Run/Step State Machine과 오류 코드를 구현한다.
+- [x] Run Core Table과 Idempotency Record Migration·제약을 구현한다.
 - [ ] Run 생성과 첫 Event의 원자적 저장을 구현한다.
 - [ ] `api_idempotency_records`와 Run 생성 Idempotency를 같은 Transaction에 연결한다.
 - [ ] Run 검색의 Stable Cursor 계약을 구현한다.
@@ -66,7 +78,7 @@
 
 ## 검증 체크리스트
 
-- [ ] 모든 허용/금지 상태 전이를 Unit Test로 고정한다.
+- [x] 모든 허용/금지 상태 전이를 Unit Test로 고정한다.
 - [ ] 동시 Worker Claim에서 같은 Run이 한 번만 실행되는지 확인한다.
 - [ ] Process 중단 뒤 Queue와 Lease Recovery를 Integration Test로 확인한다.
 - [ ] Non-idempotent Step이 자동 재실행되지 않는지 확인한다.
@@ -76,6 +88,17 @@
 - [ ] Event Index가 중복되거나 역전되지 않는지 확인한다.
 - [ ] SSE 재연결에서 Last Event 이후 항목만 전달되는지 확인한다.
 - [ ] Event와 API에 Chain-of-Thought/원문 Prompt/Secret이 없는지 검사한다.
+
+## 1차 구현 결과
+
+- Framework 의존성이 없는 불변 `Principal`, `AttachmentRef`, `RunRequest`, `Run`, `RunStep`, `RunEvent` 계약을 추가했다.
+- Embedding Client가 사용할 `AttachmentRef`, `Principal`, `RunRequest`, `RunEvent`를 Package Root Public API에 노출했다.
+- Run과 Step의 허용 Edge를 명시적 State Machine으로 고정하고 잘못된 전이를 안정적인 오류 코드로 거부한다.
+- Required Step 실패는 `failed`, Optional Step 실패는 Warning이 있는 `completed` 결과로 구분한다.
+- `0003_run_core.sql`이 `runs`, `run_steps`, `run_events`, `api_idempotency_records`와 Queue·Owner·Event 조회 Index를 추가한다.
+- Idempotency Replay는 `principal_id + route_key + idempotency_key` 복합 Key가 소유하고 `runs.idempotency_key`는 전역 Unique로 만들지 않았다.
+- Event Attribute는 Chain-of-Thought, Provider Prompt, Slack 원본 Event, Attachment 본문과 Tool Result 원문용 Key를 거부한다.
+- 실제 Run 저장 Use Case, Worker와 API/SSE가 남아 있으므로 WBS-05 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 
