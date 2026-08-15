@@ -887,6 +887,12 @@ class ModelEgressPolicy(BaseModel):
 
 Model 선택은 비용·속도만으로 결정하지 않는다. 데이터 분류를 처리할 수 없는 Provider는 후보에서 제거한다. 후보가 없으면 다른 Provider로 임의 Fallback하지 않고 `model_policy_denied`로 실패한다.
 
+Data Class 민감도는 `public < internal < confidential < personal < restricted` 순서로 고정한다. Policy Engine은 입력 Source의 전체 Class 집합을 보존하면서 가장 높은 Class도 계산한다. 후보 Profile은 전체 Class와 Source Kind를 모두 지원해야 한다.
+
+하나의 논리 Profile에 후보가 여러 개라면 각 후보에 서로 다른 `routing_priority`를 명시한다. 중복 Profile ID나 Priority는 숨은 Tie-break 없이 실패 폐쇄한다. Region Allowlist가 비어 있으면 Region이 없는 Profile만 허용하고, Region 값이 있으면 Allowlist에 정확히 포함된 후보만 허용한다. 비용·지연 기반 자동 우선순위는 운영 기본값을 정하기 전까지 사용하지 않는다.
+
+허용된 Model 입력도 중앙 Redaction을 항상 통과한다. Egress Policy의 `require_redaction`은 최소 요구를 표현하며 Redaction을 끄는 Switch로 사용하지 않는다. Provider Adapter에는 Redaction 완료 Content와 안전한 Fingerprint만 전달한다.
+
 Admin Dashboard의 Model Policy 화면은 다음을 제공한다.
 
 - Profile별 Provider, Model, Region, 목적

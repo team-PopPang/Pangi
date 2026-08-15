@@ -21,6 +21,15 @@ Root, Subagent, Skill, Eval이 사용하는 모델 호출을 Provider Adapter �
 
 - [Pangi 재설계 구현 설계서](../pangi-rebuild-implementation-design.md): Section 0.1, 8.5, 18.3~18.4, 21.1, 22.1, 23.2, 26
 
+## 내부 구현 단계
+
+WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현한다. 단계 수와 범위는 고정값이 아니다. 새로운 Provider 경계나 별도 검증 Gate가 필요해 분해를 구체적으로 바꿔야 하면 영향 범위를 정리해 사용자 또는 제품 책임자의 승인을 받은 뒤 조정한다.
+
+1. **Model 호출 계약과 Egress Policy 결정 경계(WBS-07.1)**: Model 요청·응답·오류, Versioned Profile·Egress Policy, Data Class 합성, 후보 필터와 Redaction 선행 실행 경계를 구현한다.
+2. **선택 설치 Provider Adapter와 Retry 계약(WBS-07.2)**: OpenAI·Bedrock 선택 설치 Skeleton, 구조화 출력 검증과 Transport Retry 경계를 구현한다.
+3. **Model Policy·Invocation 영속화와 계측(WBS-07.3)**: 정책·호출 Migration, Logical Call·Provider Request·Token·Duration과 안전한 결정 Event를 구현한다.
+4. **Model Policy 관리와 영향 조회(WBS-07.4)**: 관리 API·Dashboard 기반, 안전한 Diff·Audit와 WBS-15 Eval 활성화 Gate 연동점을 구현한다.
+
 ## 범위
 
 - Model Provider Port와 OpenAI/Bedrock 선택 Adapter 기반
@@ -39,8 +48,12 @@ Root, Subagent, Skill, Eval이 사용하는 모델 호출을 Provider Adapter �
 ## 기술 설계
 
 - 모든 호출자는 목적(`orchestration|subagent|skill|eval|red_team`)과 Source Kind를 명시한 Model Request를 만든다.
-- Policy Engine은 입력 Source의 가장 높은 Data Class를 합성하고 후보 Provider를 Allowlist로 줄인다.
+- Data Class 민감도는 `public < internal < confidential < personal < restricted` 순서로 고정한다. Policy Engine은 모든 입력 Source의 Class 집합과 가장 높은 Class를 함께 계산한다.
+- 후보 Profile은 요청에 포함된 모든 Data Class와 Source Kind를 지원해야 한다. 하나라도 허용하지 않으면 후보에서 제거한다.
+- 하나의 논리 Profile은 명시적인 `routing_priority`가 서로 다른 물리 후보를 제공한다. 중복 ID나 우선순위가 있으면 숨은 Tie-break를 적용하지 않고 실패 폐쇄한다.
 - Region, Zero-retention, Raw Content 허용 여부와 Redaction 요구를 검사한 뒤 Adapter를 선택한다.
+- Region Allowlist가 비어 있으면 Region이 없는 Profile만 허용한다. Region 값이 있으면 Allowlist에 정확히 포함돼야 한다.
+- 허용 요청도 중앙 Redaction을 항상 통과한다. `require_redaction`은 정책의 최소 요구를 나타내며 Redaction 우회를 허용하는 Switch가 아니다.
 - 허용 후보가 없으면 임의 Provider Fallback 없이 `model_policy_denied`로 실패한다.
 - 원문 Prompt 대신 Policy/Fingerprint/Data Class/Redaction Count/Token/Duration을 저장한다.
 - WBS-03 Unit of Work 위에서 `model_policies`, `model_invocations`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
@@ -49,10 +62,10 @@ Root, Subagent, Skill, Eval이 사용하는 모델 호출을 Provider Adapter �
 
 ## 구현 체크리스트
 
-- [ ] Provider Port, 구조화 출력 Request/Response와 Error 계약을 정의한다.
-- [ ] Model Profile과 Versioned Egress Policy Domain을 구현한다.
-- [ ] Source Kind별 Data Class 합성과 Redaction Pipeline을 구현한다.
-- [ ] Provider/Model/Region/Purpose/Retention 후보 필터를 구현한다.
+- [x] Provider Port, 구조화 출력 Request/Response와 Error 계약을 정의한다.
+- [x] Model Profile과 Versioned Egress Policy Domain을 구현한다.
+- [x] Source Kind별 Data Class 합성과 Redaction Pipeline을 구현한다.
+- [x] Provider/Model/Region/Purpose/Retention 후보 필터를 구현한다.
 - [ ] OpenAI와 Bedrock Adapter의 선택 설치 Skeleton을 만든다.
 - [ ] Logical Call, Provider Request, Token, Duration과 정책 결정 Event를 기록한다.
 - [ ] Policy 영향 분석, Eval 실행과 활성화 API를 구현한다.
@@ -60,12 +73,25 @@ Root, Subagent, Skill, Eval이 사용하는 모델 호출을 Provider Adapter �
 
 ## 검증 체크리스트
 
-- [ ] Data Class/Provider/Region 조합별 Allow/Deny Matrix를 Unit Test로 고정한다.
-- [ ] Redaction 전 금지 Field가 Provider Adapter에 도달하지 않는지 확인한다.
-- [ ] 허용 후보가 없을 때 Provider 호출이 0건인지 확인한다.
+- [x] Data Class/Provider/Region 조합별 Allow/Deny Matrix를 Unit Test로 고정한다.
+- [x] Redaction 전 금지 Field가 Provider Adapter에 도달하지 않는지 확인한다.
+- [x] 허용 후보가 없을 때 Provider 호출이 0건인지 확인한다.
 - [ ] Network Retry와 Logical Call 수가 분리되는지 Contract Test를 실행한다.
 - [ ] Provider가 잘못된 구조화 출력을 반환할 때 안전하게 실패하는지 확인한다.
 - [ ] Policy 변경이 영향 Eval 없이 활성화되지 않는지 확인한다.
+
+## 1차 구현 결과
+
+- Framework-free `DataClass`, Model Purpose·Retention과 정책 Stage·Outcome·Error Code를 추가했다.
+- Data Class 민감도 순서를 고정하고 여러 Source의 전체 Class 집합과 최고 등급을 함께 계산한다. Candidate는 요청의 모든 Class와 Source Kind를 지원해야 한다.
+- `ModelProfile`은 Provider, Model, Region, 지원 Class·Source·Purpose, Retention, Raw Content와 명시적 Priority를 Versioned SHA-256 Fingerprint에 포함한다.
+- `ModelEgressPolicy`는 허용 Provider·Model·Region·Class·Source·Purpose와 Redaction·Zero-retention·Raw Content 조건을 Canonical Fingerprint로 고정한다.
+- Profile과 Egress Policy를 기존 `PolicyFingerprintReference`로 변환해 WBS-15의 영향 Snapshot에 포함할 수 있다.
+- `ModelPolicyService`는 Policy를 먼저 확인한 뒤 후보를 필터링한다. 후보가 없거나 Candidate ID·Priority가 중복되면 `model_policy_denied`로 실패하고 Provider를 호출하지 않는다.
+- 허용된 모든 Source는 기존 중앙 Redaction을 통과한다. Provider Port에는 Redaction 완료 Content, 안전한 Input Fingerprint와 정책 결정 Metadata만 전달한다.
+- Prompt, Output Schema와 구조화 Provider Output은 객체 표현과 오류에서 제외한다. 실제 OpenAI·Bedrock SDK, SQLite, HTTP와 UI 계약은 변경하지 않았다.
+- Provider·Model·Region·Purpose·Source Kind·Data Class·Retention·Raw Content Matrix, Region 없는 Profile, 우선순위 충돌, Secret 비노출과 Provider 호출 0건을 Unit·Contract Test로 고정했다.
+- Adapter, Retry·사용량 계측, 영속화와 관리 API가 남아 있으므로 WBS-07 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 
