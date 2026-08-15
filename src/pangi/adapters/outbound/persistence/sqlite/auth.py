@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
+from pangi.adapters.outbound.persistence.sqlite.audit import SqliteAuditWriter
 from pangi.adapters.outbound.persistence.sqlite.connection import fetch_one
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
+from pangi.application.contracts.audit import AuditEventDraft
 from pangi.application.contracts.bootstrap import (
     BootstrapAdminResult,
     BootstrapIssueStatus,
@@ -19,6 +21,7 @@ from pangi.application.ports.bootstrap_admin import (
     BootstrapIdentityConflictError,
     InvalidBootstrapGrantError,
 )
+from pangi.domain.audit import AuditOutcome
 from pangi.domain.auth import BootstrapGrant, IdentityProvider, LocalAdmin, UserRole, UserStatus
 
 _INVALID_GRANT_MESSAGE = "Bootstrap Grant is invalid or unavailable"
@@ -27,8 +30,9 @@ _INVALID_GRANT_MESSAGE = "Bootstrap Grant is invalid or unavailable"
 class SqliteBootstrapStore:
     """Own Bootstrap writes on the runtime's serialized unit of work."""
 
-    def __init__(self, database: SqliteDatabase) -> None:
+    def __init__(self, database: SqliteDatabase, audit_writer: SqliteAuditWriter) -> None:
         self._database = database
+        self._audit_writer = audit_writer
 
     @asynccontextmanager
     async def _runtime(self) -> AsyncIterator[None]:
@@ -80,6 +84,29 @@ class SqliteBootstrapStore:
                     grant.token_hash,
                     grant.expires_at.astimezone(UTC).isoformat(),
                     grant.created_at.astimezone(UTC).isoformat(),
+                ),
+            )
+            await self._audit_writer.insert(
+                unit_of_work.connection,
+                AuditEventDraft(
+                    actor_id="system.bootstrap",
+                    action=(
+                        "bootstrap.grant_rotated"
+                        if existing is not None
+                        else "bootstrap.grant_issued"
+                    ),
+                    resource_type="bootstrap_grant",
+                    resource_id=grant.id,
+                    outcome=AuditOutcome.SUCCEEDED,
+                    created_at=grant.created_at,
+                    before_summary=(
+                        {"state": "open"} if existing is not None else None
+                    ),
+                    after_summary={
+                        "state": "open",
+                        "expires_at": grant.expires_at.astimezone(UTC).isoformat(),
+                    },
+                    details={"replaced_open_grant": existing is not None},
                 ),
             )
             await unit_of_work.commit()
@@ -150,6 +177,23 @@ class SqliteBootstrapStore:
                         raise InvalidBootstrapGrantError(_INVALID_GRANT_MESSAGE)
                 finally:
                     await cursor.close()
+                await self._audit_writer.insert(
+                    unit_of_work.connection,
+                    AuditEventDraft(
+                        actor_id="system.bootstrap",
+                        action="bootstrap.admin_created",
+                        resource_type="user",
+                        resource_id=admin.user_id,
+                        outcome=AuditOutcome.SUCCEEDED,
+                        created_at=now,
+                        after_summary={
+                            "role": UserRole.ADMIN.value,
+                            "status": UserStatus.ACTIVE.value,
+                            "identity_provider": IdentityProvider.LOCAL.value,
+                        },
+                        details={"bootstrap_grant_consumed": True},
+                    ),
+                )
                 await unit_of_work.commit()
         except aiosqlite.IntegrityError as error:
             raise BootstrapIdentityConflictError(

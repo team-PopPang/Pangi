@@ -7,6 +7,7 @@ from importlib import resources
 from pathlib import Path
 
 from pangi.adapters.inbound.web import create_web_app
+from pangi.application.contracts.audit import AuditListPage, AuditListQuery
 from pangi.application.contracts.auth import (
     AuthenticatedPrincipal,
     IssuedSession,
@@ -51,6 +52,17 @@ class _SchemaOnlyBootstrapAdmin:
         password: str,
     ) -> BootstrapAdminResult:
         del token, local_id, display_name, password
+        raise _schema_only_dependency()
+
+
+class _SchemaOnlyAuditOperations:
+    async def list_events(
+        self,
+        *,
+        actor: AuthenticatedPrincipal,
+        query: AuditListQuery,
+    ) -> AuditListPage:
+        del actor, query
         raise _schema_only_dependency()
 
 
@@ -143,6 +155,7 @@ def generate_openapi_document() -> dict[str, object]:
     app = create_web_app(
         runtime_backend=_SchemaOnlyRuntime(),
         readiness_probe=_SchemaOnlyReadiness(),
+        audit_operations=_SchemaOnlyAuditOperations(),
         bootstrap_admin=_SchemaOnlyBootstrapAdmin(),
         auth_sessions=_SchemaOnlyAuthSessions(),
         run_operations=_SchemaOnlyRunOperations(),

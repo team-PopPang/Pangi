@@ -11,6 +11,7 @@ import pytest
 from pangi import PangiConfig
 from pangi.adapters.outbound.initialization import FileSystemInitializer
 from pangi.adapters.outbound.passwords import Argon2idPasswordHasher
+from pangi.adapters.outbound.persistence.sqlite.audit import SqliteAuditWriter
 from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
@@ -19,7 +20,12 @@ from pangi.application.ports.bootstrap_admin import (
     BootstrapIdentityConflictError,
     InvalidBootstrapGrantError,
 )
+from pangi.application.services.audit import core_audit_redaction_service
 from pangi.application.services.bootstrap_admin import BootstrapAdminService
+
+
+def _audit_writer() -> SqliteAuditWriter:
+    return SqliteAuditWriter(core_audit_redaction_service())
 
 
 def _service(
@@ -39,7 +45,7 @@ def _service(
     initializer.apply(initializer.plan(paths), config.to_toml())
     database = SqliteDatabase(paths, config.storage)
     service = BootstrapAdminService(
-        SqliteBootstrapStore(database),
+        SqliteBootstrapStore(database, _audit_writer()),
         Argon2idPasswordHasher(),
         public_base_url="http://127.0.0.1:8787",
         grant_ttl_minutes=30,
@@ -163,7 +169,7 @@ def test_expired_grant_is_rejected_without_revealing_its_state(tmp_path: Path) -
     initializer = FileSystemInitializer()
     initializer.apply(initializer.plan(paths), config.to_toml())
     service = BootstrapAdminService(
-        SqliteBootstrapStore(SqliteDatabase(paths, config.storage)),
+        SqliteBootstrapStore(SqliteDatabase(paths, config.storage), _audit_writer()),
         Argon2idPasswordHasher(),
         public_base_url="http://127.0.0.1:8787",
         grant_ttl_minutes=30,

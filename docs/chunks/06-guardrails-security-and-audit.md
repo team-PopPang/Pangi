@@ -85,6 +85,12 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 외부 Text는 Source/Trust Metadata를 가진 Envelope로 감싸며 내부 지시로 승격하지 않는다.
 - Audit은 Append-only이며 원문 Token/Prompt/Tool Result 대신 Version, Fingerprint와 Redacted Diff를 저장한다.
 - WBS-03 Unit of Work 위에서 `audit_events`의 Migration, Append-only 제약과 Repository를 이 WBS가 소유한다.
+- `core-audit-v1`은 Actor·Action·Resource·Outcome, 이전·이후 Summary와 Details를 CRLF/NFC 정규화하고 기존 `core-secret-v1`으로 Redact한다. 안전한 각 Summary와 전체 변경에는 Canonical SHA-256 Fingerprint를 남긴다.
+- Audit Action은 후속 WBS가 확장할 수 있는 검증된 Namespace 문자열을 사용한다. Actor는 사용자 Lifecycle과 System 작업을 함께 기록할 수 있도록 `users` Foreign Key에 묶지 않는다.
+- 모든 Audit Insert는 하나의 최종 SQLite Writer를 사용한다. 상태 변경을 동반하는 Action은 같은 Unit of Work에 Audit Draft를 전달하며 둘 중 하나가 실패하면 전체를 Rollback한다.
+- `audit_events`는 Update를 항상 거부하고 365일 Retention 이전 Delete를 차단한다. Table 소유 WBS는 만료 Batch Purge 경계만 제공하고 WBS-19가 실제 Retention Job을 조율한다.
+- `GET /api/v1/audit-events`는 활성 Admin만 호출한다. Actor·Action·Resource·Outcome·기간 Filter와 Filter Scope에 묶인 Keyset Cursor를 사용한다.
+- 현재 구현된 Bootstrap Grant 발급·회전, 최초 Admin 생성과 Migration 적용을 먼저 Audit한다. 미래 Tool Policy·Skill·Memory·Schedule·API Key·IP Policy Action은 각 소유 WBS가 같은 Writer에 연결한다.
 - Security Header, Session Rotation과 Localhost 기본 Bind는 Web Middleware에서 강제한다.
 
 ## 구현 체크리스트
@@ -96,8 +102,8 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Output Sanitizer, Mention/Link Policy와 Secret Redaction을 구현한다.
 - [x] External Data Envelope와 Control Character/HTML 정규화를 구현한다.
 - [x] Log와 Run Event의 중앙 Redaction Filter·최종 Writer를 구현한다.
-- [ ] Audit Event Port, SQLite Adapter와 관리자 조회 API 기반을 만든다.
-- [ ] CSP, Frame, Content-Type, Same-origin과 기본 Bind 정책을 적용한다.
+- [x] Audit Event Port, SQLite Adapter와 관리자 조회 API 기반을 만든다.
+- [x] CSP, Frame, Content-Type, Same-origin과 기본 Bind 정책을 적용한다.
 - [ ] Guardrail/Audit 변경을 Eval 영향 대상으로 표시하는 Fingerprint를 만든다.
 
 ## 검증 체크리스트
@@ -108,7 +114,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [ ] 외부 문서의 지시가 System/Tool Policy를 바꾸지 못하는지 Contract Test를 실행한다.
 - [ ] 모든 필수 관리 Action이 Actor와 안전한 Diff를 Audit하는지 확인한다.
 - [x] Log와 Run Event 저장·JSON·SSE에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
-- [ ] Audit Event에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
+- [x] Audit Event에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
 
 ## 1차 구현 결과
 
@@ -168,7 +174,19 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - `SqliteRunEventWriter`를 유일한 Event Insert 경계로 만들었다. 첫 `run.received`, Queue 전이·복구 Event와 범용 Append가 저장 직전에 같은 Redaction을 통과한다.
 - Event Redaction 실패는 기존 SQLite Unit of Work를 그대로 Rollback한다. 동시 Index와 Visibility 계약은 유지하고 JSON API와 SSE는 Redaction 완료 Event만 전달한다.
 - 정책 결정성·정규화·크기·Cycle·금지 Field, Logging Argument·Extra·Exception·Fallback, SQLite 전체 쓰기 경로와 JSON·SSE 비노출을 Unit·Architecture·Integration Test로 고정했다.
-- JSON Formatter, Metric, Trace와 OpenTelemetry는 WBS-17에 남겼다. 기존 DB Event를 일괄 재작성하거나 Schema·OpenAPI를 변경하지 않았다. 다음 구현 단위는 WBS-06.5 Append-only Audit이다.
+- JSON Formatter, Metric, Trace와 OpenTelemetry는 WBS-17에 남겼다. 기존 DB Event를 일괄 재작성하거나 Schema·OpenAPI를 변경하지 않았다.
+
+## 5차 구현 결과
+
+- Framework 의존성이 없는 `AuditEvent`, `AuditOutcome`, Versioned `AuditPolicy`, 안전한 Draft·Query·Cursor 계약을 추가했다.
+- `core-audit-v1`이 이전·이후 Summary와 Details의 CRLF/NFC, JSON 호환 형태, 크기·깊이·항목 수를 검증한 뒤 기존 `core-secret-v1`으로 Redact한다. 안전한 각 Summary, Details와 전체 변경에 Canonical SHA-256 Fingerprint를 남긴다.
+- `0004_audit_events.sql`이 `audit_events` Table과 Actor·Action·Resource·Outcome·시간 조회 Index를 추가했다. Update를 항상 거부하고 365일이 지나지 않은 Event Delete를 차단한다.
+- 단일 `SqliteAuditWriter`가 모든 Audit Insert를 저장 직전에 Redact한다. 별도 `SqliteAuditStore`는 관리자 조회와 WBS-19가 사용할 만료 Batch Purge만 제공한다.
+- Bootstrap Grant 발급·회전, 최초 Admin 생성과 Migration 적용을 현재 관리 Action으로 연결했다. No-op은 Event를 만들지 않으며 상태 변경과 Audit 실패는 같은 Transaction에서 Rollback한다.
+- Audit Actor는 `users` Foreign Key에 묶지 않는다. `system.bootstrap`, `system.migration` 같은 System Actor와 사용자 Lifecycle 이후의 과거 Event를 보존한다.
+- 활성 Admin 전용 `GET /api/v1/audit-events`를 추가했다. Actor·Action·Resource·Outcome·기간 Filter와 Filter·Admin Scope에 묶인 `(created_at DESC, id DESC)` Cursor를 지원한다.
+- OpenAPI Artifact와 Frontend 생성 Type을 갱신하고 정책 결정성·Secret 비노출·Append-only·Retention·원자성·권한·Cursor를 Unit·Integration·Contract·Architecture Test로 고정했다.
+- React Audit Log 화면과 실제 Retention Job은 후속 WBS가 소유한다. 아직 구현되지 않은 필수 관리 Action의 연결도 각 기능 WBS가 맡으므로 WBS-06 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 

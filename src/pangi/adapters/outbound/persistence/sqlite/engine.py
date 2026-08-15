@@ -9,6 +9,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from pangi.adapters.outbound.persistence.sqlite.audit import SqliteAuditWriter
 from pangi.adapters.outbound.persistence.sqlite.connection import (
     SqliteConnectionFactory,
     fetch_all,
@@ -29,6 +30,7 @@ from pangi.adapters.outbound.persistence.sqlite.snapshots import SqliteSnapshotS
 from pangi.adapters.outbound.persistence.sqlite.write_coordinator import (
     SqliteWriteCoordinator,
 )
+from pangi.application.contracts.audit import AuditEventDraft
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.snapshots import SnapshotKind
 from pangi.application.contracts.storage import (
@@ -36,7 +38,9 @@ from pangi.application.contracts.storage import (
     MigrationDescriptor,
     MigrationPlan,
 )
+from pangi.application.services.audit import core_audit_redaction_service
 from pangi.config import StorageConfig
+from pangi.domain.audit import AuditOutcome
 
 Now = Callable[[], datetime]
 
@@ -71,6 +75,7 @@ class SqliteMigrationAdmin:
         registry: MigrationRegistry | None = None,
         now: Now = _utc_now,
         snapshot_store: SqliteSnapshotStore | None = None,
+        audit_writer: SqliteAuditWriter | None = None,
     ) -> None:
         self.paths = paths
         self.config = config
@@ -82,6 +87,11 @@ class SqliteMigrationAdmin:
             SqliteSnapshotStore(paths, registry=self._registry, now=now)
             if snapshot_store is None
             else snapshot_store
+        )
+        self._audit_writer = (
+            SqliteAuditWriter(core_audit_redaction_service())
+            if audit_writer is None
+            else audit_writer
         )
 
     async def _read_applied(
@@ -190,6 +200,39 @@ class SqliteMigrationAdmin:
                                 migration.descriptor.name,
                                 migration.descriptor.checksum,
                                 self._now().astimezone(UTC).isoformat(),
+                            ),
+                        )
+                    audit_table = await fetch_one(
+                        connection,
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'audit_events'",
+                    )
+                    if audit_table is not None:
+                        await self._audit_writer.insert(
+                            connection,
+                            AuditEventDraft(
+                                actor_id="system.migration",
+                                action="storage.migrations_applied",
+                                resource_type="database_schema",
+                                resource_id="primary",
+                                outcome=AuditOutcome.SUCCEEDED,
+                                created_at=self._now(),
+                                before_summary={"version": plan.current_version},
+                                after_summary={
+                                    "version": plan.target_version,
+                                    "migrations": [
+                                        {
+                                            "version": item.descriptor.version,
+                                            "name": item.descriptor.name,
+                                            "checksum": item.descriptor.checksum,
+                                        }
+                                        for item in pending
+                                    ],
+                                },
+                                details={
+                                    "migration_count": len(pending),
+                                    "pre_migration_snapshot_created": backup_file is not None,
+                                },
                             ),
                         )
                     await connection.execute(f"PRAGMA user_version={plan.target_version}")

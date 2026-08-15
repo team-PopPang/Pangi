@@ -11,11 +11,13 @@ from pangi import PangiConfig
 from pangi.adapters.outbound.initialization import FileSystemInitializer
 from pangi.adapters.outbound.login_attempts import InMemoryLoginAttemptLimiter
 from pangi.adapters.outbound.passwords import Argon2idPasswordHasher
+from pangi.adapters.outbound.persistence.sqlite.audit import SqliteAuditWriter
 from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.sessions import SqliteAuthSessionStore
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.application.ports.auth import AuthenticationRequiredError
+from pangi.application.services.audit import core_audit_redaction_service
 from pangi.application.services.auth import AuthSessionService
 from pangi.application.services.bootstrap_admin import BootstrapAdminService
 
@@ -34,7 +36,10 @@ def test_expired_or_disabled_persistent_session_is_rejected(tmp_path: Path) -> N
     hasher = Argon2idPasswordHasher()
     now = [datetime(2030, 1, 1, tzinfo=UTC)]
     bootstrap = BootstrapAdminService(
-        SqliteBootstrapStore(database),
+        SqliteBootstrapStore(
+            database,
+            SqliteAuditWriter(core_audit_redaction_service()),
+        ),
         hasher,
         public_base_url="http://127.0.0.1:8787",
         grant_ttl_minutes=30,

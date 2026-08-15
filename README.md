@@ -2,7 +2,7 @@
 
 조직이 직접 설치하고 운영하는 경량 Agent Runtime이다.
 
-현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail, 중앙 Redaction·External Data Envelope, 공통 Tool Permission·Approval·Budget Guardrail, 최종 Output Guardrail과 Log·Run Event Redaction까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
+현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail, 중앙 Redaction·External Data Envelope, 공통 Tool Permission·Approval·Budget Guardrail, 최종 Output Guardrail, Log·Run Event Redaction과 Append-only Audit 기반까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
 
 ## 현재 구현 상태
 
@@ -13,7 +13,7 @@
 | 03. SQLite 영속성과 Migration | 완료 | 단일 Process Lock, 직렬화된 Unit of Work, Migration·Checksum·Backup, Snapshot 검증 |
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
-| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output과 Log·Run Event Redaction 경계 |
+| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit 저장·조회 기반 |
 | 07~20 | 예정 | Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리한다. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있다.
@@ -132,12 +132,23 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 
 JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구현한다. 기존 Event Schema와 HTTP/OpenAPI 계약은 바꾸지 않았다.
 
+### Append-only Audit 기반
+
+- `core-audit-v1`이 Actor, Action, Resource, Outcome과 이전·이후 Summary를 정규화하고 기존 `core-secret-v1`으로 Redact한다.
+- 안전한 이전·이후 Summary, Details와 전체 변경에 Canonical SHA-256 Fingerprint를 남긴다. 원문 관리 Payload는 오류와 객체 표현에 포함하지 않는다.
+- SQLite Migration 4가 `audit_events`와 조회 Index를 추가한다. Event `UPDATE`와 365일 Retention 이전 `DELETE`는 DB Trigger가 거부한다.
+- Bootstrap Grant 발급·회전, 최초 Admin 생성과 Migration 적용은 상태 변경과 Audit Insert를 같은 Transaction에 저장한다.
+- `GET /api/v1/audit-events`는 활성 Admin만 호출할 수 있다. Actor·Action·Resource·Outcome·기간 Filter와 Keyset Cursor를 지원한다.
+- Audit Actor는 `users` Foreign Key에 묶지 않는다. 사용자 상태가 바뀌거나 System Actor가 기록해도 기존 Event를 보존한다.
+
+아직 구현되지 않은 Tool Policy·Skill·Memory·Schedule·API Key·IP Policy 같은 관리 Action은 각 기능 WBS가 같은 Audit 경계에 연결한다. React Audit Log 화면과 Retention Job은 후속 WBS에서 구현한다.
+
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
-- Append-only Audit과 JSON Log Formatter·Metric·Trace
+- 미래 관리 Action의 Audit 연결, Audit Log 화면과 JSON Log Formatter·Metric·Trace
 - Model Provider Routing과 데이터 반출 정책
 - Root Orchestrator, 실행 Engine, MCP, Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
@@ -276,6 +287,18 @@ uv run pytest \
   tests/unit/test_telemetry_redaction.py \
   tests/unit/test_logging_redaction.py \
   tests/integration/test_telemetry_delivery.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### Append-only Audit만 검증
+
+WBS-06.5에서 구현한 Audit 정규화·Redaction·Fingerprint, SQLite Append-only·Retention 제약, Bootstrap·Migration 기록과 Admin 조회 API를 확인한다.
+
+```bash
+uv run pytest \
+  tests/unit/test_audit_service.py \
+  tests/integration/test_audit_persistence.py \
+  tests/contract/test_audit_web_contract.py \
   tests/architecture/test_dependency_rules.py
 ```
 

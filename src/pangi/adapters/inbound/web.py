@@ -24,6 +24,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 
 from pangi._version import __version__
 from pangi.adapters.inbound.web_contracts import (
+    AuditEventListEnvelope,
     BootstrapAdminRequest,
     BootstrapAdminResponse,
     ErrorEnvelope,
@@ -36,9 +37,16 @@ from pangi.adapters.inbound.web_contracts import (
     RunQueueMetricsResponse,
     SessionEnvelope,
 )
+from pangi.application.contracts.audit import AuditListQuery
 from pangi.application.contracts.auth import AuthenticatedPrincipal, IssuedSession
 from pangi.application.contracts.run_events import RunEventStreamPolicy
 from pangi.application.contracts.runs import RunListQuery
+from pangi.application.ports.audit import (
+    AuditOperationError,
+    AuditOperations,
+    AuditPersistenceError,
+    InvalidAuditCursorError,
+)
 from pangi.application.ports.auth import (
     AuthenticationError,
     AuthenticationRequiredError,
@@ -79,6 +87,7 @@ from pangi.application.ports.runs import (
 )
 from pangi.application.ports.runtime import RuntimeBackend
 from pangi.application.services.auth import ensure_role
+from pangi.domain.audit import AuditOutcome
 from pangi.domain.auth import UserRole
 from pangi.domain.runs import PrincipalChannel, RunState
 
@@ -242,6 +251,7 @@ def create_web_app(
     *,
     runtime_backend: RuntimeBackend,
     readiness_probe: ReadinessProbe,
+    audit_operations: AuditOperations,
     bootstrap_admin: BootstrapAdminPort,
     auth_sessions: AuthSessionPort,
     run_operations: RunOperations,
@@ -347,6 +357,32 @@ def create_web_app(
             status_code=403,
             code="permission_denied",
             message="The authenticated role is not allowed",
+        )
+
+    @app.exception_handler(AuditOperationError)
+    async def audit_operation_error(
+        request: Request,
+        error: AuditOperationError,
+    ) -> JSONResponse:
+        if isinstance(error, InvalidAuditCursorError):
+            return error_response(
+                request,
+                status_code=400,
+                code=error.code,
+                message="The Audit cursor or filter is invalid",
+            )
+        if isinstance(error, AuditPersistenceError):
+            return error_response(
+                request,
+                status_code=503,
+                code=error.code,
+                message="Audit Events are unavailable",
+            )
+        return error_response(
+            request,
+            status_code=409,
+            code=error.code,
+            message="The Audit operation could not be completed",
         )
 
     @app.exception_handler(RunOperationError)
@@ -708,6 +744,51 @@ def create_web_app(
         response = Response(status_code=204)
         _clear_session_cookies(response, request)
         return response
+
+    @app.get(
+        "/api/v1/audit-events",
+        operation_id="listAuditEvents",
+        response_model=AuditEventListEnvelope,
+        responses={
+            400: {"model": ErrorEnvelope, "description": "Invalid Audit cursor or filter"},
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "Administrator required"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Audit store unavailable"},
+        },
+    )
+    async def list_audit_events(
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+        actor_id: str | None = None,
+        actions: Annotated[list[str] | None, Query(alias="action")] = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        outcomes: Annotated[
+            list[AuditOutcome] | None,
+            Query(alias="outcome"),
+        ] = None,
+        created_from: Annotated[datetime | None, Query(alias="from")] = None,
+        created_to: Annotated[datetime | None, Query(alias="to")] = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> AuditEventListEnvelope:
+        try:
+            query = AuditListQuery(
+                actor_id=actor_id,
+                actions=tuple(actions or ()),
+                resource_type=resource_type,
+                resource_id=resource_id,
+                outcomes=tuple(outcomes or ()),
+                created_from=created_from,
+                created_to=created_to,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as error:
+            raise InvalidAuditCursorError("The Audit filter is invalid") from error
+        page = await audit_operations.list_events(actor=principal, query=query)
+        return AuditEventListEnvelope.from_contract(page)
 
     @app.get(
         "/api/v1/runs",

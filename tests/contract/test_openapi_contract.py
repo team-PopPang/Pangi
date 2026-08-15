@@ -15,6 +15,7 @@ def test_openapi_has_stable_operations_and_error_schemas() -> None:
     paths = document["paths"]
     assert isinstance(paths, dict)
     assert set(paths) == {
+        "/api/v1/audit-events",
         "/api/v1/auth/login",
         "/api/v1/auth/logout",
         "/api/v1/auth/session",
@@ -41,6 +42,7 @@ def test_openapi_has_stable_operations_and_error_schemas() -> None:
         "logout",
         "rotateAuthSession",
         "listRuns",
+        "listAuditEvents",
         "getRunQueueMetrics",
         "getRun",
         "cancelRun",
@@ -76,6 +78,7 @@ def test_openapi_has_stable_operations_and_error_schemas() -> None:
     schemas = components["schemas"]
     assert isinstance(schemas, dict)
     assert {
+        "AuditEventListEnvelope",
         "BootstrapAdminRequest",
         "BootstrapAdminResponse",
         "ErrorEnvelope",

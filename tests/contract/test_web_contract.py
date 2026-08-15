@@ -146,6 +146,7 @@ def test_health_spa_assets_and_security_headers_are_stable(tmp_path: Path) -> No
     app = create_web_app(
         runtime_backend=runtime,
         readiness_probe=RuntimeReadiness(runtime),
+        audit_operations=_UNUSED_RUN_API,
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=RecordingAuthSessions(),
         run_operations=_UNUSED_RUN_API,
@@ -203,6 +204,7 @@ def test_lifespan_closes_backend_when_startup_fails(tmp_path: Path) -> None:
     app = create_web_app(
         runtime_backend=runtime,
         readiness_probe=RuntimeReadiness(runtime),
+        audit_operations=_UNUSED_RUN_API,
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=RecordingAuthSessions(),
         run_operations=_UNUSED_RUN_API,
@@ -224,6 +226,7 @@ def test_auth_cookie_transport_csrf_and_role_dependency_contracts(tmp_path: Path
     app = create_web_app(
         runtime_backend=runtime,
         readiness_probe=RuntimeReadiness(runtime),
+        audit_operations=_UNUSED_RUN_API,
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=auth,
         run_operations=_UNUSED_RUN_API,
@@ -289,6 +292,7 @@ def test_non_loopback_plain_http_login_is_rejected(tmp_path: Path) -> None:
     app = create_web_app(
         runtime_backend=runtime,
         readiness_probe=RuntimeReadiness(runtime),
+        audit_operations=_UNUSED_RUN_API,
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=auth,
         run_operations=_UNUSED_RUN_API,
@@ -318,6 +322,7 @@ def test_unexpected_api_error_uses_safe_envelope(
     app = create_web_app(
         runtime_backend=runtime,
         readiness_probe=RuntimeReadiness(runtime),
+        audit_operations=_UNUSED_RUN_API,
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=FailingAuthSessions(),
         run_operations=_UNUSED_RUN_API,
