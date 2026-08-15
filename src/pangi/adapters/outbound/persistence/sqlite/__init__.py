@@ -4,6 +4,7 @@ from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
 from pangi.adapters.outbound.persistence.sqlite.factory import (
     build_migration_admin,
+    build_run_queue_service,
     build_sqlite_database,
 )
 from pangi.adapters.outbound.persistence.sqlite.snapshots import SqliteSnapshotStore
@@ -15,5 +16,6 @@ __all__ = (
     "SqliteSnapshotStore",
     "SqliteUnitOfWork",
     "build_migration_admin",
+    "build_run_queue_service",
     "build_sqlite_database",
 )

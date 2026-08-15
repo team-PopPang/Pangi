@@ -3,6 +3,10 @@
 from pangi.application.ports.auth import AuthSessionPort
 from pangi.application.ports.bootstrap_admin import BootstrapAdminPort
 from pangi.application.ports.readiness import ReadinessProbe
+from pangi.application.ports.run_queue import (
+    RunExecutionHandler,
+    RunQueueStore,
+)
 from pangi.application.ports.runs import RunOperations
 from pangi.application.ports.runtime import RuntimeBackend
 from pangi.application.ports.runtime_control import RuntimeControl, RuntimeUnavailableError
@@ -23,7 +27,9 @@ __all__ = (
     "RuntimeUnavailableError",
     "MigrationAdmin",
     "ReadinessProbe",
+    "RunExecutionHandler",
     "RunOperations",
+    "RunQueueStore",
     "StorageOperationError",
     "UnitOfWork",
     "UnitOfWorkFactory",
