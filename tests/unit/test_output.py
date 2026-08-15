@@ -1,6 +1,6 @@
 """CLI redaction tests."""
 
-from pangi.adapters.inbound.output import redact_text, render_json
+from pangi.adapters.inbound.output import redact_data, redact_text, render_json
 
 
 def test_text_redaction_removes_common_credentials() -> None:
@@ -26,3 +26,18 @@ def test_json_redaction_happens_before_serialization() -> None:
     assert "Bearer private" not in output
     assert "visible" in output
 
+
+def test_cli_redaction_delegates_nested_values_without_hiding_safe_metrics() -> None:
+    redacted = redact_data(
+        {
+            "client_secret": "private",
+            "token_count": 3,
+            "safe": "Authorization: Bearer private-token",
+        }
+    )
+
+    assert redacted == {
+        "client_secret": "[REDACTED]",
+        "token_count": 3,
+        "safe": "authorization=[REDACTED]",
+    }

@@ -2,7 +2,7 @@
 
 조직이 직접 설치하고 운영하는 경량 Agent Runtime이다.
 
-현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API와 보호된 Input Guardrail Application 경계까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
+현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail과 중앙 Redaction·External Data Envelope 기반까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
 
 ## 현재 구현 상태
 
@@ -13,7 +13,7 @@
 | 03. SQLite 영속성과 Migration | 완료 | 단일 Process Lock, 직렬화된 Unit of Work, Migration·Checksum·Backup, Snapshot 검증 |
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
-| 06. Guardrail·보안·Audit | 진행 중 | 신뢰·판정 계약, Input 정규화·Principal·첨부·Explicit Skill·Rate Limit 검사, Guardrail 선행 Run 제출 경계 |
+| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data 정규화·Envelope·안전한 Renderer |
 | 07~20 | 예정 | Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리한다. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있다.
@@ -87,11 +87,22 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 
 이 경계는 아직 HTTP나 Channel의 Run 생성 진입점에 조립되지 않았다. WBS-08·11·16에서 Run을 수신할 때 보호된 제출 Service를 사용한다.
 
+### 중앙 Redaction과 External Data
+
+- `core-secret-v1` 정책이 Text와 중첩 JSON 호환 데이터의 Credential 할당, 알려진 Token Prefix, 민감 Key와 `secret://` Reference를 같은 방식으로 Redact한다.
+- Redaction 결과는 정책 Version·Fingerprint, Redaction Count와 적용 Rule ID만 Metadata로 제공한다. 원문 값은 결과 표현에 포함하지 않는다.
+- 기존 CLI Text·JSON 출력은 공개 함수 형태를 유지하면서 중앙 Redaction Service를 사용한다.
+- External Data는 `text/plain` 또는 `text/html`로 받고 CRLF/NFC, Control/Bidi/Hidden Unicode와 실행·비가시 HTML을 정규화한다.
+- 정규화된 외부 Content는 중앙 Redaction을 통과한 뒤 항상 `untrusted` Envelope로 생성된다. Content Fingerprint는 Redaction 완료 Text를 기준으로 계산한다.
+- Prompt Renderer는 Source와 Content를 Escape하므로 외부 Text가 `external_data`를 닫거나 새 System Tag를 만들 수 없다.
+
+이 기반은 아직 MCP, Web Fetch, Model Provider, Log·Run Event와 최종 Output에 연결되지 않았다. 각 실행 경계는 후속 WBS에서 중앙 Service와 Envelope를 사용한다.
+
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
-- 중앙 Redaction·External Data Envelope, Tool·Output Guardrail과 Append-only Audit
+- Tool Permission·Approval·Budget, Output·Log·Event Guardrail과 Append-only Audit
 - Model Provider Routing과 데이터 반출 정책
 - Root Orchestrator, 실행 Engine, MCP, Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
@@ -177,6 +188,18 @@ WBS-06.1에서 구현한 신뢰 계약, 입력 정규화, Principal·Attachment�
 uv run pytest \
   tests/unit/test_input_guardrails.py \
   tests/integration/test_guarded_run_submission.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### 중앙 Redaction과 External Data만 검증
+
+WBS-06.2에서 구현한 Versioned Redaction, External Text·HTML 정규화, 비신뢰 Envelope와 경계 Escape를 확인한다.
+
+```bash
+uv run pytest \
+  tests/unit/test_redaction_service.py \
+  tests/unit/test_external_data_service.py \
+  tests/unit/test_output.py \
   tests/architecture/test_dependency_rules.py
 ```
 
