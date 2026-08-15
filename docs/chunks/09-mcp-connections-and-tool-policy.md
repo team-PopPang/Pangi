@@ -27,7 +27,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - Connection Lifecycle, User/Instance Scope와 Health
 - OAuth 2.1/PKCE/Resource Indicator와 SecretStore
 - Tool/Resource/Prompt Discovery, Cache와 Fingerprint
-- Tool Policy, Argument 검증, Result Normalization과 Metric
+- Tool Registry·Policy/Approval/Budget 영속 Adapter, Argument Schema Adapter, Result Normalization과 Metric
 - Connection Catalog, Card, 연결/재연결/끊기/진단 UI
 
 ## 범위 밖
@@ -44,7 +44,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - SQLite에는 `secret_ref`만 저장하고 실제 값은 Keyring/Secret Manager/암호화 Vault에 둔다.
 - WBS-03 Unit of Work 위에서 `connections`, `connection_tools`, `tool_policies`, `tool_invocations`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
 - Discovery 결과는 Canonical JSON SHA-256 Fingerprint로 식별하고 변경 시 참조 Skill을 `needs_review`로 바꾼다.
-- 새 Tool은 `deny`로 등록하고 Principal/Owner/Permission/Approval/Schema/Budget을 통과한 호출만 MCP Client로 보낸다.
+- 새 Tool은 `deny`로 등록하고 Registry·Policy·Schema·Approval·Budget Adapter를 WBS-06의 공통 Tool Guardrail에 주입한다. 공통 Engine을 우회하지 않고 모든 검사를 통과한 `GuardedToolCall`만 MCP Client로 보낸다.
 - Result는 Byte/Timeout Limit 뒤 표준 `ToolResult`와 비신뢰 Data Envelope로 정규화한다.
 - Catalog는 연결 여부와 무관하게 필요한 서비스, Capability와 설치 안내를 보여준다.
 
@@ -55,7 +55,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - [ ] OAuth Discovery, PKCE, Callback와 Token Refresh/Revoke를 구현한다.
 - [ ] Keyring 우선 SecretStore와 암호화 File Vault Fallback을 구현한다.
 - [ ] Discovery Cache, Fingerprint, Refresh와 `list_changed` 처리를 구현한다.
-- [ ] Stable Tool Registry, 기본 Deny와 Argument/Scope/Approval Enforcer를 구현한다.
+- [ ] Stable Tool Registry, 기본 Deny Policy와 Argument/Scope/Approval/Budget Adapter를 구현하고 WBS-06 공통 Enforcer에 조립한다.
 - [ ] Result Normalizer, Redaction, Timeout/Byte Limit과 Invocation Metric을 구현한다.
 - [ ] Connection/Tool API와 Catalog/Card/진단 UI를 구현한다.
 - [ ] Schema Drift가 Skill에 미치는 영향 분석을 연결한다.

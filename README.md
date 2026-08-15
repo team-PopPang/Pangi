@@ -2,7 +2,7 @@
 
 조직이 직접 설치하고 운영하는 경량 Agent Runtime이다.
 
-현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail과 중앙 Redaction·External Data Envelope 기반까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
+현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail, 중앙 Redaction·External Data Envelope와 공통 Tool Permission·Approval·Budget Guardrail까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
 
 ## 현재 구현 상태
 
@@ -13,7 +13,7 @@
 | 03. SQLite 영속성과 Migration | 완료 | 단일 Process Lock, 직렬화된 Unit of Work, Migration·Checksum·Backup, Snapshot 검증 |
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
-| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data 정규화·Envelope·안전한 Renderer |
+| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget 공통 실행 경계 |
 | 07~20 | 예정 | Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리한다. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있다.
@@ -98,11 +98,25 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 
 이 기반은 아직 MCP, Web Fetch, Model Provider, Log·Run Event와 최종 Output에 연결되지 않았다. 각 실행 경계는 후속 WBS에서 중앙 Service와 Envelope를 사용한다.
 
+### Tool Permission·Approval·Budget 기반
+
+- Stable Tool ID를 현재 Connection과 Schema Snapshot으로 해석하는 Port를 제공한다. Stable ID의 실제 저장 형식과 MCP Tool Name Mapping은 아직 구현하지 않았다.
+- 활성 Principal과 Run 요청자의 사용자 ID를 먼저 비교하고 User Connection Owner를 다시 검사한다. 다른 사용자의 Run이나 Connection을 실행하지 않으며 Instance Connection에는 사용자 Owner를 허용하지 않는다.
+- 명시적인 Tool Policy가 없으면 기본 Deny한다. Policy는 Connection, Schema Fingerprint, `read`·`write`·`destructive` Permission과 `none`·`user`·`admin` Approval에 정확히 묶인다.
+- Argument를 Canonical JSON으로 고정하고 UTF-8 Byte Limit과 주입된 JSON Schema Validator를 통과시킨다. 호출 뒤 원본 Mapping이 바뀌어도 실행 Argument는 변하지 않는다.
+- Approval은 Actor, Run, Tool, Argument와 Policy Fingerprint에 묶고 만료와 승인 주체를 검증한다.
+- Run·Tool별 호출 횟수는 정책 Version이 바뀌어도 유지하며, 실행 실패도 예약된 호출 횟수를 소비한다.
+- 모든 검사를 통과한 `GuardedToolCall`만 Executor에 전달한다. 차단 호출은 Executor를 호출하지 않으며 Timeout과 Result Byte Limit은 허용된 호출에 필수로 전달한다.
+- 판정과 오류에는 정책 Fingerprint와 안전한 수치만 남기고 Argument, Approval Reference, Connection ID·Owner와 실제 Tool Name을 표현하지 않는다.
+
+실제 MCP Registry·Transport, JSON Schema Adapter, Policy·Approval·Invocation 저장소와 Result 정규화는 WBS-09에서 연결한다. 현재 구현은 Tool 호출을 수행하는 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안 경계다.
+
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
-- Tool Permission·Approval·Budget, Output·Log·Event Guardrail과 Append-only Audit
+- 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
+- Output·Log·Event Guardrail과 Append-only Audit
 - Model Provider Routing과 데이터 반출 정책
 - Root Orchestrator, 실행 Engine, MCP, Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
@@ -200,6 +214,16 @@ uv run pytest \
   tests/unit/test_redaction_service.py \
   tests/unit/test_external_data_service.py \
   tests/unit/test_output.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### Tool Guardrail만 검증
+
+WBS-06.3에서 구현한 Stable Tool ID, Connection Owner, Permission·Schema, Approval, Call·Byte·Timeout Budget과 강제 실행 경계를 확인한다.
+
+```bash
+uv run pytest \
+  tests/unit/test_tool_guardrails.py \
   tests/architecture/test_dependency_rules.py
 ```
 
