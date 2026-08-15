@@ -2,7 +2,7 @@
 
 조직이 직접 설치하고 운영하는 경량 Agent Runtime이다.
 
-현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고, Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
+현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API와 보호된 Input Guardrail Application 경계까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
 
 ## 현재 구현 상태
 
@@ -13,7 +13,8 @@
 | 03. SQLite 영속성과 Migration | 완료 | 단일 Process Lock, 직렬화된 Unit of Work, Migration·Checksum·Backup, Snapshot 검증 |
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
-| 06~20 | 예정 | Guardrail, Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
+| 06. Guardrail·보안·Audit | 진행 중 | 신뢰·판정 계약, Input 정규화·Principal·첨부·Explicit Skill·Rate Limit 검사, Guardrail 선행 Run 제출 경계 |
+| 07~20 | 예정 | Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리한다. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있다.
 
@@ -74,11 +75,23 @@
 
 Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐다. 실제 실행 Handler와 Queue Runtime 조립, Run 생성 진입점, Run 화면은 후속 WBS에서 연결한다.
 
+### Input Guardrail 기반
+
+- 사용자 입력은 비신뢰 상태로 시작하며 활성 Principal과 요청 Principal의 사용자 ID·역할 일치를 먼저 검사한다.
+- 본문은 CRLF/CR과 Unicode NFC를 정규화하고 UTF-8 Byte 기준 크기와 주입된 Control/Bidi/Hidden Unicode 정책을 적용한다. 탭·줄바꿈과 ZWJ 결합 Emoji는 보존한다.
+- Attachment의 개수, 필수 크기·MIME Metadata, 개별·전체 Byte Limit과 허용 MIME을 검사한다.
+- Explicit Skill 접근은 별도 Port로 검사한다. Skill 식별자·Version 형식은 아직 확정하지 않았다.
+- 사용자·Channel별 요청률은 최대 Key 수가 제한된 단일 Process Sliding Window Adapter로 검사한다. 조직 운영 기본값은 아직 없다.
+- Guardrail 통과 뒤에만 기존 Run 생성·SQLite Idempotency 경계를 호출한다. 차단 요청은 Run, Event와 Idempotency Record를 만들지 않는다.
+- 판정에는 정책 Version·Fingerprint와 안전한 수치 Metadata만 남기고 요청 본문, Idempotency Key와 Attachment Reference는 포함하지 않는다.
+
+이 경계는 아직 HTTP나 Channel의 Run 생성 진입점에 조립되지 않았다. WBS-08·11·16에서 Run을 수신할 때 보호된 제출 Service를 사용한다.
+
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
-- Run 생성 진입점과 Run Timeline·Workflow Admin UI
-- 입력·Tool·출력 Guardrail과 Audit
+- Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
+- 중앙 Redaction·External Data Envelope, Tool·Output Guardrail과 Append-only Audit
 - Model Provider Routing과 데이터 반출 정책
 - Root Orchestrator, 실행 Engine, MCP, Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
@@ -154,6 +167,17 @@ uv run pytest \
   tests/integration/test_run_persistence.py \
   tests/integration/test_run_queue_persistence.py \
   tests/integration/test_run_event_delivery.py
+```
+
+### Input Guardrail만 검증
+
+WBS-06.1에서 구현한 신뢰 계약, 입력 정규화, Principal·Attachment·Explicit Skill·Rate Limit 검사와 Guardrail 선행 Run 영속화 경계는 다음 명령으로 확인한다.
+
+```bash
+uv run pytest \
+  tests/unit/test_input_guardrails.py \
+  tests/integration/test_guarded_run_submission.py \
+  tests/architecture/test_dependency_rules.py
 ```
 
 ### Test 종류별 검증
