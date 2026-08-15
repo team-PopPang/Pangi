@@ -13,7 +13,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 03. SQLite 영속성과 Migration | 완료 | 단일 Process Lock, 직렬화된 Unit of Work, Migration·Checksum·Backup, Snapshot 검증 |
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
-| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit 저장·조회 기반 |
+| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
 | 07~20 | 예정 | Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
@@ -142,6 +142,17 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 - Audit Actor는 `users` Foreign Key에 묶지 않아요. 사용자 상태가 바뀌거나 System Actor가 기록해도 기존 Event를 보존해요.
 
 아직 구현하지 않은 Tool Policy·Skill·Memory·Schedule·API Key·IP Policy 같은 관리 Action은 각 기능 WBS에서 같은 Audit 경계에 연결해요. React Audit Log 화면과 Retention Job은 후속 WBS에서 구현해요.
+
+### 보안 정책 영향 Fingerprint와 신뢰 경계
+
+- `policy-impact-v1`은 Policy Kind·Stable ID·Version·기존 SHA-256 Fingerprint만 불변 참조로 받아요.
+- `PolicyImpactSnapshot`은 참조 순서와 관계없이 같은 정책 집합에 같은 영향 Fingerprint를 만들어요.
+- Baseline과 Candidate를 비교하면 추가·삭제·변경된 Policy Key를 구분할 수 있어요.
+- Policy 원문, Rule, Connection 정보, Secret과 외부 Content는 Snapshot과 Diff에 포함하지 않아요.
+- 외부 문서가 Envelope를 닫거나 System Tag를 만들려고 해도 해당 구문을 Escape하고 `untrusted` 상태를 유지해요.
+- 외부 문서가 Tool 실행을 지시해도 명시 Policy가 없거나 Deny이면 Executor 전에 차단해요.
+
+실제 영향 Eval Suite 선택·실행·활성화 Gate와 Snapshot 영속화는 WBS-15에서 구현해요. Web Search·MCP Result의 End-to-End Prompt Injection 검증은 WBS-10·15에서 연결해요.
 
 ## 아직 구현되지 않은 기능
 
@@ -300,6 +311,19 @@ uv run pytest \
   tests/unit/test_audit_service.py \
   tests/integration/test_audit_persistence.py \
   tests/contract/test_audit_web_contract.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### 보안 정책 영향과 신뢰 경계만 검증
+
+WBS-06.6에서 구현한 정책 집합 Fingerprint·변경 감지와 외부 문서의 System·Tool Policy 비승격 계약을 확인하세요.
+
+```bash
+uv run pytest \
+  tests/unit/test_policy_impact.py \
+  tests/contract/test_guardrail_security_contract.py \
+  tests/unit/test_external_data_service.py \
+  tests/unit/test_tool_guardrails.py \
   tests/architecture/test_dependency_rules.py
 ```
 

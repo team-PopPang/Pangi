@@ -31,6 +31,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 4. **Output Guardrail (WBS-06.4.1)**: 최종 Markdown과 Evidence의 Secret·내부 정보·HTML·Link·Mention·길이를 공통 경계에서 정규화한다.
 5. **Log·Run Event Redaction (WBS-06.4.2)**: 구조화 Log와 Run Event가 영속화·출력되기 전에 중앙 Redaction을 강제한다.
 6. **Append-only Audit (WBS-06.5)**: Audit 계약·저장소·관리자 조회 기반과 필수 관리 Action 기록을 구현한다.
+7. **보안 정책 영향 Fingerprint와 신뢰 경계 Contract (WBS-06.6)**: Guardrail·Audit 정책 집합의 변경을 안전하게 식별하고 외부 문서가 System·Tool Policy를 바꾸지 못하는 계약을 고정한다.
 
 ## 범위
 
@@ -91,6 +92,10 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - `audit_events`는 Update를 항상 거부하고 365일 Retention 이전 Delete를 차단한다. Table 소유 WBS는 만료 Batch Purge 경계만 제공하고 WBS-19가 실제 Retention Job을 조율한다.
 - `GET /api/v1/audit-events`는 활성 Admin만 호출한다. Actor·Action·Resource·Outcome·기간 Filter와 Filter Scope에 묶인 Keyset Cursor를 사용한다.
 - 현재 구현된 Bootstrap Grant 발급·회전, 최초 Admin 생성과 Migration 적용을 먼저 Audit한다. 미래 Tool Policy·Skill·Memory·Schedule·API Key·IP Policy Action은 각 소유 WBS가 같은 Writer에 연결한다.
+- `policy-impact-v1`은 Policy Kind·Stable ID·Version·기존 SHA-256 Fingerprint만 불변 참조로 받는다. Policy 원문, Rule, Connection 정보, Secret과 외부 Content는 계약에 포함하지 않는다.
+- `PolicyImpactSnapshot`은 참조를 Policy Key로 정렬한 뒤 Schema Version과 함께 Canonical SHA-256 영향 Fingerprint를 계산한다. 같은 집합은 입력 순서와 관계없이 같은 결과를 만든다.
+- Baseline과 Candidate 비교는 Policy Key의 추가·삭제·변경을 서로 겹치지 않는 안전한 목록으로 반환한다. 실제 영향 Eval Suite 선택·실행·활성화 Gate와 Snapshot 영속화는 WBS-15가 소유한다.
+- 외부 문서의 Closing Tag와 System 지시는 `untrusted` Envelope 안에서 Escape한다. 외부 Content는 Tool Policy Provider의 결과를 만들거나 덮어쓰지 않으며 Policy 누락·Deny 호출은 Executor 전에 실패한다.
 - Security Header, Session Rotation과 Localhost 기본 Bind는 Web Middleware에서 강제한다.
 
 ## 구현 체크리스트
@@ -104,14 +109,14 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Log와 Run Event의 중앙 Redaction Filter·최종 Writer를 구현한다.
 - [x] Audit Event Port, SQLite Adapter와 관리자 조회 API 기반을 만든다.
 - [x] CSP, Frame, Content-Type, Same-origin과 기본 Bind 정책을 적용한다.
-- [ ] Guardrail/Audit 변경을 Eval 영향 대상으로 표시하는 Fingerprint를 만든다.
+- [x] Guardrail/Audit 변경을 Eval 영향 대상으로 표시하는 Fingerprint를 만든다.
 
 ## 검증 체크리스트
 
 - [x] 비활성 Principal, 대형 입력, 금지 MIME를 차단하고 허용된 중복 요청이 Run 하나로 Replay되는지 확인한다.
 - [x] Deny Tool, 다른 사용자 Connection과 승인 없는 Write 호출이 실행되지 않는지 확인한다.
 - [x] Secret, Stack Trace, 내부 Path와 Mention 폭주가 출력에서 제거되는지 확인한다.
-- [ ] 외부 문서의 지시가 System/Tool Policy를 바꾸지 못하는지 Contract Test를 실행한다.
+- [x] 외부 문서의 지시가 System/Tool Policy를 바꾸지 못하는지 Contract Test를 실행한다.
 - [ ] 모든 필수 관리 Action이 Actor와 안전한 Diff를 Audit하는지 확인한다.
 - [x] Log와 Run Event 저장·JSON·SSE에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
 - [x] Audit Event에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
@@ -187,6 +192,16 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 활성 Admin 전용 `GET /api/v1/audit-events`를 추가했다. Actor·Action·Resource·Outcome·기간 Filter와 Filter·Admin Scope에 묶인 `(created_at DESC, id DESC)` Cursor를 지원한다.
 - OpenAPI Artifact와 Frontend 생성 Type을 갱신하고 정책 결정성·Secret 비노출·Append-only·Retention·원자성·권한·Cursor를 Unit·Integration·Contract·Architecture Test로 고정했다.
 - React Audit Log 화면과 실제 Retention Job은 후속 WBS가 소유한다. 아직 구현되지 않은 필수 관리 Action의 연결도 각 기능 WBS가 맡으므로 WBS-06 상태는 `진행 중`으로 유지한다.
+
+## 6차 구현 결과
+
+- Framework 의존성이 없는 `PolicyFingerprintReference`, `PolicyImpactSnapshot`, `PolicyImpactDiff` 계약과 `policy-impact-v1` Schema Version을 추가했다.
+- Policy 참조에는 Kind·Stable ID·Version·기존 SHA-256 Fingerprint만 허용한다. 가변 목록, 빈 Snapshot, 중복 Key와 잘못된 식별자·Fingerprint는 안전한 오류로 거부한다.
+- Snapshot은 Policy Key로 참조를 정렬한 뒤 Canonical SHA-256 영향 Fingerprint를 계산한다. 같은 집합은 입력 순서와 관계없이 같은 결과를 만든다.
+- Baseline과 Candidate에서 추가·삭제·Version 또는 Fingerprint가 바뀐 Policy Key를 결정적으로 구분한다. Policy 원문, Rule, Connection 정보와 외부 Content는 Snapshot과 Diff에 포함하지 않는다.
+- Hostile External Data가 Envelope를 닫거나 System Tag를 만들지 못하고 `untrusted`로 유지되는지 Contract Test로 고정했다.
+- 외부 문서가 Tool 실행을 지시해도 명시 Policy가 없거나 Deny이면 Schema·Approval·Budget과 Executor에 도달하기 전에 차단하는지 함께 검증했다.
+- 실제 영향 Eval Suite 선택·실행·활성화 Gate와 Snapshot 영속화는 WBS-15에 남겼다. 미래 필수 관리 Action의 Audit 연결도 각 기능 WBS가 맡으므로 WBS-06 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 
