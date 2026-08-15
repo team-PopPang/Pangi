@@ -15,19 +15,24 @@ from pangi.application.contracts.model_routing import (
     ModelPolicyBlockedError,
     ModelPolicyDecision,
     ModelProfile,
+    ModelProviderFailure,
+    ModelProviderResponse,
 )
 from pangi.application.contracts.redaction import RedactionInputError, RedactionSummary
 from pangi.application.ports.model_routing import (
     ModelEgressPolicyProvider,
     ModelProfileProvider,
     ModelProvider,
+    StructuredOutputValidator,
 )
 from pangi.application.services.redaction import RedactionService
 from pangi.domain.model_routing import (
     DataClass,
+    ModelFinishReason,
     ModelPolicyErrorCode,
     ModelPolicyOutcome,
     ModelPolicyStage,
+    ModelProviderErrorCode,
     ModelRetention,
     data_class_rank,
 )
@@ -244,6 +249,7 @@ class ModelPolicyService:
                     data_classes=source.data_classes,
                     content=result.value,
                     raw_content=source.raw_content,
+                    role=source.role,
                     canonical_data_json=safe_data_json,
                 )
             )
@@ -290,6 +296,7 @@ class ModelPolicyService:
                     "data": source.canonical_data_json,
                     "data_classes": sorted(value.value for value in source.data_classes),
                     "raw_content": source.raw_content,
+                    "role": source.role.value,
                     "source_kind": source.source_kind,
                 }
                 for source in safe_sources
@@ -376,13 +383,48 @@ class ModelPolicyService:
 
 
 class GuardedModelExecutionService:
-    """Make Model policy and redaction mandatory before one Provider call."""
+    """Make Model policy, redaction, and output validation mandatory."""
 
-    def __init__(self, policy: ModelPolicyService, *, provider: ModelProvider) -> None:
+    def __init__(
+        self,
+        policy: ModelPolicyService,
+        *,
+        provider: ModelProvider,
+        output_validator: StructuredOutputValidator,
+    ) -> None:
         self._policy = policy
         self._provider = provider
+        self._output_validator = output_validator
 
     async def execute(self, request: ModelCallRequest) -> GuardedModelExecution:
         guarded = await self._policy.guard(request)
         response = await self._provider.invoke(guarded)
+        if not isinstance(response, ModelProviderResponse):
+            raise ModelProviderFailure(ModelProviderErrorCode.UNKNOWN, retryable=False)
+        if response.finish_reason is not ModelFinishReason.STOP:
+            code = (
+                ModelProviderErrorCode.CONTENT_FILTERED
+                if response.finish_reason is ModelFinishReason.CONTENT_FILTERED
+                else ModelProviderErrorCode.INVALID_STRUCTURED_OUTPUT
+            )
+            raise ModelProviderFailure(
+                code,
+                retryable=False,
+                provider_request_count=response.provider_request_count,
+                duration_ms=response.duration_ms,
+            )
+        try:
+            valid = self._output_validator.is_valid(
+                schema=guarded.output_schema,
+                canonical_output_json=response.canonical_output_json,
+            )
+        except Exception:
+            valid = False
+        if not valid:
+            raise ModelProviderFailure(
+                ModelProviderErrorCode.INVALID_STRUCTURED_OUTPUT,
+                retryable=False,
+                provider_request_count=response.provider_request_count,
+                duration_ms=response.duration_ms,
+            )
         return GuardedModelExecution(response=response, decision=guarded.decision)

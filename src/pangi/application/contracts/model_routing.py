@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import TypeVar
@@ -12,6 +13,8 @@ from pangi.application.contracts.policy_impact import PolicyFingerprintReference
 from pangi.application.contracts.redaction import RedactionSummary
 from pangi.domain.model_routing import (
     DataClass,
+    ModelFinishReason,
+    ModelMessageRole,
     ModelPolicyErrorCode,
     ModelPolicyOutcome,
     ModelPolicyStage,
@@ -22,6 +25,7 @@ from pangi.domain.model_routing import (
 )
 
 _STABLE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+_STRUCTURED_OUTPUT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _LOWER_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_.-]{0,119}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ModelEnum = TypeVar("_ModelEnum", DataClass, ModelPurpose)
@@ -90,7 +94,8 @@ class StructuredOutputSchema:
     canonical_schema_json: str = field(repr=False)
 
     def __post_init__(self) -> None:
-        _stable_identifier(self.name, field_name="structured output name")
+        if _STRUCTURED_OUTPUT_NAME.fullmatch(self.name) is None:
+            raise ValueError("structured output name must be a portable identifier")
         try:
             schema = json.loads(self.canonical_schema_json)
         except (json.JSONDecodeError, RecursionError) as error:
@@ -117,6 +122,7 @@ class ModelInputSource:
     data_classes: frozenset[DataClass]
     content: str = field(repr=False)
     raw_content: bool
+    role: ModelMessageRole = ModelMessageRole.USER
     canonical_data_json: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -130,6 +136,10 @@ class ModelInputSource:
             raise ValueError("Model input content cannot be blank")
         if not isinstance(self.raw_content, bool):
             raise ValueError("raw_content must be a boolean")
+        try:
+            object.__setattr__(self, "role", ModelMessageRole(self.role))
+        except ValueError as error:
+            raise ValueError("Model message role is invalid") from error
         if self.canonical_data_json is not None:
             try:
                 data = json.loads(self.canonical_data_json)
@@ -166,6 +176,14 @@ class ModelCallRequest:
             raise ValueError("sources must be a non-empty immutable tuple")
         if any(not isinstance(source, ModelInputSource) for source in self.sources):
             raise TypeError("sources must contain ModelInputSource values")
+        seen_user = False
+        for source in self.sources:
+            if source.role is ModelMessageRole.USER:
+                seen_user = True
+            elif seen_user:
+                raise ValueError("system sources must precede user sources")
+        if not seen_user:
+            raise ValueError("sources must contain at least one user source")
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,8 +514,85 @@ class GuardedModelRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderRetryPolicy:
+    """Explicit Transport Retry limits for one logical Model call."""
+
+    max_attempts: int
+    attempt_timeout_seconds: float
+    total_timeout_seconds: float
+    retry_backoff_seconds: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.max_attempts, bool)
+            or not isinstance(self.max_attempts, int)
+            or not 1 <= self.max_attempts <= 10
+        ):
+            raise ValueError("max_attempts must be between 1 and 10")
+        for value, field_name in (
+            (self.attempt_timeout_seconds, "attempt_timeout_seconds"),
+            (self.total_timeout_seconds, "total_timeout_seconds"),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{field_name} must be a positive finite number")
+        if self.total_timeout_seconds < self.attempt_timeout_seconds:
+            raise ValueError("total_timeout_seconds cannot be shorter than one attempt")
+        if (
+            not isinstance(self.retry_backoff_seconds, tuple)
+            or len(self.retry_backoff_seconds) != self.max_attempts - 1
+        ):
+            raise ValueError("retry_backoff_seconds must define every retry delay")
+        for value in self.retry_backoff_seconds:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError("retry backoff values must be finite and non-negative")
+
+    @property
+    def fingerprint(self) -> str:
+        return _fingerprint(
+            {
+                "attempt_timeout_seconds": self.attempt_timeout_seconds,
+                "max_attempts": self.max_attempts,
+                "retry_backoff_seconds": self.retry_backoff_seconds,
+                "total_timeout_seconds": self.total_timeout_seconds,
+            }
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ModelTokenUsage:
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+    def __post_init__(self) -> None:
+        values = (self.input_tokens, self.output_tokens, self.total_tokens)
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in values
+        ):
+            raise ValueError("Model token counts must be non-negative integers")
+        if self.total_tokens < max(self.input_tokens, self.output_tokens):
+            raise ValueError("total_tokens cannot be smaller than a component count")
+
+
+@dataclass(frozen=True, slots=True)
 class ModelProviderResponse:
     canonical_output_json: str = field(repr=False)
+    token_usage: ModelTokenUsage | None = None
+    provider_request_count: int = 1
+    duration_ms: int = 0
+    provider_latency_ms: int | None = None
+    finish_reason: ModelFinishReason = ModelFinishReason.STOP
 
     def __post_init__(self) -> None:
         try:
@@ -514,6 +609,30 @@ class ModelProviderResponse:
             sort_keys=True,
         )
         object.__setattr__(self, "canonical_output_json", canonical)
+        if self.token_usage is not None and not isinstance(self.token_usage, ModelTokenUsage):
+            raise TypeError("token_usage must be ModelTokenUsage or None")
+        if (
+            isinstance(self.provider_request_count, bool)
+            or not isinstance(self.provider_request_count, int)
+            or not 1 <= self.provider_request_count <= 10
+        ):
+            raise ValueError("provider_request_count must be between 1 and 10")
+        if (
+            isinstance(self.duration_ms, bool)
+            or not isinstance(self.duration_ms, int)
+            or self.duration_ms < 0
+        ):
+            raise ValueError("duration_ms must be a non-negative integer")
+        if self.provider_latency_ms is not None and (
+            isinstance(self.provider_latency_ms, bool)
+            or not isinstance(self.provider_latency_ms, int)
+            or self.provider_latency_ms < 0
+        ):
+            raise ValueError("provider_latency_ms must be a non-negative integer or None")
+        try:
+            object.__setattr__(self, "finish_reason", ModelFinishReason(self.finish_reason))
+        except ValueError as error:
+            raise ValueError("finish_reason is invalid") from error
 
     @property
     def output_fingerprint(self) -> str:
@@ -544,13 +663,34 @@ class ModelPolicyBlockedError(RuntimeError):
 
 
 class ModelProviderFailure(RuntimeError):
-    def __init__(self, code: ModelProviderErrorCode, *, retryable: bool) -> None:
+    def __init__(
+        self,
+        code: ModelProviderErrorCode,
+        *,
+        retryable: bool,
+        provider_request_count: int = 1,
+        duration_ms: int = 0,
+    ) -> None:
         try:
             normalized = ModelProviderErrorCode(code)
         except ValueError:
             raise ValueError("Model Provider error code is invalid") from None
         if not isinstance(retryable, bool):
             raise ValueError("retryable must be a boolean")
+        if (
+            isinstance(provider_request_count, bool)
+            or not isinstance(provider_request_count, int)
+            or not 1 <= provider_request_count <= 10
+        ):
+            raise ValueError("provider_request_count must be between 1 and 10")
+        if (
+            isinstance(duration_ms, bool)
+            or not isinstance(duration_ms, int)
+            or duration_ms < 0
+        ):
+            raise ValueError("duration_ms must be a non-negative integer")
         super().__init__(f"Model Provider failed: {normalized.value}")
         self.code = normalized
         self.retryable = retryable
+        self.provider_request_count = provider_request_count
+        self.duration_ms = duration_ms

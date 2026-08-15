@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from pangi.adapters.outbound.model_providers.json_schema import JsonSchemaOutputValidator
 from pangi.application.contracts.model_routing import (
     GuardedModelRequest,
     ModelCallRequest,
@@ -114,7 +115,11 @@ def test_denied_data_never_calls_provider_and_allowed_data_is_redacted_first() -
         policies=ContractPolicies(_policy()),
         redactor=RedactionService(core_secret_redaction_policy()),
     )
-    execution = GuardedModelExecutionService(policy_service, provider=provider)
+    execution = GuardedModelExecutionService(
+        policy_service,
+        provider=provider,
+        output_validator=JsonSchemaOutputValidator(),
+    )
 
     with pytest.raises(ModelPolicyBlockedError):
         asyncio.run(execution.execute(_request(DataClass.RESTRICTED, "restricted")))

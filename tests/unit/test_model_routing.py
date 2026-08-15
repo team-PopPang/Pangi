@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from pangi.adapters.outbound.model_providers.json_schema import JsonSchemaOutputValidator
 from pangi.application.contracts.model_routing import (
     GuardedModelRequest,
     ModelCallRequest,
@@ -167,7 +168,11 @@ def _services(
         policies=policies,
         redactor=RedactionService(core_secret_redaction_policy()),
     )
-    execution = GuardedModelExecutionService(service, provider=recording_provider)
+    execution = GuardedModelExecutionService(
+        service,
+        provider=recording_provider,
+        output_validator=JsonSchemaOutputValidator(),
+    )
     return service, execution, profiles, policies, recording_provider
 
 

@@ -66,7 +66,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Model Profile과 Versioned Egress Policy Domain을 구현한다.
 - [x] Source Kind별 Data Class 합성과 Redaction Pipeline을 구현한다.
 - [x] Provider/Model/Region/Purpose/Retention 후보 필터를 구현한다.
-- [ ] OpenAI와 Bedrock Adapter의 선택 설치 Skeleton을 만든다.
+- [x] OpenAI와 Bedrock Adapter의 선택 설치 Skeleton을 만든다.
 - [ ] Logical Call, Provider Request, Token, Duration과 정책 결정 Event를 기록한다.
 - [ ] Policy 영향 분석, Eval 실행과 활성화 API를 구현한다.
 - [ ] Dashboard에서 Policy, 사용처와 최근 허용/거부 Summary를 조회할 기반을 만든다.
@@ -76,8 +76,8 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Data Class/Provider/Region 조합별 Allow/Deny Matrix를 Unit Test로 고정한다.
 - [x] Redaction 전 금지 Field가 Provider Adapter에 도달하지 않는지 확인한다.
 - [x] 허용 후보가 없을 때 Provider 호출이 0건인지 확인한다.
-- [ ] Network Retry와 Logical Call 수가 분리되는지 Contract Test를 실행한다.
-- [ ] Provider가 잘못된 구조화 출력을 반환할 때 안전하게 실패하는지 확인한다.
+- [x] Network Retry와 Logical Call 수가 분리되는지 Contract Test를 실행한다.
+- [x] Provider가 잘못된 구조화 출력을 반환할 때 안전하게 실패하는지 확인한다.
 - [ ] Policy 변경이 영향 Eval 없이 활성화되지 않는지 확인한다.
 
 ## 1차 구현 결과
@@ -92,6 +92,20 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Prompt, Output Schema와 구조화 Provider Output은 객체 표현과 오류에서 제외한다. 실제 OpenAI·Bedrock SDK, SQLite, HTTP와 UI 계약은 변경하지 않았다.
 - Provider·Model·Region·Purpose·Source Kind·Data Class·Retention·Raw Content Matrix, Region 없는 Profile, 우선순위 충돌, Secret 비노출과 Provider 호출 0건을 Unit·Contract Test로 고정했다.
 - Adapter, Retry·사용량 계측, 영속화와 관리 API가 남아 있으므로 WBS-07 상태는 `진행 중`으로 유지한다.
+
+## 2차 구현 결과
+
+- `ModelInputSource`에 System과 User 역할을 추가하고 System Source가 User Source보다 먼저 오도록 Provider 공통 순서를 고정했다.
+- Provider 응답은 Token Usage, 실제 Provider Request 수, 전체 Duration, Provider Latency와 정규화된 종료 사유를 공통 계약으로 반환한다.
+- `ProviderRetryPolicy`는 최대 요청 횟수, 요청별 Timeout, 전체 Timeout과 요청 사이 Backoff를 명시한다. 조직 기본값은 아직 고정하지 않았다.
+- `RetryingModelProvider`는 Timeout, Rate Limit과 일시적인 Provider 장애만 재시도한다. SDK 내부 Retry는 끄고 Pangi가 실제 Network Request 수를 직접 계산한다.
+- OpenAI 선택 Adapter는 Responses API, Strict JSON Schema와 `store=False`를 사용한다. `max_retries=0`으로 SDK Retry를 비활성화한다.
+- Bedrock 선택 Adapter는 Converse API의 `outputConfig.textFormat`을 사용한다. Boto3는 `total_max_attempts=1`로 설정하고 동기 호출을 Event Loop 밖에서 실행한다.
+- Provider가 반환한 JSON은 `StructuredOutputValidator` Port를 통해 요청 Schema로 다시 검사한다. JSON 파싱·Schema 검증·종료 사유가 잘못되면 Semantic Retry 없이 실패한다.
+- OpenAI·Boto3·JSON Schema Package는 선택 Extra와 개발 Extra에만 포함한다. 기본 `pangi` Import는 이 Package를 불러오지 않는다.
+- Fake OpenAI·Bedrock Client와 결정적 Clock·Sleeper를 사용해 실제 Credential이나 외부 Network 없이 요청 변환, 오류 정규화, Retry와 사용량 변환을 검증했다.
+- 호출 Metadata는 이번 단계에서 안전한 응답·오류 계약으로만 반환한다. SQLite 영속화와 정책 결정 Event는 WBS-07.3에서 구현한다.
+- Credential·Model 설정과 Runtime 조립, Provider Capability 자동 탐색은 남아 있으므로 WBS-07 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 
