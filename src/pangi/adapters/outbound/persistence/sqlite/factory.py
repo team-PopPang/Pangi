@@ -2,6 +2,10 @@
 
 from pangi.adapters.outbound.login_attempts import InMemoryLoginAttemptLimiter
 from pangi.adapters.outbound.passwords import Argon2idPasswordHasher
+from pangi.adapters.outbound.persistence.sqlite.audit import (
+    SqliteAuditStore,
+    SqliteAuditWriter,
+)
 from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
@@ -14,6 +18,10 @@ from pangi.adapters.outbound.persistence.sqlite.runs import (
 from pangi.adapters.outbound.persistence.sqlite.sessions import SqliteAuthSessionStore
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.run_queue import RunQueuePolicy
+from pangi.application.services.audit import (
+    AuditQueryService,
+    core_audit_redaction_service,
+)
 from pangi.application.services.auth import AuthSessionService
 from pangi.application.services.bootstrap_admin import BootstrapAdminService
 from pangi.application.services.run_events import (
@@ -32,13 +40,25 @@ from pangi.config import PangiConfig
 def build_migration_admin(paths: RuntimePaths, config: PangiConfig) -> SqliteMigrationAdmin:
     """Build the configured migration administration adapter."""
 
-    return SqliteMigrationAdmin(paths, config.storage)
+    return SqliteMigrationAdmin(
+        paths,
+        config.storage,
+        audit_writer=_build_audit_writer(),
+    )
 
 
 def build_sqlite_database(paths: RuntimePaths, config: PangiConfig) -> SqliteDatabase:
     """Build the single-connection runtime database."""
 
-    return SqliteDatabase(paths, config.storage)
+    return SqliteDatabase(
+        paths,
+        config.storage,
+        migration_admin=build_migration_admin(paths, config),
+    )
+
+
+def _build_audit_writer() -> SqliteAuditWriter:
+    return SqliteAuditWriter(core_audit_redaction_service())
 
 
 def _build_run_event_writer() -> SqliteRunEventWriter:
@@ -52,11 +72,18 @@ def build_bootstrap_admin(
     """Build the Bootstrap use case against a shared SQLite runtime."""
 
     return BootstrapAdminService(
-        SqliteBootstrapStore(database),
+        SqliteBootstrapStore(database, _build_audit_writer()),
         Argon2idPasswordHasher(),
         public_base_url=f"http://{config.server.host}:{config.server.port}",
         grant_ttl_minutes=config.auth.bootstrap_grant_ttl_minutes,
     )
+
+
+def build_audit_query_service(database: SqliteDatabase) -> AuditQueryService:
+    """Build administrator-only Audit Event search use cases."""
+
+    writer = _build_audit_writer()
+    return AuditQueryService(SqliteAuditStore(database, writer))
 
 
 def build_auth_sessions(

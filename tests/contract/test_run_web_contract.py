@@ -204,6 +204,7 @@ def _app(
     return create_web_app(
         runtime_backend=Runtime(),
         readiness_probe=Readiness(),
+        audit_operations=api,
         bootstrap_admin=Bootstrap(),
         auth_sessions=auth,
         run_operations=api,

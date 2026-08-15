@@ -10,6 +10,7 @@ from pangi.adapters.inbound.web import create_web_app
 from pangi.adapters.outbound.initialization import FileSystemInitializer
 from pangi.adapters.outbound.logging import TelemetryRedactionFilter
 from pangi.adapters.outbound.persistence.sqlite.factory import (
+    build_audit_query_service,
     build_auth_sessions,
     build_bootstrap_admin,
     build_bootstrap_admin_for_cli,
@@ -51,6 +52,7 @@ def create_asgi_app(paths: RuntimePaths, config: PangiConfig) -> FastAPI:
     return create_web_app(
         runtime_backend=database,
         readiness_probe=LocalRuntimeReadinessProbe(database),
+        audit_operations=build_audit_query_service(database),
         bootstrap_admin=build_bootstrap_admin(database, config),
         auth_sessions=build_auth_sessions(database, config),
         run_operations=build_run_service(database),

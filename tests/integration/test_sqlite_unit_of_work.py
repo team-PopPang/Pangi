@@ -62,7 +62,7 @@ def test_start_applies_migrations_once_and_close_is_idempotent(tmp_path: Path) -
             runtime_connection = unit_of_work.connection
             row = await fetch_one(unit_of_work.connection, "PRAGMA user_version")
             assert row is not None
-            assert int(row[0]) == 3
+            assert int(row[0]) == 4
         async with database.create() as unit_of_work:
             assert unit_of_work.connection is runtime_connection
         await database.close()

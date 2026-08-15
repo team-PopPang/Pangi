@@ -2120,7 +2120,7 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 | `eligible_user_snapshots` | date, timezone, source, source_version, eligible_users | date+timezone+source_version Unique | 17 |
 | `usage_daily` | date, timezone, cohort_version_id, dimension_type, dimension_id, active_users, eligible_users, runs, runs_90d, success, failed, feedback_positive, feedback_negative | 집계 Dimension Unique | 17 |
 | `capability_packs` | name, version, manifest_json, fingerprint, state, health_json | name Unique | 20 |
-| `audit_events` | id, actor_id, action, resource_type, resource_id, metadata_json, created_at | Append-only | 06 |
+| `audit_events` | id, actor_id, action, resource_type, resource_id, metadata_json(schema_version, outcome, before/after/details Fingerprint, policy/redaction), created_at | Actor FK 없음, Append-only, 365일 Retention | 06 |
 
 ### 14.4 관계
 
@@ -2203,6 +2203,8 @@ Secret은 기본 Backup에서 제외한다. `--include-secrets`는 Master Key와
 원본 MCP Result와 Slack 원문은 기본 저장하지 않는다. Tool Result Summary와 Evidence Link만 저장한다.
 
 기능 Table의 만료 Query, Batch 삭제와 Pin/Soft Delete 예외는 해당 Table 소유 WBS가 구현한다. 공통 운영 Job과 Backup Artifact Retention은 WBS-19가 조율한다.
+
+`audit_events`는 Update를 항상 거부하고 생성 뒤 365일이 지나기 전에는 Delete도 거부한다. WBS-06은 만료 Event만 제한된 Batch로 삭제하는 Repository 경계를 제공한다. WBS-19는 이 경계를 호출하는 Retention Job과 운영 주기를 조율한다.
 
 ## 15. Memory 설계
 
@@ -3458,6 +3460,12 @@ Output Guardrail은 답의 의미를 다시 판단하거나 Markdown을 Slack Bl
 
 ### 21.6 Audit
 
+WBS-06.5의 `core-audit-v1`은 Actor·Action·Resource·Outcome, 이전·이후 Summary와 Details를 CRLF/NFC 정규화하고 `core-secret-v1`으로 Redact한다. 각 안전한 Summary와 전체 변경은 Canonical SHA-256 Fingerprint를 가진다. 원문 Token, Password, Prompt, Tool Result와 관리 요청 Payload는 저장하지 않는다.
+
+Action은 후속 기능이 확장할 수 있는 검증된 Namespace 문자열이다. `actor_id`는 사용자 ID와 `system.bootstrap`, `system.migration` 같은 System Actor를 모두 표현한다. Audit 기록은 사용자 삭제나 역할 변경 뒤에도 남아야 하므로 `users` Foreign Key를 사용하지 않는다.
+
+상태 변경을 동반하는 기능은 같은 SQLite Unit of Work에서 상태와 Audit Event를 함께 Commit한다. Audit Redaction이나 Insert가 실패하면 상태 변경도 Rollback한다. 현재 구현은 Bootstrap Grant 발급·회전, 최초 Admin 생성과 Migration 적용을 기록한다. 아래 미래 Action은 각 소유 WBS가 같은 최종 Writer에 연결한다.
+
 반드시 남길 Event:
 
 - Connection 생성/연결/재연결/종료
@@ -3480,7 +3488,9 @@ Output Guardrail은 답의 의미를 다시 판단하거나 Markdown을 Slack Bl
 - 외부 Linear/Plain Ticket 생성 승인·재사용·실패
 - Skill Prompt 조회와 사용자 Skill 삭제/복구
 
-Audit Metadata에는 이전/이후의 안전한 Summary와 Fingerprint를 남긴다. Secret과 원문 Token은 남기지 않는다.
+`GET /api/v1/audit-events`는 활성 Admin만 호출한다. Actor·Action·Resource·Outcome·기간 Filter와 Filter·Admin Scope에 묶인 Keyset Cursor를 사용한다. Audit Log 조회 자체는 새 Audit Event를 만들지 않는다.
+
+SQLite는 Audit Event Update와 365일 Retention 이전 Delete를 거부한다. 만료 Batch Purge는 WBS-06 Repository 경계를 사용하고 실제 Job은 WBS-19가 조율한다. React Audit Log 화면은 후속 Admin UI 범위에 남긴다.
 
 ## 22. 관측성과 운영
 

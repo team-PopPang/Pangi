@@ -112,3 +112,25 @@ def test_run_events_have_one_final_sqlite_write_boundary() -> None:
     assert sorted(insert_owners) == [
         "pangi/adapters/outbound/persistence/sqlite/event_writer.py"
     ]
+
+
+def test_audit_events_have_one_final_sqlite_insert_boundary() -> None:
+    insert_owners = []
+    for path in PANGI_ROOT.rglob("*.py"):
+        if "INSERT INTO audit_events" in path.read_text("utf-8"):
+            insert_owners.append(path.relative_to(SOURCE_ROOT).as_posix())
+
+    assert sorted(insert_owners) == [
+        "pangi/adapters/outbound/persistence/sqlite/audit.py"
+    ]
+
+
+def test_audit_events_have_one_retention_delete_boundary() -> None:
+    delete_owners = []
+    for path in PANGI_ROOT.rglob("*.py"):
+        if "DELETE FROM audit_events" in path.read_text("utf-8"):
+            delete_owners.append(path.relative_to(SOURCE_ROOT).as_posix())
+
+    assert sorted(delete_owners) == [
+        "pangi/adapters/outbound/persistence/sqlite/audit.py"
+    ]

@@ -1,5 +1,6 @@
 """Ports implemented by inbound and outbound adapters."""
 
+from pangi.application.ports.audit import AuditOperations
 from pangi.application.ports.auth import AuthSessionPort
 from pangi.application.ports.bootstrap_admin import BootstrapAdminPort
 from pangi.application.ports.readiness import ReadinessProbe
@@ -20,6 +21,7 @@ from pangi.application.ports.storage import (
 
 __all__ = (
     "BootstrapAdminPort",
+    "AuditOperations",
     "AuthSessionPort",
     "DatabaseSnapshotAdmin",
     "RuntimeBackend",

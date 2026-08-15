@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pangi.application.contracts.audit import AuditListPage
 from pangi.application.contracts.auth import AuthenticatedPrincipal, SessionView
 from pangi.application.contracts.bootstrap import BootstrapAdminResult
 from pangi.application.contracts.run_events import RunEventPage, RunQueueMetrics
 from pangi.application.contracts.run_queue import RunCancellation
 from pangi.application.contracts.runs import RunListPage, RunSummary
+from pangi.domain.audit import AuditEvent, AuditOutcome
 from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.runs import (
     AttachmentRef,
@@ -26,6 +29,18 @@ from pangi.domain.runs import (
 
 class _StrictApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+def _json_mapping(value: Mapping[str, object]) -> dict[str, object]:
+    return {str(key): _json_value(item) for key, item in value.items()}
+
+
+def _json_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _json_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in value]
+    return value
 
 
 class BootstrapAdminRequest(_StrictApiModel):
@@ -130,6 +145,42 @@ class SessionEnvelope(_StrictApiModel):
     @classmethod
     def from_contract(cls, session: SessionView) -> SessionEnvelope:
         return cls(session=SessionResponse.from_contract(session))
+
+
+class AuditEventResponse(_StrictApiModel):
+    id: str
+    actor_id: str
+    action: str
+    resource_type: str
+    resource_id: str
+    outcome: AuditOutcome
+    metadata: dict[str, object]
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, event: AuditEvent) -> AuditEventResponse:
+        return cls(
+            id=event.id,
+            actor_id=event.actor_id,
+            action=event.action,
+            resource_type=event.resource_type,
+            resource_id=event.resource_id,
+            outcome=event.outcome,
+            metadata=_json_mapping(event.metadata),
+            created_at=event.created_at,
+        )
+
+
+class AuditEventListEnvelope(_StrictApiModel):
+    items: tuple[AuditEventResponse, ...]
+    next_cursor: str | None
+
+    @classmethod
+    def from_contract(cls, page: AuditListPage) -> AuditEventListEnvelope:
+        return cls(
+            items=tuple(AuditEventResponse.from_domain(item) for item in page.items),
+            next_cursor=page.next_cursor,
+        )
 
 
 class AttachmentResponse(_StrictApiModel):
