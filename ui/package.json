@@ -4,8 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && vite build",
-    "check": "tsc --noEmit"
+    "api:check": "node scripts/generate-api-types.mjs --check",
+    "api:generate": "node scripts/generate-api-types.mjs",
+    "build": "npm run api:check && tsc --noEmit && vite build",
+    "check": "npm run api:check && tsc --noEmit"
   },
   "dependencies": {
     "react": "^19.1.1",
@@ -16,6 +18,7 @@
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.2"
   }
