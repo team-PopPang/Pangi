@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않아요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지 완료했고 WBS-06과 WBS-07을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. Model 호출 계약과 데이터 반출 정책 경계도 추가했지만 실제 Provider 호출은 아직 지원하지 않아요.
 
 ## 현재 구현 상태
 
@@ -14,7 +14,8 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
-| 07~20 | 예정 | Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
+| 07. Model Routing과 Egress Policy | 진행 중 | Model 요청·응답·오류 계약, Versioned Profile·Egress Policy, Data Class 합성, 결정적 후보 필터와 Redaction 선행 Provider 경계 |
+| 08~20 | 예정 | Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
 
@@ -154,12 +155,25 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 
 실제 영향 Eval Suite 선택·실행·활성화 Gate와 Snapshot 영속화는 WBS-15에서 구현해요. Web Search·MCP Result의 End-to-End Prompt Injection 검증은 WBS-10·15에서 연결해요.
 
+### Model Routing과 Egress Policy 기반
+
+- 모든 Model 요청은 논리 Profile, 목적, Source Kind, Data Class와 구조화 Output Schema를 명시해요.
+- Data Class는 `public`, `internal`, `confidential`, `personal`, `restricted` 순서로 더 민감해져요. 여러 Source가 있으면 전체 Class와 최고 등급을 함께 계산해요.
+- Versioned Model Profile은 Provider, Model, Region, 지원 Class·Source·목적, Retention, Raw Content와 명시적 후보 Priority를 고정해요.
+- Versioned Egress Policy는 허용 Provider·Model·Region·Class·Source·목적과 Redaction·Zero-retention·Raw Content 조건을 검사해요.
+- 후보는 요청의 모든 Data Class와 Source Kind를 지원해야 해요. 후보가 없거나 후보 ID·Priority가 중복되면 Provider를 호출하지 않고 `model_policy_denied`로 실패해요.
+- 허용된 입력도 중앙 Redaction을 항상 통과해요. Provider Port에는 Redaction 완료 Content와 안전한 Fingerprint만 전달해요.
+- Model Profile과 Egress Policy Fingerprint를 기존 Policy Impact Snapshot에 포함할 수 있어요.
+- Prompt, Output Schema와 구조화 Provider Output은 결과·오류·객체 표현에 포함하지 않아요.
+
+실제 OpenAI·Bedrock Adapter, 구조화 Output Schema 검증, Network Retry와 호출 계측, SQLite 영속화와 Model Policy 관리 화면은 후속 WBS-07 단계에서 구현해요.
+
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Engine·Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
-- Model Provider Routing과 데이터 반출 정책
+- 실제 Model Provider Adapter, Retry·사용량 계측, Policy 영속화와 관리 화면
 - Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
 - Slack 요청 수신과 응답 전달
@@ -324,6 +338,17 @@ uv run pytest \
   tests/contract/test_guardrail_security_contract.py \
   tests/unit/test_external_data_service.py \
   tests/unit/test_tool_guardrails.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### Model Routing과 Egress Policy만 검증
+
+WBS-07.1에서 구현한 Model 계약, Data Class 합성, 후보 Allow/Deny Matrix, Redaction 선행 실행과 Provider 호출 차단 경계를 확인하세요.
+
+```bash
+uv run pytest \
+  tests/unit/test_model_routing.py \
+  tests/contract/test_model_egress_contract.py \
   tests/architecture/test_dependency_rules.py
 ```
 

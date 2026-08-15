@@ -34,7 +34,7 @@
 | 04 | [Web/API Shell과 인증](04-web-api-shell-and-auth.md) | FastAPI, Admin SPA Shell, Local Bootstrap·Session과 공통 API/OpenAPI 계약을 만든다. | 01, 02, 03 | 완료 |
 | 05 | [Run 상태·Queue·Event](05-run-state-queue-and-events.md) | Run 계약, 영속 Queue, Idempotency·Cursor·SSE와 복구 흐름을 만든다. | 03, 04 | 완료 |
 | 06 | [Guardrail·보안·Audit](06-guardrails-security-and-audit.md) | 입력·Tool·출력 경계와 Audit 정책을 코드로 강제한다. | 02, 03, 05 | 진행 중 |
-| 07 | [Model Routing과 Egress Policy](07-model-routing-and-egress-policy.md) | Provider Adapter와 데이터 분류 기반 모델 반출 정책을 만든다. | 02, 03, 06 | 예정 |
+| 07 | [Model Routing과 Egress Policy](07-model-routing-and-egress-policy.md) | Provider Adapter와 데이터 분류 기반 모델 반출 정책을 만든다. | 02, 03, 06 | 진행 중 |
 | 08 | [Root Orchestrator와 실행 Engine](08-root-orchestrator-and-execution-engine.md) | Root 1회 Decision, Plan 검증, 실행과 결정적 결과 합성을 만든다. | 05, 06, 07 | 예정 |
 | 09 | [MCP 연결과 Tool Policy](09-mcp-connections-and-tool-policy.md) | MCP Transport, OAuth, Secret, Discovery, Tool 실행과 연결 UI를 만든다. | 03, 04, 06 | 예정 |
 | 10 | [Subagent와 Web Search](10-subagents-and-web-search.md) | 깊이 1 Subagent, 제한 병렬 실행, Synthesis와 안전한 Web 검색을 만든다. | 07, 08, 09 | 예정 |
