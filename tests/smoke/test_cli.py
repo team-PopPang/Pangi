@@ -25,7 +25,15 @@ import pangi
 for module in ('fastapi', 'mcp', 'slack_sdk', 'typer'):
     assert module not in sys.modules, module
 assert 'pangi.plugins' not in sys.modules
-assert pangi.__all__ == ('PangiConfig', 'PangiRuntime', '__version__')
+assert pangi.__all__ == (
+    'AttachmentRef',
+    'PangiConfig',
+    'PangiRuntime',
+    'Principal',
+    'RunEvent',
+    'RunRequest',
+    '__version__',
+)
 """
     subprocess.run([sys.executable, "-c", code], check=True)
 

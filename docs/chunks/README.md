@@ -32,7 +32,7 @@
 | 02 | [설정·Runtime Data·CLI](02-configuration-runtime-data-and-cli.md) | 설정, 데이터 경로, `init/start/status/doctor`의 첫 실행 경로를 만든다. | 01 | 완료 |
 | 03 | [SQLite 영속성과 Migration](03-sqlite-persistence-and-migrations.md) | 단일 Process SQLite Profile, Unit of Work, Migration과 DB Snapshot 기반을 만든다. | 01, 02 | 완료 |
 | 04 | [Web/API Shell과 인증](04-web-api-shell-and-auth.md) | FastAPI, Admin SPA Shell, Local Bootstrap·Session과 공통 API/OpenAPI 계약을 만든다. | 01, 02, 03 | 완료 |
-| 05 | [Run 상태·Queue·Event](05-run-state-queue-and-events.md) | Run 계약, 영속 Queue, Idempotency·Cursor·SSE와 복구 흐름을 만든다. | 03, 04 | 예정 |
+| 05 | [Run 상태·Queue·Event](05-run-state-queue-and-events.md) | Run 계약, 영속 Queue, Idempotency·Cursor·SSE와 복구 흐름을 만든다. | 03, 04 | 진행 중 |
 | 06 | [Guardrail·보안·Audit](06-guardrails-security-and-audit.md) | 입력·Tool·출력 경계와 Audit 정책을 코드로 강제한다. | 02, 03, 05 | 예정 |
 | 07 | [Model Routing과 Egress Policy](07-model-routing-and-egress-policy.md) | Provider Adapter와 데이터 분류 기반 모델 반출 정책을 만든다. | 02, 03, 06 | 예정 |
 | 08 | [Root Orchestrator와 실행 Engine](08-root-orchestrator-and-execution-engine.md) | Root 1회 Decision, Plan 검증, 실행과 결정적 결과 합성을 만든다. | 05, 06, 07 | 예정 |

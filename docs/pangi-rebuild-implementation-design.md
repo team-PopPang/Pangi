@@ -676,6 +676,7 @@ stateDiagram-v2
     planning --> queued: valid decision
     planning --> failed: model/schema/policy error
     queued --> running: worker claim
+    queued --> cancelled: user/admin cancel
     running --> composing: all required steps done
     running --> failed: required step failed
     running --> cancelled: user/admin cancel
@@ -690,10 +691,12 @@ stateDiagram-v2
     completed --> [*]
 ```
 
+Run Step은 `queued → running → completed|failed|cancelled|interrupted`를 사용한다. `queued → cancelled`, `interrupted → queued|failed`도 허용하며 나머지 Edge는 Domain Policy가 거부한다.
+
 ### 7.5 실패와 Partial Result
 
 - Required Step 하나가 실패하면 Run은 `failed`다.
-- Optional Step이 실패하면 Reducer는 해당 출처 실패를 표시하고 나머지 결과를 반환할 수 있다.
+- Optional Step이 실패하면 Reducer는 해당 출처 실패를 Warning으로 표시하고 Run을 `completed`로 종료할 수 있다. 별도 `partial` Run 상태는 두지 않는다.
 - 인증 만료는 `connection_auth_expired`로 분류하고 재연결 Link를 제공한다.
 - Tool Timeout은 같은 요청에서 자동 재호출하지 않는다. Tool이 명시적으로 Idempotent이고 Policy에 Retry가 설정된 경우만 1회 재시도한다.
 - Root Orchestrator가 실패하면 Subagent를 실행하지 않는다.
@@ -712,26 +715,42 @@ stateDiagram-v2
 
 Claim에는 `worker_id`, `lease_expires_at`, `heartbeat_at`을 기록한다. 단일 Process Profile에서도 Crash Recovery와 중복 방지를 위해 Lease를 사용한다.
 
+Restart 뒤 `queued` Run을 복구하려면 실행 입력도 함께 영속해야 한다. `runs`에는 Channel Adapter가 정규화한 Request Text와 Attachment 참조만 저장한다. Slack Event 원본 JSON, Attachment 본문, Provider Prompt와 Tool Result 원문은 저장하지 않는다.
+
 ## 8. Core 계약
 
 ### 8.1 RunRequest
 
 ```python
-class Principal(BaseModel):
-    user_id: str
-    role: Literal["member", "skill_author", "admin", "system"]
-    channel: Literal["slack", "api", "dashboard", "scheduler", "eval"]
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import datetime
 
-class RunRequest(BaseModel):
+@dataclass(frozen=True, slots=True)
+class AttachmentRef:
+    reference: str
+    display_name: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    fingerprint: str | None = None
+
+@dataclass(frozen=True, slots=True)
+class Principal:
+    user_id: str
+    role: UserRole
+    channel: PrincipalChannel
+
+@dataclass(frozen=True, slots=True)
+class RunRequest:
     request_id: str
     principal: Principal
     text: str
+    idempotency_key: str
+    created_at: datetime
     thread_key: str | None = None
     explicit_skill: str | None = None
     schedule_id: str | None = None
-    attachments: list["AttachmentRef"] = []
-    idempotency_key: str
-    created_at: datetime
+    attachments: tuple[AttachmentRef, ...] = ()
 ```
 
 ### 8.2 AgentResult
@@ -774,15 +793,16 @@ class ToolPolicy(BaseModel):
 ### 8.4 Event
 
 ```python
-class RunEvent(BaseModel):
+@dataclass(frozen=True, slots=True)
+class RunEvent:
     run_id: str
     index: int
     type: str
-    visibility: Literal["public", "admin", "internal"]
+    visibility: EventVisibility
+    created_at: datetime
     step_id: str | None = None
     message: str | None = None
-    attributes: dict = {}
-    created_at: datetime
+    attributes: Mapping[str, object] = field(default_factory=dict)
 ```
 
 Event Type은 Namespace를 사용한다.
@@ -2033,7 +2053,7 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 | `auth_identities` | id, user_id, provider, subject, password_hash, created_at, updated_at | provider+subject Unique, Local만 Argon2id Hash | 04 |
 | `auth_sessions` | id, user_id, token_hash, csrf_hash, expires_at, rotated_at, state | 원문 Token 미저장, 만료 필수 | 04 |
 | `bootstrap_grants` | id, token_hash, expires_at, consumed_at, consumed_by_user_id, revoked_at, created_at | Active Grant 최대 1개, 일회용 | 04 |
-| `api_idempotency_records` | principal_id, route_key, idempotency_key, request_fingerprint, response_json, state, expires_at | principal+route+key Unique | 04 |
+| `api_idempotency_records` | principal_id, route_key, idempotency_key, request_fingerprint, response_json, state, run_id, expires_at, timestamps | principal+route+key Unique | 05 |
 | `connections` | id, kind, display_name, display_qualifier, scope, owner_user_id, transport, state, config_json, secret_ref | User Scope면 owner 필수 | 09 |
 | `connection_tools` | connection_id, stable_tool_id, remote_name, schema_json, fingerprint, state | connection+stable ID Unique | 09 |
 | `tool_policies` | connection_id, stable_tool_id, effect, permission, approval, limits_json | Tool당 Active 1개 | 09 |
@@ -2043,9 +2063,9 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 | `holiday_calendar_versions` | id, calendar_id, version, dates_json, source, source_fingerprint, state | calendar+version Unique, 불변 | 14 |
 | `schedules` | id, owner_user_id, kind, cron, timezone, target_type, request_text_ciphertext, request_key_version, request_fingerprint, skill_version_id, input_json, holiday_policy, holiday_calendar_version_id, next_run_at, revision, state | Target XOR, revision 증가 | 14 |
 | `schedule_runs` | id, schedule_id, scheduled_for, run_id, state, skip_reason | schedule+scheduled_for Unique | 14 |
-| `runs` | id, request_id, principal_id, trigger, state, mode, skill_version_id, idempotency_key, worker_id, lease_expires_at, heartbeat_at, timestamps | idempotency_key Unique | 05 |
-| `run_steps` | id, run_id, node_id, type, state, attempt, depends_on_json, timestamps, error_code | run+node+attempt Unique | 05 |
-| `run_events` | run_id, event_index, type, visibility, step_id, attributes_json, created_at | run+index Unique | 05 |
+| `runs` | id, request_id, principal_id, trigger, state, mode, skill_version_id, normalized request, idempotency_key, revision, worker_id, lease_expires_at, heartbeat_at, timestamps | request_id Unique, idempotency_key는 비고유 | 05 |
+| `run_steps` | id, run_id, node_id, type, state, requirement, idempotent, attempt, depends_on_json, timestamps, error_code | run+node+attempt Unique | 05 |
+| `run_events` | run_id, event_index, type, visibility, step_id, message, attributes_json, created_at | run+index Unique | 05 |
 | `model_policies` | id, name, version, rules_json, fingerprint, state, eval_run_id | Active Version 불변 | 07 |
 | `model_invocations` | run_id, step_id, role, provider, model, region, policy_id, data_classes_json, source_kinds_json, redaction_count, input_fingerprint, logical_calls, provider_requests, token, duration, state | 원문 Prompt 미저장 | 07 |
 | `tool_invocations` | run_id, step_id, connection_id, stable_tool_id, redacted_arguments, result_summary, duration, state | Secret 미저장 | 09 |
@@ -2422,7 +2442,7 @@ AB180처럼 제품이 조직의 반복 업무가 됐는지 확인하려면 시�
 
 정의:
 
-- Active User: 집계 기간에 `completed`, `partial`, `failed` 중 하나의 실제 Run을 만든 고유 사용자. `eval`, `system`, Health 호출은 제외한다.
+- Active User: 집계 기간에 `completed`, `failed` 중 하나의 실제 Run을 만든 고유 사용자. Optional Step 실패는 Warning이 있는 `completed`로 센다. `eval`, `system`, Health 호출은 제외한다.
 - DAU/WAU/MAU: Instance Timezone의 1일/7일/30일 Rolling Window 고유 Active User다.
 - Stickiness: `DAU / MAU`, `WAU / MAU`다. 분모가 0이면 `null`로 표시한다.
 - Returning User: 이전 집계 기간에도 Active였던 사용자다.
@@ -2889,9 +2909,9 @@ config = PangiConfig.load("/etc/pangi/pangi.toml")
 async with PangiRuntime.create(config) as pangi:
     result = await pangi.run(
         RunRequest(
-            request_id="example",
+            request_id="example-request",
             principal=Principal(
-                user_id="service-user",
+                user_id="service-user-0001",
                 role="member",
                 channel="api",
             ),
