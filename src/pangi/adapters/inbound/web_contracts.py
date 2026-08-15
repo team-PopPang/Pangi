@@ -9,7 +9,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from pangi.application.contracts.auth import AuthenticatedPrincipal, SessionView
 from pangi.application.contracts.bootstrap import BootstrapAdminResult
+from pangi.application.contracts.run_events import RunEventPage, RunQueueMetrics
+from pangi.application.contracts.run_queue import RunCancellation
+from pangi.application.contracts.runs import RunListPage, RunSummary
 from pangi.domain.auth import UserRole, UserStatus
+from pangi.domain.runs import (
+    AttachmentRef,
+    EventVisibility,
+    PrincipalChannel,
+    Run,
+    RunEvent,
+    RunMode,
+    RunState,
+)
 
 
 class _StrictApiModel(BaseModel):
@@ -118,6 +130,188 @@ class SessionEnvelope(_StrictApiModel):
     @classmethod
     def from_contract(cls, session: SessionView) -> SessionEnvelope:
         return cls(session=SessionResponse.from_contract(session))
+
+
+class AttachmentResponse(_StrictApiModel):
+    reference: str
+    display_name: str | None
+    media_type: str | None
+    size_bytes: int | None
+    fingerprint: str | None
+
+    @classmethod
+    def from_domain(cls, attachment: AttachmentRef) -> AttachmentResponse:
+        return cls(
+            reference=attachment.reference,
+            display_name=attachment.display_name,
+            media_type=attachment.media_type,
+            size_bytes=attachment.size_bytes,
+            fingerprint=attachment.fingerprint,
+        )
+
+
+class RunRequestResponse(_StrictApiModel):
+    request_id: str
+    principal_id: str
+    trigger: PrincipalChannel
+    text: str
+    thread_key: str | None
+    explicit_skill: str | None
+    schedule_id: str | None
+    attachments: tuple[AttachmentResponse, ...]
+    created_at: datetime
+
+
+class RunResponse(_StrictApiModel):
+    id: str
+    request: RunRequestResponse
+    state: RunState
+    mode: RunMode | None
+    skill_version_id: str | None
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    warnings: tuple[str, ...]
+    error_code: str | None
+
+    @classmethod
+    def from_domain(cls, run: Run) -> RunResponse:
+        request = run.request
+        return cls(
+            id=run.id,
+            request=RunRequestResponse(
+                request_id=request.request_id,
+                principal_id=request.principal.user_id,
+                trigger=request.principal.channel,
+                text=request.text,
+                thread_key=request.thread_key,
+                explicit_skill=request.explicit_skill,
+                schedule_id=request.schedule_id,
+                attachments=tuple(
+                    AttachmentResponse.from_domain(attachment)
+                    for attachment in request.attachments
+                ),
+                created_at=request.created_at,
+            ),
+            state=run.state,
+            mode=run.mode,
+            skill_version_id=run.skill_version_id,
+            revision=run.revision,
+            created_at=request.created_at,
+            updated_at=run.updated_at,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            warnings=run.warnings,
+            error_code=run.error_code,
+        )
+
+
+class RunEnvelope(_StrictApiModel):
+    run: RunResponse
+
+    @classmethod
+    def from_domain(cls, run: Run) -> RunEnvelope:
+        return cls(run=RunResponse.from_domain(run))
+
+
+class RunSummaryResponse(_StrictApiModel):
+    id: str
+    request_id: str
+    principal_id: str
+    trigger: PrincipalChannel
+    state: RunState
+    mode: RunMode | None
+    skill_version_id: str | None
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    warning_count: int
+    error_code: str | None
+
+    @classmethod
+    def from_contract(cls, summary: RunSummary) -> RunSummaryResponse:
+        return cls(**{
+            field: getattr(summary, field)
+            for field in cls.model_fields
+        })
+
+
+class RunListEnvelope(_StrictApiModel):
+    items: tuple[RunSummaryResponse, ...]
+    next_cursor: str | None
+
+    @classmethod
+    def from_contract(cls, page: RunListPage) -> RunListEnvelope:
+        return cls(
+            items=tuple(RunSummaryResponse.from_contract(item) for item in page.items),
+            next_cursor=page.next_cursor,
+        )
+
+
+class RunCancellationEnvelope(_StrictApiModel):
+    run: RunResponse
+    changed: bool
+
+    @classmethod
+    def from_contract(cls, result: RunCancellation) -> RunCancellationEnvelope:
+        return cls(run=RunResponse.from_domain(result.run), changed=result.changed)
+
+
+class RunEventResponse(_StrictApiModel):
+    run_id: str
+    index: int
+    type: str
+    visibility: EventVisibility
+    step_id: str | None
+    message: str | None
+    attributes: dict[str, object]
+    created_at: datetime
+
+    @classmethod
+    def from_domain(cls, event: RunEvent) -> RunEventResponse:
+        return cls(
+            run_id=event.run_id,
+            index=event.index,
+            type=event.type,
+            visibility=event.visibility,
+            step_id=event.step_id,
+            message=event.message,
+            attributes=dict(event.attributes),
+            created_at=event.created_at,
+        )
+
+
+class RunEventListEnvelope(_StrictApiModel):
+    items: tuple[RunEventResponse, ...]
+    next_after_index: int | None
+    terminal: bool
+
+    @classmethod
+    def from_contract(cls, page: RunEventPage) -> RunEventListEnvelope:
+        return cls(
+            items=tuple(RunEventResponse.from_domain(item) for item in page.items),
+            next_after_index=page.next_after_index,
+            terminal=page.terminal,
+        )
+
+
+class RunQueueMetricsResponse(_StrictApiModel):
+    queue_depth: int
+    running_count: int
+    expired_lease_count: int
+    oldest_queued_at: datetime | None
+    oldest_queued_age_seconds: float | None
+
+    @classmethod
+    def from_contract(cls, metrics: RunQueueMetrics) -> RunQueueMetricsResponse:
+        return cls(**{
+            field: getattr(metrics, field)
+            for field in cls.model_fields
+        })
 
 
 class ErrorBody(_StrictApiModel):

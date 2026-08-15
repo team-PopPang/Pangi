@@ -5,6 +5,7 @@ from pangi.adapters.outbound.passwords import Argon2idPasswordHasher
 from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
+from pangi.adapters.outbound.persistence.sqlite.run_events import SqliteRunEventStore
 from pangi.adapters.outbound.persistence.sqlite.runs import (
     SqliteRunQueueStore,
     SqliteRunStore,
@@ -14,6 +15,11 @@ from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.run_queue import RunQueuePolicy
 from pangi.application.services.auth import AuthSessionService
 from pangi.application.services.bootstrap_admin import BootstrapAdminService
+from pangi.application.services.run_events import (
+    RunCancellationService,
+    RunEventService,
+    RunQueueMetricService,
+)
 from pangi.application.services.run_queue import RunQueueService
 from pangi.application.services.runs import RunService
 from pangi.config import PangiConfig
@@ -78,6 +84,29 @@ def build_run_queue_service(
     """Build persistent queue use cases with an explicitly approved timing policy."""
 
     return RunQueueService(SqliteRunQueueStore(database), policy)
+
+
+def build_run_cancellation_service(
+    database: SqliteDatabase,
+) -> RunCancellationService:
+    """Build owner-authorized Run cancellation without starting a worker runtime."""
+
+    return RunCancellationService(
+        SqliteRunStore(database),
+        SqliteRunQueueStore(database),
+    )
+
+
+def build_run_event_service(database: SqliteDatabase) -> RunEventService:
+    """Build owner- and visibility-scoped Run Event delivery."""
+
+    return RunEventService(SqliteRunEventStore(database))
+
+
+def build_run_queue_metric_service(database: SqliteDatabase) -> RunQueueMetricService:
+    """Build administrator-only Queue metric delivery."""
+
+    return RunQueueMetricService(SqliteRunEventStore(database))
 
 
 def build_bootstrap_admin_for_cli(

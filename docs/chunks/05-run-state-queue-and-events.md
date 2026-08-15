@@ -2,7 +2,7 @@
 
 ## 요약
 
-모든 Channel과 Scheduler 요청을 하나의 `RunRequest`로 수렴시키고, Run/Step/Event 상태, 영속 Queue, Lease와 중단 복구를 구현한다.
+모든 Channel과 Scheduler 요청을 하나의 `RunRequest`로 수렴시키고, Run/Step/Event 상태, 영속 Queue, Lease·중단 복구와 조회·취소·Event 전달 API를 구현한다.
 
 ## 목표
 
@@ -63,6 +63,12 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 중단된 Non-idempotent Step은 자동 재실행하지 않고 실패로 종료한다.
 - Event는 `run_id + index`로 순서를 보장하고 Public/Admin/Internal Visibility를 적용한다.
 - Event Attribute는 구조화 Summary와 Fingerprint만 저장하고 Chain-of-Thought, Prompt와 Tool Result 원문을 금지한다.
+- Run 목록과 상세는 Owner Scope를 적용하고, 목록 응답에는 요청 본문과 Attachment를 포함하지 않는다. 상세 응답도 Idempotency Key, Worker ID, Lease와 Heartbeat는 노출하지 않는다.
+- Run 취소는 `queued`와 `running`에서만 허용하며, Session 인증과 Owner/Admin 검사 뒤 Same-origin·CSRF 검증을 통과해야 한다.
+- Event HTTP 조회에서 Owner는 `public`, Admin은 `public`과 `admin`만 볼 수 있다. `internal` Event는 어떤 HTTP 역할에도 반환하지 않는다.
+- Event 조회는 JSON Page와 SSE를 같은 경로에서 제공한다. SSE 재연결은 `Last-Event-ID`를 최초 `after`보다 우선하고, 각 Poll의 짧은 조회 Transaction을 종료한 뒤 대기한다.
+- SSE는 기본 한 Poll당 100개, 1초 Poll, 15초 Keepalive 정책을 주입받는다. 매 Poll마다 Session을 다시 확인하고 Terminal Run의 조회 가능한 Event를 모두 보낸 뒤 닫는다.
+- Admin Queue Metric은 `queue_depth`, `running_count`, `expired_lease_count`, `oldest_queued_at`, `oldest_queued_age_seconds`만 반환하고 Run ID나 요청 내용을 포함하지 않는다.
 
 ## 구현 체크리스트
 
@@ -75,11 +81,11 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Queue 조회, `BEGIN IMMEDIATE` Claim과 동시 실행 Semaphore를 구현한다.
 - [x] Lease, Heartbeat, Cancel과 Startup Recovery를 구현한다.
 - [x] Idempotent/Non-idempotent 복구 정책을 연결한다.
-- [ ] Event Store와 Visibility Filter를 구현한다.
+- [x] Event Store와 Visibility Filter를 구현한다.
 - [x] Run 목록·상세 조회의 Resource Owner 조건을 구현한다.
-- [ ] Run 취소·Event 조회의 Resource Owner 조건을 구현한다.
-- [ ] Run 상세/검색/취소/SSE API를 구현한다.
-- [ ] 오래된 `running`과 `queued` Run에 대한 운영 Metric을 연결한다.
+- [x] Run 취소·Event 조회의 Resource Owner 조건을 구현한다.
+- [x] Run 상세/검색/취소/SSE API를 구현한다.
+- [x] 오래된 `running`과 `queued` Run에 대한 운영 Metric을 연결한다.
 
 ## 검증 체크리스트
 
@@ -90,10 +96,10 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] 같은 Idempotency Key의 Run이 중복 생성되지 않는지 확인한다.
 - [x] Cursor 재사용에서 Run이 중복되거나 누락되지 않는지 확인한다.
 - [x] 다른 사용자의 Run 목록·상세 조회를 거부하는지 확인한다.
-- [ ] 다른 사용자의 Run 취소·Event 조회를 거부하는지 확인한다.
-- [ ] Event Index가 중복되거나 역전되지 않는지 확인한다.
-- [ ] SSE 재연결에서 Last Event 이후 항목만 전달되는지 확인한다.
-- [ ] Event와 API에 Chain-of-Thought/원문 Prompt/Secret이 없는지 검사한다.
+- [x] 다른 사용자의 Run 취소·Event 조회를 거부하는지 확인한다.
+- [x] Event Index가 중복되거나 역전되지 않는지 확인한다.
+- [x] SSE 재연결에서 Last Event 이후 항목만 전달되는지 확인한다.
+- [x] Event와 API에 Chain-of-Thought/원문 Prompt/Secret이 없는지 검사한다.
 
 ## 1차 구현 결과
 
@@ -125,6 +131,17 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Queue 상태 변경과 `run.queued`, `run.running`, `run.interrupted`, `run.cancelled`, `run.failed` Event를 같은 Transaction에 저장한다.
 - Lease Duration과 Heartbeat Interval은 `RunQueuePolicy`로 주입한다. 운영 Baseline 없이 공개 설정 기본값을 고정하지 않았고 Test는 명시적인 시간 정책을 사용한다.
 - 실제 Root Orchestrator와 실행 Handler는 WBS-08에서, Owner 기반 취소 API·Event 조회·SSE·Queue Metric은 WBS-05.4에서 연결하므로 WBS-05 상태는 `진행 중`으로 유지한다.
+
+## 4차 구현 결과
+
+- Owner/Admin 범위의 `GET /api/v1/runs`, `GET /api/v1/runs/{run_id}`와 CSRF·Origin을 검증하는 `POST /api/v1/runs/{run_id}/cancel`을 ASGI Composition Root에 연결했다.
+- 범용 Event Store가 `BEGIN IMMEDIATE` 안에서 Run별 다음 Index를 배정한다. 동시 Append에서도 Index가 연속적이고 중복되지 않는지 Integration Test로 고정했다.
+- `GET /api/v1/runs/{run_id}/events`가 JSON Page와 SSE를 함께 제공한다. SSE는 `Last-Event-ID` 우선 재개, `run-event` Frame, Poll별 Session 재검증, Keepalive와 Terminal 종료를 지원한다.
+- Owner는 Public Event만, Admin은 Public·Admin Event만 조회한다. Internal Event는 저장은 가능하지만 HTTP 응답과 SSE에서 항상 제외한다.
+- 각 SSE Poll의 SQLite Unit of Work를 Commit한 뒤 Stream Yield·대기를 수행해 단일 Connection과 Writer를 장시간 점유하지 않는다.
+- Admin 전용 `GET /api/v1/runs/metrics`가 Queue 깊이, 실행 수, 만료 Lease 수와 가장 오래된 대기 시간을 식별자 없이 반환한다.
+- OpenAPI 산출물, Frontend 생성 Type, JSON API Client와 `EventSource` Helper를 동기화했다. Run 화면과 Navigation 활성화는 WBS-12 범위로 남겼다.
+- Owner·Visibility·동시 Event Index·CSRF·`Last-Event-ID`·Terminal 종료·Poll 대기 경계·Metric을 Contract와 Integration Test로 검증했으므로 WBS-05를 완료한다.
 
 ## 완료 조건
 

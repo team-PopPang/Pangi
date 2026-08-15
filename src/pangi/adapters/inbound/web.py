@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import secrets
@@ -14,9 +15,9 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import RequestResponseEndpoint
@@ -27,9 +28,17 @@ from pangi.adapters.inbound.web_contracts import (
     BootstrapAdminResponse,
     ErrorEnvelope,
     LoginRequest,
+    RunCancellationEnvelope,
+    RunEnvelope,
+    RunEventListEnvelope,
+    RunEventResponse,
+    RunListEnvelope,
+    RunQueueMetricsResponse,
     SessionEnvelope,
 )
 from pangi.application.contracts.auth import AuthenticatedPrincipal, IssuedSession
+from pangi.application.contracts.run_events import RunEventStreamPolicy
+from pangi.application.contracts.runs import RunListQuery
 from pangi.application.ports.auth import (
     AuthenticationError,
     AuthenticationRequiredError,
@@ -45,9 +54,33 @@ from pangi.application.ports.bootstrap_admin import (
     InvalidBootstrapGrantError,
 )
 from pangi.application.ports.readiness import ReadinessProbe
+from pangi.application.ports.run_events import (
+    InvalidRunEventCursorError,
+    RunCancellationOperations,
+    RunEventError,
+    RunEventNotFoundError,
+    RunEventOperations,
+    RunEventPersistenceError,
+    RunQueueMetricOperations,
+    RunQueueMetricPersistenceError,
+)
+from pangi.application.ports.run_queue import (
+    RunQueueConflictError,
+    RunQueueError,
+    RunQueueNotFoundError,
+    RunQueuePersistenceError,
+)
+from pangi.application.ports.runs import (
+    InvalidRunCursorError,
+    RunNotFoundError,
+    RunOperationError,
+    RunOperations,
+    RunPersistenceError,
+)
 from pangi.application.ports.runtime import RuntimeBackend
 from pangi.application.services.auth import ensure_role
 from pangi.domain.auth import UserRole
+from pangi.domain.runs import PrincipalChannel, RunState
 
 _LOGGER = logging.getLogger(__name__)
 _CONTENT_SECURITY_POLICY = "; ".join(
@@ -71,6 +104,10 @@ _SESSION_COOKIE = "pangi_session"
 _CSRF_COOKIE = "pangi_csrf"
 _SECURE_SESSION_COOKIE = "__Host-pangi_session"
 _SECURE_CSRF_COOKIE = "__Host-pangi_csrf"
+_EVENT_INDEX = re.compile(r"^(?:0|[1-9][0-9]{0,18})$")
+_DEFAULT_EVENT_STREAM_POLICY = RunEventStreamPolicy()
+
+Sleeper = Callable[[float], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,13 +227,30 @@ def _csrf_token(request: Request) -> str:
     return header
 
 
+def _event_index(value: str | None, *, default: int) -> int:
+    if value is None:
+        return default
+    if _EVENT_INDEX.fullmatch(value) is None:
+        raise InvalidRunEventCursorError("The Run Event cursor is invalid")
+    index = int(value)
+    if index > 9_223_372_036_854_775_807:
+        raise InvalidRunEventCursorError("The Run Event cursor is invalid")
+    return index
+
+
 def create_web_app(
     *,
     runtime_backend: RuntimeBackend,
     readiness_probe: ReadinessProbe,
     bootstrap_admin: BootstrapAdminPort,
     auth_sessions: AuthSessionPort,
+    run_operations: RunOperations,
+    run_cancellations: RunCancellationOperations,
+    run_events: RunEventOperations,
+    run_queue_metrics: RunQueueMetricOperations,
     static_root: Path,
+    event_stream_policy: RunEventStreamPolicy = _DEFAULT_EVENT_STREAM_POLICY,
+    event_stream_sleeper: Sleeper = asyncio.sleep,
 ) -> FastAPI:
     """Create an ASGI application without importing concrete outbound adapters."""
 
@@ -293,6 +347,108 @@ def create_web_app(
             status_code=403,
             code="permission_denied",
             message="The authenticated role is not allowed",
+        )
+
+    @app.exception_handler(RunOperationError)
+    async def run_operation_error(
+        request: Request,
+        error: RunOperationError,
+    ) -> JSONResponse:
+        if isinstance(error, InvalidRunCursorError):
+            return error_response(
+                request,
+                status_code=400,
+                code=error.code,
+                message="The Run cursor is invalid",
+            )
+        if isinstance(error, RunNotFoundError):
+            return error_response(
+                request,
+                status_code=404,
+                code=error.code,
+                message="The Run was not found",
+            )
+        if isinstance(error, RunPersistenceError):
+            return error_response(
+                request,
+                status_code=503,
+                code=error.code,
+                message="The Run store is unavailable",
+            )
+        return error_response(
+            request,
+            status_code=409,
+            code=error.code,
+            message="The Run operation conflicts with its current state",
+        )
+
+    @app.exception_handler(RunEventError)
+    async def run_event_error(
+        request: Request,
+        error: RunEventError,
+    ) -> JSONResponse:
+        if isinstance(error, InvalidRunEventCursorError):
+            return error_response(
+                request,
+                status_code=400,
+                code=error.code,
+                message="The Run Event cursor is invalid",
+            )
+        if isinstance(error, RunEventNotFoundError):
+            return error_response(
+                request,
+                status_code=404,
+                code=error.code,
+                message="The Run was not found",
+            )
+        if isinstance(
+            error,
+            (RunEventPersistenceError, RunQueueMetricPersistenceError),
+        ):
+            return error_response(
+                request,
+                status_code=503,
+                code=error.code,
+                message="Run operational data is unavailable",
+            )
+        return error_response(
+            request,
+            status_code=409,
+            code=error.code,
+            message="The Run Event operation conflicts with its current state",
+        )
+
+    @app.exception_handler(RunQueueError)
+    async def run_queue_error(
+        request: Request,
+        error: RunQueueError,
+    ) -> JSONResponse:
+        if isinstance(error, RunQueueNotFoundError):
+            return error_response(
+                request,
+                status_code=404,
+                code="run_not_found",
+                message="The Run was not found",
+            )
+        if isinstance(error, RunQueueConflictError):
+            return error_response(
+                request,
+                status_code=409,
+                code=error.code,
+                message="The Run cannot be cancelled in its current state",
+            )
+        if isinstance(error, RunQueuePersistenceError):
+            return error_response(
+                request,
+                status_code=503,
+                code=error.code,
+                message="The Run Queue is unavailable",
+            )
+        return error_response(
+            request,
+            status_code=409,
+            code=error.code,
+            message="The Run Queue operation conflicts with its current state",
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -552,6 +708,193 @@ def create_web_app(
         response = Response(status_code=204)
         _clear_session_cookies(response, request)
         return response
+
+    @app.get(
+        "/api/v1/runs",
+        operation_id="listRuns",
+        response_model=RunListEnvelope,
+        responses={
+            400: {"model": ErrorEnvelope, "description": "Invalid Run cursor"},
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Run store unavailable"},
+        },
+    )
+    async def list_runs(
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+        states: Annotated[list[RunState] | None, Query(alias="state")] = None,
+        triggers: Annotated[
+            list[PrincipalChannel] | None,
+            Query(alias="trigger"),
+        ] = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> RunListEnvelope:
+        try:
+            query = RunListQuery(
+                states=tuple(states or ()),
+                triggers=tuple(triggers or ()),
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as error:
+            raise InvalidRunCursorError("The Run cursor is invalid") from error
+        page = await run_operations.list_runs(actor=principal, query=query)
+        return RunListEnvelope.from_contract(page)
+
+    @app.get(
+        "/api/v1/runs/metrics",
+        operation_id="getRunQueueMetrics",
+        response_model=RunQueueMetricsResponse,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "Administrator required"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Metric store unavailable"},
+        },
+    )
+    async def get_run_queue_metrics(
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+    ) -> RunQueueMetricsResponse:
+        metrics = await run_queue_metrics.queue_metrics(actor=principal)
+        return RunQueueMetricsResponse.from_contract(metrics)
+
+    @app.get(
+        "/api/v1/runs/{run_id}",
+        operation_id="getRun",
+        response_model=RunEnvelope,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            404: {"model": ErrorEnvelope, "description": "Run not found"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Run store unavailable"},
+        },
+    )
+    async def get_run(
+        run_id: str,
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+    ) -> RunEnvelope:
+        run = await run_operations.get_run(actor=principal, run_id=run_id)
+        return RunEnvelope.from_domain(run)
+
+    @app.post(
+        "/api/v1/runs/{run_id}/cancel",
+        operation_id="cancelRun",
+        response_model=RunCancellationEnvelope,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "CSRF or origin rejected"},
+            404: {"model": ErrorEnvelope, "description": "Run not found"},
+            409: {"model": ErrorEnvelope, "description": "Run state conflict"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Run Queue unavailable"},
+        },
+    )
+    async def cancel_run(
+        run_id: str,
+        request: Request,
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+    ) -> RunCancellationEnvelope:
+        if not _origin_allowed(request, required=True):
+            raise CsrfRejectedError("The request origin is invalid")
+        _csrf_token(request)
+        result = await run_cancellations.cancel_run(actor=principal, run_id=run_id)
+        return RunCancellationEnvelope.from_contract(result)
+
+    @app.get(
+        "/api/v1/runs/{run_id}/events",
+        operation_id="getRunEvents",
+        response_model=RunEventListEnvelope,
+        responses={
+            200: {
+                "description": "JSON Event page or resumable Event stream",
+                "content": {
+                    "text/event-stream": {
+                        "schema": {"type": "string"},
+                    }
+                },
+            },
+            400: {"model": ErrorEnvelope, "description": "Invalid Event cursor"},
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            404: {"model": ErrorEnvelope, "description": "Run not found"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Event store unavailable"},
+        },
+    )
+    async def get_run_events(
+        run_id: str,
+        request: Request,
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+        after: str | None = None,
+        limit: int = 100,
+    ) -> RunEventListEnvelope | StreamingResponse:
+        initial_after = _event_index(after, default=0)
+        if not 1 <= limit <= 100:
+            raise InvalidRunEventCursorError("The Run Event page limit is invalid")
+        accepts_sse = "text/event-stream" in request.headers.get("accept", "").casefold()
+        if not accepts_sse:
+            page = await run_events.list_events(
+                actor=principal,
+                run_id=run_id,
+                after_index=initial_after,
+                limit=limit,
+            )
+            return RunEventListEnvelope.from_contract(page)
+
+        last_event_id = request.headers.get("last-event-id")
+        stream_after = _event_index(last_event_id, default=initial_after)
+        session_token = _session_token(request)
+        await run_events.list_events(
+            actor=principal,
+            run_id=run_id,
+            after_index=stream_after,
+            limit=1,
+        )
+
+        async def event_stream() -> AsyncIterator[str]:
+            cursor = stream_after
+            loop = asyncio.get_running_loop()
+            next_keepalive = loop.time() + event_stream_policy.keepalive_interval_seconds
+            while True:
+                try:
+                    session_view = await auth_sessions.current_session(
+                        session_token=session_token
+                    )
+                    page = await run_events.list_events(
+                        actor=session_view.principal,
+                        run_id=run_id,
+                        after_index=cursor,
+                        limit=event_stream_policy.batch_size,
+                    )
+                except (AuthenticationError, RunEventNotFoundError):
+                    return
+                for event in page.items:
+                    payload = RunEventResponse.from_domain(event).model_dump_json()
+                    yield f"id: {event.index}\nevent: run-event\ndata: {payload}\n\n"
+                    cursor = event.index
+                if page.terminal and page.next_after_index is None:
+                    return
+                if page.next_after_index is not None:
+                    continue
+                await event_stream_sleeper(event_stream_policy.poll_interval_seconds)
+                if loop.time() >= next_keepalive:
+                    yield ": keepalive\n\n"
+                    next_keepalive = (
+                        loop.time() + event_stream_policy.keepalive_interval_seconds
+                    )
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     app.mount("/assets", StaticFiles(directory=assets_root), name="assets")
 

@@ -10,7 +10,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _OPENAPI_ARTIFACT = _PROJECT_ROOT / "docs" / "openapi" / "pangi-admin-api.json"
 
 
-def test_openapi_has_stable_auth_operations_and_error_schemas() -> None:
+def test_openapi_has_stable_operations_and_error_schemas() -> None:
     document = generate_openapi_document()
     paths = document["paths"]
     assert isinstance(paths, dict)
@@ -20,6 +20,11 @@ def test_openapi_has_stable_auth_operations_and_error_schemas() -> None:
         "/api/v1/auth/session",
         "/api/v1/auth/session/rotate",
         "/api/v1/bootstrap/admin",
+        "/api/v1/runs",
+        "/api/v1/runs/metrics",
+        "/api/v1/runs/{run_id}",
+        "/api/v1/runs/{run_id}/cancel",
+        "/api/v1/runs/{run_id}/events",
     }
 
     operation_ids = {
@@ -35,6 +40,11 @@ def test_openapi_has_stable_auth_operations_and_error_schemas() -> None:
         "login",
         "logout",
         "rotateAuthSession",
+        "listRuns",
+        "getRunQueueMetrics",
+        "getRun",
+        "cancelRun",
+        "getRunEvents",
     }
 
     documented_errors = {
@@ -46,7 +56,9 @@ def test_openapi_has_stable_auth_operations_and_error_schemas() -> None:
         for status in operation.get("responses", {})
         if status != "200" and status != "201" and status != "204"
     }
-    assert {"400", "401", "403", "409", "422", "429", "500"} <= documented_errors
+    assert {"400", "401", "403", "404", "409", "422", "429", "500", "503"} <= (
+        documented_errors
+    )
     for path_item in paths.values():
         assert isinstance(path_item, dict)
         for operation in path_item.values():
@@ -68,6 +80,11 @@ def test_openapi_has_stable_auth_operations_and_error_schemas() -> None:
         "BootstrapAdminResponse",
         "ErrorEnvelope",
         "LoginRequest",
+        "RunCancellationEnvelope",
+        "RunEnvelope",
+        "RunEventListEnvelope",
+        "RunListEnvelope",
+        "RunQueueMetricsResponse",
         "SessionEnvelope",
     } <= set(schemas)
     assert schemas["BootstrapAdminRequest"]["properties"]["token"]["writeOnly"] is True
@@ -80,6 +97,17 @@ def test_openapi_has_stable_auth_operations_and_error_schemas() -> None:
     ):
         sensitive_schema = schemas[schema_name]["properties"][property_name]
         assert not {"default", "example", "examples"} & set(sensitive_schema)
+
+    run_response = schemas["RunResponse"]["properties"]
+    assert not {"worker_id", "lease_expires_at", "heartbeat_at"} & set(run_response)
+    run_request = schemas["RunRequestResponse"]["properties"]
+    assert "idempotency_key" not in run_request
+
+    event_response = paths["/api/v1/runs/{run_id}/events"]["get"]["responses"]["200"]
+    assert set(event_response["content"]) == {
+        "application/json",
+        "text/event-stream",
+    }
 
 
 def test_openapi_generation_has_no_runtime_data_side_effect(
