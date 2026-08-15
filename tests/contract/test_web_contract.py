@@ -125,6 +125,13 @@ class FailingAuthSessions(RecordingAuthSessions):
         raise RuntimeError("internal-secret-value")
 
 
+class UnusedRunApi:
+    """Placeholder for tests that exercise only shell and authentication routes."""
+
+
+_UNUSED_RUN_API = UnusedRunApi()
+
+
 def _static_root(tmp_path: Path) -> Path:
     static_root = tmp_path / "static"
     assets = static_root / "assets"
@@ -141,6 +148,10 @@ def test_health_spa_assets_and_security_headers_are_stable(tmp_path: Path) -> No
         readiness_probe=RuntimeReadiness(runtime),
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=RecordingAuthSessions(),
+        run_operations=_UNUSED_RUN_API,
+        run_cancellations=_UNUSED_RUN_API,
+        run_events=_UNUSED_RUN_API,
+        run_queue_metrics=_UNUSED_RUN_API,
         static_root=_static_root(tmp_path),
     )
 
@@ -194,6 +205,10 @@ def test_lifespan_closes_backend_when_startup_fails(tmp_path: Path) -> None:
         readiness_probe=RuntimeReadiness(runtime),
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=RecordingAuthSessions(),
+        run_operations=_UNUSED_RUN_API,
+        run_cancellations=_UNUSED_RUN_API,
+        run_events=_UNUSED_RUN_API,
+        run_queue_metrics=_UNUSED_RUN_API,
         static_root=_static_root(tmp_path),
     )
 
@@ -211,6 +226,10 @@ def test_auth_cookie_transport_csrf_and_role_dependency_contracts(tmp_path: Path
         readiness_probe=RuntimeReadiness(runtime),
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=auth,
+        run_operations=_UNUSED_RUN_API,
+        run_cancellations=_UNUSED_RUN_API,
+        run_events=_UNUSED_RUN_API,
+        run_queue_metrics=_UNUSED_RUN_API,
         static_root=_static_root(tmp_path),
     )
 
@@ -272,6 +291,10 @@ def test_non_loopback_plain_http_login_is_rejected(tmp_path: Path) -> None:
         readiness_probe=RuntimeReadiness(runtime),
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=auth,
+        run_operations=_UNUSED_RUN_API,
+        run_cancellations=_UNUSED_RUN_API,
+        run_events=_UNUSED_RUN_API,
+        run_queue_metrics=_UNUSED_RUN_API,
         static_root=_static_root(tmp_path),
     )
 
@@ -297,6 +320,10 @@ def test_unexpected_api_error_uses_safe_envelope(
         readiness_probe=RuntimeReadiness(runtime),
         bootstrap_admin=RecordingBootstrapAdmin(),
         auth_sessions=FailingAuthSessions(),
+        run_operations=_UNUSED_RUN_API,
+        run_cancellations=_UNUSED_RUN_API,
+        run_events=_UNUSED_RUN_API,
+        run_queue_metrics=_UNUSED_RUN_API,
         static_root=_static_root(tmp_path),
     )
 

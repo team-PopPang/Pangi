@@ -7,9 +7,17 @@ from importlib import resources
 from pathlib import Path
 
 from pangi.adapters.inbound.web import create_web_app
-from pangi.application.contracts.auth import IssuedSession, SessionView
+from pangi.application.contracts.auth import (
+    AuthenticatedPrincipal,
+    IssuedSession,
+    SessionView,
+)
 from pangi.application.contracts.bootstrap import BootstrapAdminResult, BootstrapIssueResult
 from pangi.application.contracts.readiness import ReadinessReport
+from pangi.application.contracts.run_events import RunEventPage, RunQueueMetrics
+from pangi.application.contracts.run_queue import RunCancellation
+from pangi.application.contracts.runs import RunCreation, RunListPage, RunListQuery
+from pangi.domain.runs import Run, RunRequest
 
 
 def _schema_only_dependency() -> RuntimeError:
@@ -75,6 +83,59 @@ class _SchemaOnlyAuthSessions:
         raise _schema_only_dependency()
 
 
+class _SchemaOnlyRunOperations:
+    async def create_run(self, request: RunRequest, *, route_key: str) -> RunCreation:
+        del request, route_key
+        raise _schema_only_dependency()
+
+    async def get_run(self, *, actor: AuthenticatedPrincipal, run_id: str) -> Run:
+        del actor, run_id
+        raise _schema_only_dependency()
+
+    async def list_runs(
+        self,
+        *,
+        actor: AuthenticatedPrincipal,
+        query: RunListQuery,
+    ) -> RunListPage:
+        del actor, query
+        raise _schema_only_dependency()
+
+
+class _SchemaOnlyRunCancellation:
+    async def cancel_run(
+        self,
+        *,
+        actor: AuthenticatedPrincipal,
+        run_id: str,
+    ) -> RunCancellation:
+        del actor, run_id
+        raise _schema_only_dependency()
+
+
+class _SchemaOnlyRunEvents:
+    async def list_events(
+        self,
+        *,
+        actor: AuthenticatedPrincipal,
+        run_id: str,
+        after_index: int,
+        limit: int,
+    ) -> RunEventPage:
+        del actor, run_id, after_index, limit
+        raise _schema_only_dependency()
+
+
+class _SchemaOnlyRunQueueMetrics:
+    async def queue_metrics(
+        self,
+        *,
+        actor: AuthenticatedPrincipal,
+    ) -> RunQueueMetrics:
+        del actor
+        raise _schema_only_dependency()
+
+
 def generate_openapi_document() -> dict[str, object]:
     """Build the API schema without starting SQLite or reading runtime configuration."""
 
@@ -84,6 +145,10 @@ def generate_openapi_document() -> dict[str, object]:
         readiness_probe=_SchemaOnlyReadiness(),
         bootstrap_admin=_SchemaOnlyBootstrapAdmin(),
         auth_sessions=_SchemaOnlyAuthSessions(),
+        run_operations=_SchemaOnlyRunOperations(),
+        run_cancellations=_SchemaOnlyRunCancellation(),
+        run_events=_SchemaOnlyRunEvents(),
+        run_queue_metrics=_SchemaOnlyRunQueueMetrics(),
         static_root=static_root,
     )
     return app.openapi()

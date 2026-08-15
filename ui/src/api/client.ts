@@ -1,4 +1,4 @@
-import type { components, operations, paths } from "./generated";
+import type { components, operations } from "./generated";
 
 export type BootstrapAdminRequest =
   operations["createBootstrapAdmin"]["requestBody"]["content"]["application/json"];
@@ -8,8 +8,19 @@ export type LoginRequest = operations["login"]["requestBody"]["content"]["applic
 export type SessionEnvelope =
   operations["getAuthSession"]["responses"][200]["content"]["application/json"];
 export type SessionInfo = SessionEnvelope["session"];
+export type RunListQuery = NonNullable<operations["listRuns"]["parameters"]["query"]>;
+export type RunListEnvelope =
+  operations["listRuns"]["responses"][200]["content"]["application/json"];
+export type RunEnvelope =
+  operations["getRun"]["responses"][200]["content"]["application/json"];
+export type RunCancellationEnvelope =
+  operations["cancelRun"]["responses"][200]["content"]["application/json"];
+export type RunEventListEnvelope =
+  operations["getRunEvents"]["responses"][200]["content"]["application/json"];
+export type RunEvent = components["schemas"]["RunEventResponse"];
+export type RunQueueMetrics =
+  operations["getRunQueueMetrics"]["responses"][200]["content"]["application/json"];
 
-type ApiPath = keyof paths;
 type ErrorEnvelope = components["schemas"]["ErrorEnvelope"];
 
 type RequestOptions = {
@@ -91,7 +102,29 @@ function retryAfterSeconds(response: Response): number | null {
   return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
 }
 
-async function request<T>(path: ApiPath, options: RequestOptions): Promise<T> {
+function runPath(runId: string, suffix = ""): string {
+  return `/api/v1/runs/${encodeURIComponent(runId)}${suffix}`;
+}
+
+function runListPath(query: RunListQuery): string {
+  const search = new URLSearchParams();
+  if (query.cursor !== undefined && query.cursor !== null) {
+    search.set("cursor", query.cursor);
+  }
+  if (query.limit !== undefined) {
+    search.set("limit", String(query.limit));
+  }
+  for (const state of query.state ?? []) {
+    search.append("state", state);
+  }
+  for (const trigger of query.trigger ?? []) {
+    search.append("trigger", trigger);
+  }
+  const serialized = search.toString();
+  return serialized === "" ? "/api/v1/runs" : `/api/v1/runs?${serialized}`;
+}
+
+async function request<T>(path: string, options: RequestOptions): Promise<T> {
   const headers = new Headers({ Accept: "application/json" });
   if (options.body !== undefined) {
     headers.set("Content-Type", "application/json");
@@ -167,4 +200,65 @@ export const adminApi = {
   logout(): Promise<void> {
     return request("/api/v1/auth/logout", { method: "POST", csrf: true });
   },
+
+  listRuns(query: RunListQuery = {}): Promise<RunListEnvelope> {
+    return request(runListPath(query), { method: "GET" });
+  },
+
+  getRun(runId: string): Promise<RunEnvelope> {
+    return request(runPath(runId), { method: "GET" });
+  },
+
+  cancelRun(runId: string): Promise<RunCancellationEnvelope> {
+    return request(runPath(runId, "/cancel"), { method: "POST", csrf: true });
+  },
+
+  getRunEvents(
+    runId: string,
+    options: { after?: number; limit?: number } = {},
+  ): Promise<RunEventListEnvelope> {
+    const search = new URLSearchParams();
+    if (options.after !== undefined) {
+      search.set("after", String(options.after));
+    }
+    if (options.limit !== undefined) {
+      search.set("limit", String(options.limit));
+    }
+    const serialized = search.toString();
+    const path = runPath(runId, "/events");
+    return request(serialized === "" ? path : `${path}?${serialized}`, { method: "GET" });
+  },
+
+  getRunQueueMetrics(): Promise<RunQueueMetrics> {
+    return request("/api/v1/runs/metrics", { method: "GET" });
+  },
 };
+
+export type RunEventStreamCallbacks = {
+  onEvent: (event: RunEvent) => void;
+  onError?: (event: Event) => void;
+  onProtocolError?: (error: unknown) => void;
+};
+
+export function openRunEventStream(
+  runId: string,
+  callbacks: RunEventStreamCallbacks,
+  options: { after?: number } = {},
+): EventSource {
+  const url = new URL(runPath(runId, "/events"), window.location.origin);
+  if (options.after !== undefined) {
+    url.searchParams.set("after", String(options.after));
+  }
+  const source = new EventSource(url, { withCredentials: true });
+  source.addEventListener("run-event", (message) => {
+    try {
+      callbacks.onEvent(JSON.parse((message as MessageEvent<string>).data) as RunEvent);
+    } catch (error) {
+      callbacks.onProtocolError?.(error);
+    }
+  });
+  if (callbacks.onError !== undefined) {
+    source.onerror = callbacks.onError;
+  }
+  return source;
+}

@@ -2,7 +2,7 @@
 
 조직이 직접 설치하고 운영하는 경량 Agent Runtime이다.
 
-현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-04까지 완료했고, WBS-05는 Run Core, 생성·조회와 영속 Queue·복구 기반까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
+현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고, Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
 
 ## 현재 구현 상태
 
@@ -12,7 +12,7 @@
 | 02. 설정·Runtime Data·CLI | 완료 | 설정과 경로 해석, `init`, `start`, `status`, `doctor`, `config`, `migrate`, Bootstrap 복구 명령 |
 | 03. SQLite 영속성과 Migration | 완료 | 단일 Process Lock, 직렬화된 Unit of Work, Migration·Checksum·Backup, Snapshot 검증 |
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
-| 05. Run 상태·Queue·Event | 진행 중 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, SQLite Queue Claim, Semaphore, Lease·Heartbeat, 취소와 재시작 복구 |
+| 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
 | 06~20 | 예정 | Guardrail, Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리한다. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있다.
@@ -51,7 +51,7 @@
 - React/Vite Admin Shell과 역할별 Navigation을 wheel 정적 Asset으로 제공한다.
 - Backend OpenAPI와 Frontend Type의 변경 불일치를 검증한다.
 
-### Run Core, 생성·조회와 영속 Queue
+### Run Core, 영속 Queue와 Event API
 
 - `Principal`, `RunRequest`, `Run`, `RunStep`, `RunEvent`와 상태 전이 규칙을 제공한다.
 - Run, 첫 `run.received` Event와 Idempotency 결과를 하나의 Transaction으로 저장한다.
@@ -66,13 +66,18 @@
 - 대기·실행 Run 취소와 오래된 Worker 쓰기 거부를 지원한다.
 - 재시작 시 만료된 Run을 복구한다. 실행 중인 Step이 없거나 모두 Idempotent면 재대기하고 Non-idempotent Step이 있으면 안전하게 실패시킨다.
 - Queue 상태와 `run.queued`, `run.running`, `run.interrupted`, `run.cancelled`, `run.failed` Event를 같은 Transaction에 저장한다.
+- 인증된 Owner/Admin은 Run 목록과 상세를 조회하고, Same-origin·CSRF 검증 뒤 대기·실행 Run을 취소할 수 있다.
+- Run Event는 JSON Page와 SSE로 조회한다. `Last-Event-ID` 재연결, Keepalive, Poll별 Session 재검증과 Terminal 종료를 지원한다.
+- Owner는 Public Event만, Admin은 Public·Admin Event만 볼 수 있으며 Internal Event는 HTTP로 노출하지 않는다.
+- Admin은 Queue 깊이, 실행 수, 만료 Lease 수와 가장 오래된 대기 시간을 식별자 없는 Metric으로 조회할 수 있다.
+- OpenAPI와 Frontend 생성 Type, Run API Client와 `EventSource` Helper를 함께 제공한다.
 
-Run 생성·조회와 Queue는 현재 Application Service, SQLite Store와 주입형 Queue Runtime까지 구현됐다. 실제 실행 Handler와 ASGI Composition Root에는 아직 연결하지 않았으며 HTTP API, Admin UI와 CLI에서도 호출할 수 없다.
+Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐다. 실제 실행 Handler와 Queue Runtime 조립, Run 생성 진입점, Run 화면은 후속 WBS에서 연결한다.
 
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
-- Owner 기반 Run 취소 API, 일반 Event 조회, Visibility Filter, SSE, Queue Metric과 Run HTTP API
+- Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 입력·Tool·출력 Guardrail과 Audit
 - Model Provider Routing과 데이터 반출 정책
 - Root Orchestrator, 실행 Engine, MCP, Subagent와 Web Search
@@ -80,7 +85,7 @@ Run 생성·조회와 Queue는 현재 Application Service, SQLite Store와 주�
 - Slack 요청 수신과 응답 전달
 - Analytics, Feedback, API Key·IP Policy와 운영 Upgrade/Rollback
 
-따라서 현재 Runtime은 설치·저장소·인증·Admin Shell, Run 영속성과 Queue 복구 기반을 검증하는 단계다. 실제 업무 요청을 처리하는 Agent 기능은 후속 WBS에서 연결한다.
+따라서 현재 Runtime은 설치·저장소·인증·Admin Shell, Run 영속성·Queue 복구와 Event 전달 기반을 검증하는 단계다. 실제 업무 요청을 처리하는 Agent 기능은 후속 WBS에서 연결한다.
 
 ## 개발 환경 준비
 
@@ -137,16 +142,18 @@ uv run python scripts/export_openapi.py --check
 
 ### Run 기능만 검증
 
-WBS-05에서 지금까지 구현한 Domain, Schema, Idempotency, Cursor, Owner Scope와 Queue·복구를 빠르게 확인하려면 다음 Test를 실행한다.
+WBS-05에서 구현한 Domain, Schema, Idempotency, Cursor, Owner Scope, Queue·복구와 Event API를 빠르게 확인하려면 다음 Test를 실행한다.
 
 ```bash
 uv run pytest \
   tests/unit/test_run_domain.py \
   tests/unit/test_run_service.py \
   tests/unit/test_run_queue_service.py \
+  tests/contract/test_run_web_contract.py \
   tests/integration/test_run_schema.py \
   tests/integration/test_run_persistence.py \
-  tests/integration/test_run_queue_persistence.py
+  tests/integration/test_run_queue_persistence.py \
+  tests/integration/test_run_event_delivery.py
 ```
 
 ### Test 종류별 검증
