@@ -2,7 +2,7 @@
 
 조직이 직접 설치하고 운영하는 경량 Agent Runtime이다.
 
-현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail, 중앙 Redaction·External Data Envelope와 공통 Tool Permission·Approval·Budget Guardrail까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
+현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail, 중앙 Redaction·External Data Envelope, 공통 Tool Permission·Approval·Budget Guardrail과 최종 Output Guardrail까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
 
 ## 현재 구현 상태
 
@@ -13,7 +13,7 @@
 | 03. SQLite 영속성과 Migration | 완료 | 단일 Process Lock, 직렬화된 Unit of Work, Migration·Checksum·Backup, Snapshot 검증 |
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
-| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget 공통 실행 경계 |
+| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget과 최종 Output 공통 경계 |
 | 07~20 | 예정 | Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리한다. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있다.
@@ -96,7 +96,7 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 - 정규화된 외부 Content는 중앙 Redaction을 통과한 뒤 항상 `untrusted` Envelope로 생성된다. Content Fingerprint는 Redaction 완료 Text를 기준으로 계산한다.
 - Prompt Renderer는 Source와 Content를 Escape하므로 외부 Text가 `external_data`를 닫거나 새 System Tag를 만들 수 없다.
 
-이 기반은 아직 MCP, Web Fetch, Model Provider, Log·Run Event와 최종 Output에 연결되지 않았다. 각 실행 경계는 후속 WBS에서 중앙 Service와 Envelope를 사용한다.
+이 기반은 아직 MCP, Web Fetch, Model Provider와 Log·Run Event에 연결되지 않았다. 각 실행 경계는 후속 WBS에서 중앙 Service와 Envelope를 사용한다.
 
 ### Tool Permission·Approval·Budget 기반
 
@@ -111,12 +111,23 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 
 실제 MCP Registry·Transport, JSON Schema Adapter, Policy·Approval·Invocation 저장소와 Result 정규화는 WBS-09에서 연결한다. 현재 구현은 Tool 호출을 수행하는 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안 경계다.
 
+### 최종 Output Guardrail 기반
+
+- WBS-08이 앞으로 만들 Direct Answer·Reducer 결과를 위한 Framework-free `OutputCandidate`→`SafeOutput` 경계를 제공한다. 모델 출력은 항상 `untrusted`로 유지한다.
+- CRLF/NFC 정규화와 전체 입력 UTF-8 Byte Limit 뒤에 중앙 `core-secret-v1` Redaction을 Markdown·Evidence에 함께 적용한다.
+- Python·Node Stack Trace와 Unix·Windows 내부 Path를 Versioned Rule로 제거하고 Raw HTML과 Slack Angle Markup을 Escape한다.
+- Markdown Inline·Reference Link와 Evidence Link에 같은 Scheme 정책을 적용한다. 허용되지 않은 Scheme과 Protocol-relative Link는 제거하고 Inline Link Label은 보존한다.
+- Broadcast Mention은 항상 중립화하고 일반 Mention은 명시된 개수를 넘긴 항목만 중립화한다. 최종 길이는 한국어·Emoji Codepoint를 깨뜨리지 않고 UTF-8 Byte 기준으로 자른다.
+- 허용 결과에는 Sanitized Content Fingerprint, 정책 Version·Fingerprint와 변경 수치만 제공한다. 원문 Output·Evidence와 Rule 본문은 오류·`repr`에서 제외한다.
+
+이 경계는 아직 WBS-08의 `AgentResult`·Reducer나 WBS-16의 Slack Renderer에 조립되지 않았다. 채널 Renderer는 공통 Guardrail을 우회하지 않고 `SafeOutput`만 받아야 한다.
+
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
-- Output·Log·Event Guardrail과 Append-only Audit
+- Log·Run Event Redaction과 Append-only Audit
 - Model Provider Routing과 데이터 반출 정책
 - Root Orchestrator, 실행 Engine, MCP, Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
@@ -224,6 +235,16 @@ WBS-06.3에서 구현한 Stable Tool ID, Connection Owner, Permission·Schema, A
 ```bash
 uv run pytest \
   tests/unit/test_tool_guardrails.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### 최종 Output Guardrail만 검증
+
+WBS-06.4.1에서 구현한 Secret·Stack·내부 Path 제거, HTML Escape, Markdown·Evidence Link, Mention과 UTF-8 Byte 경계를 확인한다.
+
+```bash
+uv run pytest \
+  tests/unit/test_output_guardrails.py \
   tests/architecture/test_dependency_rules.py
 ```
 
