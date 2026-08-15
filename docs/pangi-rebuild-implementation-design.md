@@ -790,17 +790,29 @@ Subagent는 자유 형식 장문을 반환하지 않는다. Reducer가 안정적
 ### 8.3 Tool Policy
 
 ```python
-class ToolPolicy(BaseModel):
+@dataclass(frozen=True, slots=True)
+class ToolPolicy:
+    policy_version: str
+    tool_id: str
     connection_id: str
-    tool_name: str
     effect: Literal["allow", "deny"]
     permission: Literal["read", "write", "destructive"]
     approval: Literal["none", "user", "admin"]
-    max_calls_per_run: int = Field(default=3, ge=0, le=20)
-    timeout_seconds: int = Field(default=30, ge=1, le=120)
-    retry_count: int = Field(default=0, ge=0, le=1)
-    redact_paths: list[str] = []
+    schema_fingerprint: str
+    max_calls_per_run: int
+    max_argument_bytes: int
+    timeout_seconds: int
+    max_result_bytes: int
 ```
+
+`tool_id`는 Pangi 내부의 불투명 Stable ID다. 실제 MCP Tool Name과의 Mapping, Connection과
+Schema Snapshot 저장은 WBS-09의 Registry가 소유한다. Policy는 Stable Tool ID와 Connection,
+Schema Fingerprint에 정확히 묶이며 Wildcard나 암묵적인 Allow를 사용하지 않는다. 모든 제한값은
+조직 기본값을 Core에 숨기지 않고 주입하며 Canonical JSON SHA-256 Fingerprint에 포함한다.
+
+재시도는 별도 권한을 만들지 않는다. 실제 Transport 시도마다 Run·Tool 단위 Call Budget을 하나씩
+소비하고 실패한 시도도 환불하지 않는다. Tool Result Redaction 경로와 실제 Timeout·Result Stream
+Byte 차단은 WBS-09의 실행 Adapter와 WBS-06 Output Redaction 경계에서 적용한다.
 
 ### 8.4 Event
 
@@ -1216,15 +1228,22 @@ File Vault를 사용할 때는 Master Key를 DB 밖의 환경변수 또는 권�
 
 ### 10.7 Tool Call 흐름
 
-1. Step이 안정된 Pangi Tool ID를 요청한다.
-2. Registry가 현재 MCP Tool Name과 Schema를 찾는다.
-3. Policy Engine이 Principal, Connection Scope, Permission, Approval, Rate Limit을 검사한다.
-4. JSON Schema로 Argument를 검증한다.
-5. Secret Field를 Trace에서 Redact한다.
-6. MCP Client가 Timeout과 Result Byte Limit을 적용해 호출한다.
-7. Result Normalizer가 Text, Structured Content, Resource Link를 `ToolResult`로 변환한다.
-8. 외부 Text를 `external_data`로 감싼다.
-9. Run Event와 Tool Invocation Metric을 저장한다.
+1. 현재 활성 Principal과 Run 요청자의 사용자 ID를 확인하고 Step이 불투명 Stable Pangi Tool ID를 요청한다.
+2. Registry가 같은 Stable ID의 활성 Connection, 현재 MCP Tool Name과 Schema Snapshot을 찾는다.
+3. User Connection Owner와 요청자를 정확히 비교하고 Instance Connection Scope를 확인한다.
+4. 정확히 일치하는 Tool Policy가 없으면 기본 Deny하고 Permission과 Schema Fingerprint를 검증한다.
+5. Argument를 Canonical JSON으로 고정하고 UTF-8 Byte Limit과 JSON Schema를 검증한다.
+6. 필요한 User/Admin Approval이 Actor, Run, Tool, Argument와 Policy Fingerprint에 묶였는지 검사한다.
+7. Run·Tool 단위 Call Budget을 원자적으로 예약한다. 정책 Version이 바뀌어도 이미 사용한 횟수는 유지한다.
+8. Secret Field를 Trace에서 Redact한다.
+9. MCP Client가 Policy의 Timeout과 Result Byte Limit을 적용해 호출한다.
+10. Result Normalizer가 Text, Structured Content, Resource Link를 `ToolResult`로 변환한다.
+11. 외부 Text를 `external_data`로 감싼다.
+12. Run Event와 Tool Invocation Metric을 저장한다.
+
+1~7의 Framework-free 계약과 강제 실행 Wrapper는 WBS-06이 소유한다. Registry, JSON Schema
+Validator, Approval·Invocation 저장소와 8~12의 MCP 실행 Adapter는 WBS-09가 구현한다. 검사를
+통과한 `GuardedToolCall`만 Executor Port가 받을 수 있고, 차단된 호출은 외부 Tool에 도달하지 않는다.
 
 ### 10.8 연결 화면 구현
 

@@ -63,7 +63,11 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - External Data는 `text/plain` 또는 `text/html`을 Byte Limit 안에서 정규화한다. 실행·비가시 HTML, Control/Bidi/Hidden Unicode를 제거한 뒤 중앙 Redaction을 적용하고 `TrustLevel.UNTRUSTED`로 고정한다.
 - External Content Fingerprint는 원문이 아니라 정규화·Redaction 완료 Text로 계산한다. Source URL과 외부 식별자는 이 단계의 Metadata에 포함하지 않는다.
 - Prompt용 `<external_data>` Renderer는 Source Attribute와 Content를 Escape한다. Envelope 안의 문장은 Evidence인 비신뢰 데이터이며 호출자가 신뢰 수준을 승격할 수 없다.
-- Tool Guardrail은 Stable Tool ID, Connection Owner, JSON Schema, Permission, Approval, Call/Byte/Timeout Budget을 순서대로 검사한다.
+- Tool Guardrail은 활성 Principal과 Run 요청자의 사용자 ID, Stable Tool ID를 확인한 뒤 Connection Owner, 명시 Policy·Permission·Schema Fingerprint, Canonical Argument Byte·Schema, Approval과 Call Budget을 고정된 순서로 검사한다.
+- Tool Policy는 Stable Tool ID·Connection·Schema Snapshot에 정확히 묶고 명시 Policy가 없으면 기본 Deny한다. User Connection은 요청자와 Owner가 일치해야 하며 Instance Connection은 사용자 Owner를 갖지 않는다.
+- Approval은 Actor, Run, Tool, Argument와 Policy Fingerprint에 묶고 만료와 User/Admin 승인 주체를 검증한다. Destructive Tool의 Admin Approval 적용 범위는 암묵적 기본값 대신 명시 Policy가 결정한다.
+- Run·Tool 단위 Call Budget은 정책 Version이 바뀌어도 누적하며 실제 실행을 시도한 호출은 실패해도 환불하지 않는다. Argument는 Canonical JSON UTF-8 Byte로 제한한다.
+- Timeout과 Result Byte Limit은 허용된 `GuardedToolCall`에 필수 실행 제한으로 전달한다. 실제 MCP Transport 차단과 영속 Budget Ledger는 WBS-09 Adapter가 소유한다.
 - Output Guardrail은 Secret Pattern, Token Prefix, HTML, Mention, 길이, Link Scheme, Stack Trace와 Evidence를 검사한다.
 - 외부 Text는 Source/Trust Metadata를 가진 Envelope로 감싸며 내부 지시로 승격하지 않는다.
 - Audit은 Append-only이며 원문 Token/Prompt/Tool Result 대신 Version, Fingerprint와 Redacted Diff를 저장한다.
@@ -75,7 +79,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] 신뢰 수준, Guardrail Result와 Error Code 계약을 정의한다.
 - [x] Input 정규화, 크기/MIME/Rate Rule과 기존 Idempotency 경계 앞의 보호된 Run 제출을 구현한다.
 - [x] Versioned 중앙 Redaction Policy·Service와 안전한 Result Summary를 구현한다.
-- [ ] Tool Policy와 Approval 검증 Engine의 공통 단계를 구현한다.
+- [x] Tool Policy와 Approval 검증 Engine의 공통 단계를 구현한다.
 - [ ] Output Sanitizer, Mention/Link Policy와 Secret Redaction을 구현한다.
 - [x] External Data Envelope와 Control Character/HTML 정규화를 구현한다.
 - [ ] JSON Log와 Event의 중앙 Redaction Filter를 구현한다.
@@ -86,7 +90,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 ## 검증 체크리스트
 
 - [x] 비활성 Principal, 대형 입력, 금지 MIME를 차단하고 허용된 중복 요청이 Run 하나로 Replay되는지 확인한다.
-- [ ] Deny Tool, 다른 사용자 Connection과 승인 없는 Write 호출이 실행되지 않는지 확인한다.
+- [x] Deny Tool, 다른 사용자 Connection과 승인 없는 Write 호출이 실행되지 않는지 확인한다.
 - [ ] Secret, Stack Trace, 내부 Path와 Mention 폭주가 출력에서 제거되는지 확인한다.
 - [ ] 외부 문서의 지시가 System/Tool Policy를 바꾸지 못하는지 Contract Test를 실행한다.
 - [ ] 모든 필수 관리 Action이 Actor와 안전한 Diff를 Audit하는지 확인한다.
@@ -116,6 +120,19 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 원문이 다른 두 Secret이 같은 Redaction 결과를 만들면 같은 Content Fingerprint를 생성하는지, 오류·결과 표현에 원문이 없는지 Unit Test로 고정했다.
 - 아직 MCP/Web/Model 호출, Log·Run Event와 최종 Output에는 연결하지 않았다. Tool Policy는 3차, Output·Log·Event Redaction은 4차, Append-only Audit은 5차 구현 단위로 남긴다.
 - 남은 Guardrail·Audit 작업이 있으므로 WBS-06 상태는 `진행 중`으로 유지한다.
+
+## 3차 구현 결과
+
+- Framework-free `ToolPermission`, `ToolApprovalRequirement`, Connection Scope, Policy Effect와 Tool Guardrail Stage·Outcome·Error Code 계약을 추가했다.
+- Tool Policy가 Stable Tool ID, Connection ID, 예상 Schema Fingerprint, Permission·Approval, Run별 호출 수와 Argument·Result Byte·Timeout 제한을 명시하도록 했다. 조직 운영 기본값은 추가하지 않고 모든 필드를 Canonical 정책 Fingerprint에 포함했다.
+- Stable Tool Resolver, Policy Provider, Argument Validator, Approval Verifier, 원자적 Budget Ledger와 Tool Executor Port를 정의했다. 실제 MCP·SQLite Adapter는 추가하지 않았다.
+- Tool Guardrail은 활성 Principal과 Run 요청자 일치, Stable ID 해석, User Connection Owner, 명시 Policy와 Permission·Schema Drift, Canonical JSON Argument·Byte·Schema, Actor·Run·Tool·Argument·Policy에 묶인 승인, Call Budget을 고정된 순서로 검사한다.
+- Policy가 없거나 Deny인 Tool, 비활성·Unknown Tool, 교차 사용자 Connection, Schema Drift, 승인 없는 Write와 만료·Scope 불일치·일반 사용자 Admin 승인을 실패 폐쇄 방식으로 차단한다.
+- `GuardedToolExecutionService`가 모든 검사를 통과한 호출만 Executor에 넘긴다. Timeout과 Result Byte Limit은 필수 실행 계약으로 전달하고 차단 호출의 Executor 호출 수를 0회로 고정했다.
+- Run·Tool 호출 횟수는 Policy Version 변경으로 초기화하지 않으며, 실행 실패도 예약된 호출 횟수를 환불하지 않는 계약으로 정했다.
+- Argument와 Approval Reference, Connection ID·Owner와 실제 Tool Name은 요청·정책·해석 결과·오류의 `repr`에서 제외한다. 판정에는 Stable Tool ID, 정책 Version·Fingerprint, Permission과 안전한 Byte·Call Metadata만 남긴다.
+- 실제 Registry, JSON Schema Adapter, Approval·Invocation 영속화, MCP Timeout·Result Stream Byte 차단과 Tool Result 정규화는 WBS-09에 남긴다.
+- Output·Log·Run Event Redaction과 Append-only Audit이 남아 있으므로 WBS-06 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 
