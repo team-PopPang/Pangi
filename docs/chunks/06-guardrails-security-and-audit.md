@@ -58,6 +58,11 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 모든 검사를 통과한 정규화 요청만 기존 `RunService.create_run`에 전달한다. 중복 Idempotency 판정과 Run·첫 Event·Idempotency Record의 원자 저장은 WBS-05의 기존 SQLite 경계가 계속 소유한다.
 - 차단 판정과 예외는 안정적인 Error Code, 정책 Version·Fingerprint, 본문 Byte 수와 Attachment 개수 같은 안전한 Metadata만 포함한다. 요청 본문, Idempotency Key와 Attachment Reference를 표현하지 않는다.
 - 자연어 URL을 임의로 다시 쓰거나 위험 의도를 Keyword로 분류하지 않는다.
+- 중앙 Redaction은 Versioned Rule Set을 사용해 Text와 중첩 JSON 호환 데이터에 같은 정책을 적용한다. 결과 Metadata에는 정책 Version·Fingerprint, Redaction Count와 Rule ID만 포함한다.
+- Built-in `core-secret-v1`은 CLI가 사용하던 Credential 할당, 알려진 Token Prefix, 민감 Key와 `secret://` Reference 규칙을 소유한다. 조직별 Pattern, PII Redaction과 오탐 승인 절차는 포함하지 않는다.
+- External Data는 `text/plain` 또는 `text/html`을 Byte Limit 안에서 정규화한다. 실행·비가시 HTML, Control/Bidi/Hidden Unicode를 제거한 뒤 중앙 Redaction을 적용하고 `TrustLevel.UNTRUSTED`로 고정한다.
+- External Content Fingerprint는 원문이 아니라 정규화·Redaction 완료 Text로 계산한다. Source URL과 외부 식별자는 이 단계의 Metadata에 포함하지 않는다.
+- Prompt용 `<external_data>` Renderer는 Source Attribute와 Content를 Escape한다. Envelope 안의 문장은 Evidence인 비신뢰 데이터이며 호출자가 신뢰 수준을 승격할 수 없다.
 - Tool Guardrail은 Stable Tool ID, Connection Owner, JSON Schema, Permission, Approval, Call/Byte/Timeout Budget을 순서대로 검사한다.
 - Output Guardrail은 Secret Pattern, Token Prefix, HTML, Mention, 길이, Link Scheme, Stack Trace와 Evidence를 검사한다.
 - 외부 Text는 Source/Trust Metadata를 가진 Envelope로 감싸며 내부 지시로 승격하지 않는다.
@@ -69,9 +74,10 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 
 - [x] 신뢰 수준, Guardrail Result와 Error Code 계약을 정의한다.
 - [x] Input 정규화, 크기/MIME/Rate Rule과 기존 Idempotency 경계 앞의 보호된 Run 제출을 구현한다.
+- [x] Versioned 중앙 Redaction Policy·Service와 안전한 Result Summary를 구현한다.
 - [ ] Tool Policy와 Approval 검증 Engine의 공통 단계를 구현한다.
 - [ ] Output Sanitizer, Mention/Link Policy와 Secret Redaction을 구현한다.
-- [ ] External Data Envelope와 Control Character/HTML 정규화를 구현한다.
+- [x] External Data Envelope와 Control Character/HTML 정규화를 구현한다.
 - [ ] JSON Log와 Event의 중앙 Redaction Filter를 구현한다.
 - [ ] Audit Event Port, SQLite Adapter와 관리자 조회 API 기반을 만든다.
 - [ ] CSP, Frame, Content-Type, Same-origin과 기본 Bind 정책을 적용한다.
@@ -97,6 +103,19 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 허용된 정규화 요청의 SQLite Idempotency Replay, 차단 시 무영속화, 한국어·Emoji Byte 경계와 오류·결과 표현의 원문 비노출을 Unit·Integration Test로 고정했다.
 - 아직 실제 Run 생성 HTTP/Channel 진입점에는 조립하지 않았다. WBS-08·11·16의 요청 수신 경계는 이 보호된 제출 서비스를 사용해야 한다.
 - Tool·Output Guardrail, 중앙 Redaction·External Data Envelope와 Append-only Audit이 남아 있으므로 WBS-06 상태는 `진행 중`으로 유지한다.
+
+## 2차 구현 결과
+
+- `RedactionRule`, `RedactionPolicy`, `RedactionSummary`와 원문 값을 `repr`에서 제외하는 `RedactionResult` 계약을 추가했다.
+- Rule ID·Target·Pattern·Replacement·Flags와 재귀 제한을 Canonical JSON으로 직렬화해 SHA-256 정책 Fingerprint를 계산한다. 실제로 탐지한 Secret은 Fingerprint에 사용하지 않는다.
+- `RedactionService`가 Text와 중첩 Mapping·Sequence의 Credential 할당, 알려진 Token Prefix, 민감 Key와 Secret Reference를 같은 정책으로 처리한다. 최대 깊이·항목 수와 Cycle을 안전한 오류 코드로 거부한다.
+- 기존 CLI의 `redact_text`, `redact_data`, `render_json` 함수는 유지하고 내부 구현만 `core-secret-v1` 중앙 Service에 위임했다.
+- `ExternalDataService`가 Plain Text와 HTML의 입력 Byte Limit, CRLF/NFC, Control/Bidi/Hidden Unicode, 실행·비가시 HTML 제거와 중앙 Redaction을 순서대로 적용한다.
+- External Data는 항상 `untrusted`로 고정된다. Envelope의 안전한 Metadata에는 Source Kind, 정책 Version·Fingerprint, Redaction·제거 횟수와 Redaction 완료 Content Fingerprint만 포함한다.
+- 전용 Renderer가 Attribute와 Content를 Escape해 `</external_data><system>` 같은 외부 문장이 Envelope 경계를 닫거나 새 Instruction Tag를 만들지 못하게 한다.
+- 원문이 다른 두 Secret이 같은 Redaction 결과를 만들면 같은 Content Fingerprint를 생성하는지, 오류·결과 표현에 원문이 없는지 Unit Test로 고정했다.
+- 아직 MCP/Web/Model 호출, Log·Run Event와 최종 Output에는 연결하지 않았다. Tool Policy는 3차, Output·Log·Event Redaction은 4차, Append-only Audit은 5차 구현 단위로 남긴다.
+- 남은 Guardrail·Audit 작업이 있으므로 WBS-06 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 
