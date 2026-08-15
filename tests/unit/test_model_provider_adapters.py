@@ -72,6 +72,7 @@ def _guarded(*, provider: str, model: str, region: str | None) -> GuardedModelRe
         source_kinds=("channel", "policy"),
         evaluated_candidate_count=1,
         eligible_candidate_count=1,
+        policy_id="root-default-egress",
         policy_version="policy-v1",
         policy_fingerprint="b" * 64,
         selected_profile_id=profile.profile_id,

@@ -7,6 +7,12 @@ import asyncio
 import pytest
 
 from pangi.adapters.outbound.model_providers.json_schema import JsonSchemaOutputValidator
+from pangi.application.contracts.model_persistence import (
+    ModelInvocationContext,
+    ModelInvocationDenial,
+    ModelInvocationFinish,
+    ModelInvocationStart,
+)
 from pangi.application.contracts.model_routing import (
     GuardedModelRequest,
     ModelCallRequest,
@@ -19,6 +25,7 @@ from pangi.application.contracts.model_routing import (
     StructuredOutputSchema,
 )
 from pangi.application.contracts.policy_impact import PolicyImpactSnapshot
+from pangi.application.ports.model_persistence import ModelInvocationPersistenceError
 from pangi.application.services.model_routing import (
     GuardedModelExecutionService,
     ModelPolicyService,
@@ -68,6 +75,42 @@ class RecordingModelProvider:
     async def invoke(self, request: GuardedModelRequest) -> ModelProviderResponse:
         self.calls.append(request)
         return ModelProviderResponse(self.output)
+
+
+class RecordingInvocationRecorder:
+    def __init__(self) -> None:
+        self.started: list[ModelInvocationStart] = []
+        self.denied: list[ModelInvocationDenial] = []
+        self.finished: list[ModelInvocationFinish] = []
+
+    async def start(self, invocation: ModelInvocationStart) -> None:
+        self.started.append(invocation)
+
+    async def deny(self, invocation: ModelInvocationDenial) -> None:
+        self.denied.append(invocation)
+
+    async def finish(self, invocation: ModelInvocationFinish) -> None:
+        self.finished.append(invocation)
+
+
+class FailingInvocationRecorder(RecordingInvocationRecorder):
+    def __init__(self, *, fail_start: bool = False, fail_finish: bool = False) -> None:
+        super().__init__()
+        self.fail_start = fail_start
+        self.fail_finish = fail_finish
+
+    async def start(self, invocation: ModelInvocationStart) -> None:
+        await super().start(invocation)
+        if self.fail_start:
+            raise ModelInvocationPersistenceError("forced start failure")
+
+    async def finish(self, invocation: ModelInvocationFinish) -> None:
+        await super().finish(invocation)
+        if self.fail_finish:
+            raise ModelInvocationPersistenceError("forced finish failure")
+
+
+CONTEXT = ModelInvocationContext("run-identifier-0001")
 
 
 def _schema() -> StructuredOutputSchema:
@@ -153,6 +196,7 @@ def _services(
     candidates: tuple[ModelProfile, ...] | None = None,
     policy: ModelEgressPolicy | None | object = ...,
     provider: RecordingModelProvider | None = None,
+    recorder: RecordingInvocationRecorder | None = None,
 ) -> tuple[
     ModelPolicyService,
     GuardedModelExecutionService,
@@ -172,6 +216,7 @@ def _services(
         service,
         provider=recording_provider,
         output_validator=JsonSchemaOutputValidator(),
+        invocations=recorder or RecordingInvocationRecorder(),
     )
     return service, execution, profiles, policies, recording_provider
 
@@ -233,7 +278,7 @@ def test_allowed_call_aggregates_classification_selects_priority_and_redacts() -
         )
     )
 
-    result = asyncio.run(execution.execute(request))
+    result = asyncio.run(execution.execute(request, context=CONTEXT))
 
     assert result.decision.outcome is ModelPolicyOutcome.ALLOWED
     assert result.decision.data_classes == (DataClass.PUBLIC, DataClass.PERSONAL)
@@ -339,7 +384,12 @@ def test_redaction_cannot_be_disabled_by_an_egress_policy() -> None:
     _, execution, _, _, provider = _services(policy=_policy(require_redaction=False))
     secret = "sk-policy-cannot-disable-redaction"
 
-    asyncio.run(execution.execute(_request(sources=(_source(content=secret),))))
+    asyncio.run(
+        execution.execute(
+            _request(sources=(_source(content=secret),)),
+            context=CONTEXT,
+        )
+    )
 
     assert provider.calls[0].sources[0].content == "[REDACTED]"
 
@@ -404,6 +454,23 @@ def test_request_response_failures_and_representations_do_not_expose_content() -
     with pytest.raises(ValueError) as captured:
         ModelProviderFailure(invalid_code_secret, retryable=True)  # type: ignore[arg-type]
     assert invalid_code_secret not in str(captured.value)
+
+
+def test_invocation_persistence_failures_never_duplicate_provider_calls() -> None:
+    start_failure = FailingInvocationRecorder(fail_start=True)
+    _, execution, _, _, provider = _services(recorder=start_failure)
+
+    with pytest.raises(ModelInvocationPersistenceError):
+        asyncio.run(execution.execute(_request(), context=CONTEXT))
+    assert provider.calls == []
+
+    finish_failure = FailingInvocationRecorder(fail_finish=True)
+    _, execution, _, _, provider = _services(recorder=finish_failure)
+
+    with pytest.raises(ModelInvocationPersistenceError):
+        asyncio.run(execution.execute(_request(), context=CONTEXT))
+    assert len(provider.calls) == 1
+    assert len(finish_failure.started) == len(finish_failure.finished) == 1
 
 
 def test_contracts_reject_mutable_or_invalid_collections() -> None:

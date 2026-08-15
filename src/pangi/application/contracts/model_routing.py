@@ -252,25 +252,26 @@ class ModelProfile:
 
     @property
     def fingerprint(self) -> str:
-        return _fingerprint(
-            {
-                "active": self.active,
-                "allow_raw_content": self.allow_raw_content,
-                "model": self.model,
-                "profile": self.profile,
-                "profile_id": self.profile_id,
-                "profile_version": self.profile_version,
-                "provider": self.provider,
-                "region": self.region,
-                "retention": self.retention.value,
-                "routing_priority": self.routing_priority,
-                "supported_data_classes": sorted(
-                    value.value for value in self.supported_data_classes
-                ),
-                "supported_purposes": sorted(value.value for value in self.supported_purposes),
-                "supported_source_kinds": sorted(self.supported_source_kinds),
-            }
-        )
+        return _fingerprint(self.as_dict())
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "active": self.active,
+            "allow_raw_content": self.allow_raw_content,
+            "model": self.model,
+            "profile": self.profile,
+            "profile_id": self.profile_id,
+            "profile_version": self.profile_version,
+            "provider": self.provider,
+            "region": self.region,
+            "retention": self.retention.value,
+            "routing_priority": self.routing_priority,
+            "supported_data_classes": sorted(
+                value.value for value in self.supported_data_classes
+            ),
+            "supported_purposes": sorted(value.value for value in self.supported_purposes),
+            "supported_source_kinds": sorted(self.supported_source_kinds),
+        }
 
     def impact_reference(self) -> PolicyFingerprintReference:
         return PolicyFingerprintReference(
@@ -345,22 +346,25 @@ class ModelEgressPolicy:
 
     @property
     def fingerprint(self) -> str:
-        return _fingerprint(
-            {
-                "allow_raw_content": self.allow_raw_content,
-                "allowed_data_classes": sorted(value.value for value in self.allowed_data_classes),
-                "allowed_models": sorted(self.allowed_models),
-                "allowed_providers": sorted(self.allowed_providers),
-                "allowed_purposes": sorted(value.value for value in self.allowed_purposes),
-                "allowed_regions": sorted(self.allowed_regions),
-                "allowed_source_kinds": sorted(self.allowed_source_kinds),
-                "policy_id": self.policy_id,
-                "policy_version": self.policy_version,
-                "profile": self.profile,
-                "require_redaction": self.require_redaction,
-                "require_zero_retention": self.require_zero_retention,
-            }
-        )
+        return _fingerprint(self.as_dict())
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "allow_raw_content": self.allow_raw_content,
+            "allowed_data_classes": sorted(
+                value.value for value in self.allowed_data_classes
+            ),
+            "allowed_models": sorted(self.allowed_models),
+            "allowed_providers": sorted(self.allowed_providers),
+            "allowed_purposes": sorted(value.value for value in self.allowed_purposes),
+            "allowed_regions": sorted(self.allowed_regions),
+            "allowed_source_kinds": sorted(self.allowed_source_kinds),
+            "policy_id": self.policy_id,
+            "policy_version": self.policy_version,
+            "profile": self.profile,
+            "require_redaction": self.require_redaction,
+            "require_zero_retention": self.require_zero_retention,
+        }
 
     def impact_reference(self) -> PolicyFingerprintReference:
         return PolicyFingerprintReference(
@@ -382,6 +386,7 @@ class ModelPolicyDecision:
     source_kinds: tuple[str, ...]
     evaluated_candidate_count: int
     eligible_candidate_count: int
+    policy_id: str | None = None
     policy_version: str | None = None
     policy_fingerprint: str | None = None
     selected_profile_id: str | None = None
@@ -422,8 +427,13 @@ class ModelPolicyDecision:
             raise ValueError("candidate counts cannot be negative")
         if self.eligible_candidate_count > self.evaluated_candidate_count:
             raise ValueError("eligible candidate count cannot exceed evaluated candidates")
-        if (self.policy_version is None) is not (self.policy_fingerprint is None):
-            raise ValueError("policy version and fingerprint must be present together")
+        policy_values = (self.policy_id, self.policy_version, self.policy_fingerprint)
+        if any(value is None for value in policy_values) is not all(
+            value is None for value in policy_values
+        ):
+            raise ValueError("policy metadata must be present together")
+        if self.policy_id is not None:
+            _stable_identifier(self.policy_id, field_name="policy_id")
         if self.policy_version is not None:
             _stable_identifier(self.policy_version, field_name="policy_version")
             assert self.policy_fingerprint is not None
@@ -472,6 +482,7 @@ class ModelPolicyDecision:
             "source_kinds": list(self.source_kinds),
             "evaluated_candidate_count": self.evaluated_candidate_count,
             "eligible_candidate_count": self.eligible_candidate_count,
+            "policy_id": self.policy_id,
             "policy_version": self.policy_version,
             "policy_fingerprint": self.policy_fingerprint,
             "selected_profile_id": self.selected_profile_id,
@@ -670,6 +681,10 @@ class ModelProviderFailure(RuntimeError):
         retryable: bool,
         provider_request_count: int = 1,
         duration_ms: int = 0,
+        token_usage: ModelTokenUsage | None = None,
+        provider_latency_ms: int | None = None,
+        finish_reason: ModelFinishReason | None = None,
+        output_fingerprint: str | None = None,
     ) -> None:
         try:
             normalized = ModelProviderErrorCode(code)
@@ -689,8 +704,27 @@ class ModelProviderFailure(RuntimeError):
             or duration_ms < 0
         ):
             raise ValueError("duration_ms must be a non-negative integer")
+        if token_usage is not None and not isinstance(token_usage, ModelTokenUsage):
+            raise TypeError("token_usage must be ModelTokenUsage or None")
+        if provider_latency_ms is not None and (
+            isinstance(provider_latency_ms, bool)
+            or not isinstance(provider_latency_ms, int)
+            or provider_latency_ms < 0
+        ):
+            raise ValueError("provider_latency_ms must be a non-negative integer or None")
+        if finish_reason is not None:
+            try:
+                finish_reason = ModelFinishReason(finish_reason)
+            except ValueError:
+                raise ValueError("finish_reason is invalid") from None
+        if output_fingerprint is not None and _SHA256.fullmatch(output_fingerprint) is None:
+            raise ValueError("output_fingerprint must be a SHA-256 hex digest")
         super().__init__(f"Model Provider failed: {normalized.value}")
         self.code = normalized
         self.retryable = retryable
         self.provider_request_count = provider_request_count
         self.duration_ms = duration_ms
+        self.token_usage = token_usage
+        self.provider_latency_ms = provider_latency_ms
+        self.finish_reason = finish_reason
+        self.output_fingerprint = output_fingerprint

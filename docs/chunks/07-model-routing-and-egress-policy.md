@@ -67,7 +67,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Source Kind별 Data Class 합성과 Redaction Pipeline을 구현한다.
 - [x] Provider/Model/Region/Purpose/Retention 후보 필터를 구현한다.
 - [x] OpenAI와 Bedrock Adapter의 선택 설치 Skeleton을 만든다.
-- [ ] Logical Call, Provider Request, Token, Duration과 정책 결정 Event를 기록한다.
+- [x] Logical Call, Provider Request, Token, Duration과 정책 결정 Event를 기록한다.
 - [ ] Policy 영향 분석, Eval 실행과 활성화 API를 구현한다.
 - [ ] Dashboard에서 Policy, 사용처와 최근 허용/거부 Summary를 조회할 기반을 만든다.
 
@@ -106,6 +106,20 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Fake OpenAI·Bedrock Client와 결정적 Clock·Sleeper를 사용해 실제 Credential이나 외부 Network 없이 요청 변환, 오류 정규화, Retry와 사용량 변환을 검증했다.
 - 호출 Metadata는 이번 단계에서 안전한 응답·오류 계약으로만 반환한다. SQLite 영속화와 정책 결정 Event는 WBS-07.3에서 구현한다.
 - Credential·Model 설정과 Runtime 조립, Provider Capability 자동 탐색은 남아 있으므로 WBS-07 상태는 `진행 중`으로 유지한다.
+
+## 3차 구현 결과
+
+- SQLite Migration 5는 `model_policies`와 `model_invocations`를 추가한다. Policy Version 중복, Policy별 단일 Active Version, Active 규칙 변경·삭제와 잘못된 Invocation 상태를 DB 제약으로 거부한다.
+- `ModelPolicySnapshot`은 Egress Policy와 우선순위가 고정된 후보 Profile을 Canonical JSON으로 묶고 SHA-256 Fingerprint를 계산한다. Repository는 Draft Version을 추가하고 Active Version만 Routing에 제공한다.
+- Model 실행자는 실제 Provider 호출 전에 Run과 선택적인 Step에 연결된 `running` Invocation과 `model.policy_allowed` 내부 Event를 저장한다. 이 기록이 실패하면 Provider를 호출하지 않는다.
+- Policy가 요청을 차단하면 Provider 호출 없이 `denied` Invocation과 `model.policy_denied` 내부 Event를 같은 Unit of Work에 저장한다.
+- Provider 호출은 SQLite Transaction 밖에서 실행한다. 호출이 끝나면 Invocation 상태와 `model.invocation_completed` Event를 다시 하나의 Unit of Work로 저장한다.
+- 하나의 Logical Call은 항상 `logical_calls=1`로 기록한다. Transport Retry는 같은 Invocation의 `provider_requests`만 증가시킨다. 같은 Run에서 같은 Logical Call을 다시 실행하려 하면 Provider 호출 전에 거부한다.
+- Token Usage, 전체 Duration, Provider Latency, Finish Reason과 정규화된 오류 코드를 저장한다. Token을 제공하지 않는 Provider 응답은 Token Field를 `NULL`로 유지한다.
+- 원문 Logical Call ID는 저장하지 않고 Fingerprint만 남긴다. Prompt, Redaction 이후 실제 입력, 구조화 Model Output과 Credential은 SQLite와 Run Event에 저장하지 않는다.
+- 영속화 실패 때문에 Provider를 다시 호출하지 않는다. Provider 응답 뒤 완료 기록이 실패하면 결과를 반환하지 않고 안전하게 실패한다.
+- Migration·Repository·허용·차단·Retry·Rollback·중복 Logical Call과 Secret 비노출을 Unit·Contract·Integration Test로 검증했다.
+- Model Policy 관리 API·Dashboard, 활성화·폐기 흐름과 WBS-15 Eval Gate가 남아 있으므로 WBS-07 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 

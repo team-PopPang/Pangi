@@ -9,6 +9,12 @@ import pytest
 
 from pangi.adapters.outbound.model_providers.json_schema import JsonSchemaOutputValidator
 from pangi.adapters.outbound.model_providers.retry import RetryingModelProvider
+from pangi.application.contracts.model_persistence import (
+    ModelInvocationContext,
+    ModelInvocationDenial,
+    ModelInvocationFinish,
+    ModelInvocationStart,
+)
 from pangi.application.contracts.model_routing import (
     GuardedModelRequest,
     ModelCallRequest,
@@ -137,12 +143,28 @@ class FlakyProvider:
         return outcome
 
 
+class ContractInvocations:
+    def __init__(self) -> None:
+        self.started: list[ModelInvocationStart] = []
+        self.denied: list[ModelInvocationDenial] = []
+        self.finished: list[ModelInvocationFinish] = []
+
+    async def start(self, invocation: ModelInvocationStart) -> None:
+        self.started.append(invocation)
+
+    async def deny(self, invocation: ModelInvocationDenial) -> None:
+        self.denied.append(invocation)
+
+    async def finish(self, invocation: ModelInvocationFinish) -> None:
+        self.finished.append(invocation)
+
+
 def _execution(
     provider: FlakyProvider,
     *,
     clock: Callable[[], float],
     sleeper: AdvancingSleeper,
-) -> GuardedModelExecutionService:
+) -> tuple[GuardedModelExecutionService, ContractInvocations]:
     retrying = RetryingModelProvider(
         provider,
         ProviderRetryPolicy(
@@ -154,11 +176,13 @@ def _execution(
         clock=clock,
         sleeper=sleeper,
     )
+    invocations = ContractInvocations()
     return GuardedModelExecutionService(
         _policy_service(),
         provider=retrying,
         output_validator=JsonSchemaOutputValidator(),
-    )
+        invocations=invocations,
+    ), invocations
 
 
 def test_transport_retry_counts_requests_under_one_logical_call() -> None:
@@ -169,13 +193,20 @@ def test_transport_retry_counts_requests_under_one_logical_call() -> None:
     clock = FakeClock()
     sleeper = AdvancingSleeper(clock)
 
-    result = asyncio.run(_execution(provider, clock=clock, sleeper=sleeper).execute(_request()))
+    execution, invocations = _execution(provider, clock=clock, sleeper=sleeper)
+    result = asyncio.run(
+        execution.execute(
+            _request(),
+            context=ModelInvocationContext("contract-run-00001"),
+        )
+    )
 
     assert len(provider.calls) == 3
     assert {call.logical_call_id for call in provider.calls} == {"one-logical-call"}
     assert result.response.provider_request_count == 3
     assert result.response.duration_ms == 300
     assert sleeper.delays == [0.1, 0.2]
+    assert invocations.finished[0].provider_request_count == 3
 
 
 def test_non_retryable_failure_stops_after_one_network_request() -> None:
@@ -190,13 +221,20 @@ def test_non_retryable_failure_stops_after_one_network_request() -> None:
     clock = FakeClock()
     sleeper = AdvancingSleeper(clock)
 
+    execution, invocations = _execution(provider, clock=clock, sleeper=sleeper)
     with pytest.raises(ModelProviderFailure) as captured:
-        asyncio.run(_execution(provider, clock=clock, sleeper=sleeper).execute(_request()))
+        asyncio.run(
+            execution.execute(
+                _request(),
+                context=ModelInvocationContext("contract-run-00001"),
+            )
+        )
 
     assert captured.value.code is ModelProviderErrorCode.INVALID_REQUEST
     assert captured.value.provider_request_count == 1
     assert len(provider.calls) == 1
     assert sleeper.delays == []
+    assert invocations.finished[0].provider_request_count == 1
 
 
 def test_retry_exhaustion_reports_all_network_requests() -> None:
@@ -205,14 +243,21 @@ def test_retry_exhaustion_reports_all_network_requests() -> None:
     clock = FakeClock()
     sleeper = AdvancingSleeper(clock)
 
+    execution, invocations = _execution(provider, clock=clock, sleeper=sleeper)
     with pytest.raises(ModelProviderFailure) as captured:
-        asyncio.run(_execution(provider, clock=clock, sleeper=sleeper).execute(_request()))
+        asyncio.run(
+            execution.execute(
+                _request(),
+                context=ModelInvocationContext("contract-run-00001"),
+            )
+        )
 
     assert captured.value.code is ModelProviderErrorCode.TIMEOUT
     assert not captured.value.retryable
     assert captured.value.provider_request_count == 3
     assert len(provider.calls) == 3
     assert sleeper.delays == [0.1, 0.2]
+    assert invocations.finished[0].provider_request_count == 3
 
 
 def test_invalid_structured_output_fails_without_semantic_retry() -> None:
@@ -220,11 +265,18 @@ def test_invalid_structured_output_fails_without_semantic_retry() -> None:
     clock = FakeClock()
     sleeper = AdvancingSleeper(clock)
 
+    execution, invocations = _execution(provider, clock=clock, sleeper=sleeper)
     with pytest.raises(ModelProviderFailure) as captured:
-        asyncio.run(_execution(provider, clock=clock, sleeper=sleeper).execute(_request()))
+        asyncio.run(
+            execution.execute(
+                _request(),
+                context=ModelInvocationContext("contract-run-00001"),
+            )
+        )
 
     assert captured.value.code is ModelProviderErrorCode.INVALID_STRUCTURED_OUTPUT
     assert not captured.value.retryable
     assert captured.value.provider_request_count == 1
     assert len(provider.calls) == 1
     assert sleeper.delays == []
+    assert invocations.finished[0].output_fingerprint is not None

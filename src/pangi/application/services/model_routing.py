@@ -4,8 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import NoReturn
 
+from pangi.application.contracts.model_persistence import (
+    ModelInvocationContext,
+    ModelInvocationDenial,
+    ModelInvocationFinish,
+    ModelInvocationStart,
+    logical_call_fingerprint,
+)
 from pangi.application.contracts.model_routing import (
     GuardedModelExecution,
     GuardedModelRequest,
@@ -19,6 +29,7 @@ from pangi.application.contracts.model_routing import (
     ModelProviderResponse,
 )
 from pangi.application.contracts.redaction import RedactionInputError, RedactionSummary
+from pangi.application.ports.model_persistence import ModelInvocationRecorder
 from pangi.application.ports.model_routing import (
     ModelEgressPolicyProvider,
     ModelProfileProvider,
@@ -36,6 +47,17 @@ from pangi.domain.model_routing import (
     ModelRetention,
     data_class_rank,
 )
+
+Clock = Callable[[], datetime]
+IdFactory = Callable[[], str]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _identifier() -> str:
+    return uuid.uuid4().hex
 
 
 def _classification(request: ModelCallRequest) -> tuple[tuple[DataClass, ...], DataClass]:
@@ -337,6 +359,7 @@ class ModelPolicyService:
             source_kinds=source_kinds,
             evaluated_candidate_count=evaluated_candidate_count,
             eligible_candidate_count=eligible_candidate_count,
+            policy_id=policy.policy_id if policy is not None else None,
             policy_version=policy.policy_version if policy is not None else None,
             policy_fingerprint=policy.fingerprint if policy is not None else None,
             selected_profile_id=selected.profile_id if selected is not None else None,
@@ -391,13 +414,81 @@ class GuardedModelExecutionService:
         *,
         provider: ModelProvider,
         output_validator: StructuredOutputValidator,
+        invocations: ModelInvocationRecorder,
+        clock: Clock = _utc_now,
+        id_factory: IdFactory = _identifier,
     ) -> None:
         self._policy = policy
         self._provider = provider
         self._output_validator = output_validator
+        self._invocations = invocations
+        self._clock = clock
+        self._id_factory = id_factory
 
-    async def execute(self, request: ModelCallRequest) -> GuardedModelExecution:
-        guarded = await self._policy.guard(request)
+    async def execute(
+        self,
+        request: ModelCallRequest,
+        *,
+        context: ModelInvocationContext,
+    ) -> GuardedModelExecution:
+        invocation_id = self._id_factory()
+        call_fingerprint = logical_call_fingerprint(request.logical_call_id)
+        try:
+            guarded = await self._policy.guard(request)
+        except ModelPolicyBlockedError as blocked:
+            await self._invocations.deny(
+                ModelInvocationDenial(
+                    invocation_id=invocation_id,
+                    context=context,
+                    logical_call_fingerprint=call_fingerprint,
+                    decision=blocked.decision,
+                    denied_at=self._clock(),
+                )
+            )
+            raise
+        await self._invocations.start(
+            ModelInvocationStart(
+                invocation_id=invocation_id,
+                context=context,
+                logical_call_fingerprint=call_fingerprint,
+                decision=guarded.decision,
+                started_at=self._clock(),
+            )
+        )
+        try:
+            response = await self._invoke(guarded)
+        except ModelProviderFailure as provider_failure:
+            await self._invocations.finish(
+                ModelInvocationFinish.failed(
+                    invocation_id,
+                    provider_failure,
+                    finished_at=self._clock(),
+                )
+            )
+            raise
+        except Exception:
+            unknown_failure = ModelProviderFailure(
+                ModelProviderErrorCode.UNKNOWN,
+                retryable=False,
+            )
+            await self._invocations.finish(
+                ModelInvocationFinish.failed(
+                    invocation_id,
+                    unknown_failure,
+                    finished_at=self._clock(),
+                )
+            )
+            raise unknown_failure from None
+        await self._invocations.finish(
+            ModelInvocationFinish.completed(
+                invocation_id,
+                response,
+                finished_at=self._clock(),
+            )
+        )
+        return GuardedModelExecution(response=response, decision=guarded.decision)
+
+    async def _invoke(self, guarded: GuardedModelRequest) -> ModelProviderResponse:
         response = await self._provider.invoke(guarded)
         if not isinstance(response, ModelProviderResponse):
             raise ModelProviderFailure(ModelProviderErrorCode.UNKNOWN, retryable=False)
@@ -412,6 +503,10 @@ class GuardedModelExecutionService:
                 retryable=False,
                 provider_request_count=response.provider_request_count,
                 duration_ms=response.duration_ms,
+                token_usage=response.token_usage,
+                provider_latency_ms=response.provider_latency_ms,
+                finish_reason=response.finish_reason,
+                output_fingerprint=response.output_fingerprint,
             )
         try:
             valid = self._output_validator.is_valid(
@@ -426,5 +521,9 @@ class GuardedModelExecutionService:
                 retryable=False,
                 provider_request_count=response.provider_request_count,
                 duration_ms=response.duration_ms,
+                token_usage=response.token_usage,
+                provider_latency_ms=response.provider_latency_ms,
+                finish_reason=response.finish_reason,
+                output_fingerprint=response.output_fingerprint,
             )
-        return GuardedModelExecution(response=response, decision=guarded.decision)
+        return response
