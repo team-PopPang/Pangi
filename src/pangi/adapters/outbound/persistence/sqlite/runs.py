@@ -12,6 +12,7 @@ import aiosqlite
 
 from pangi.adapters.outbound.persistence.sqlite.connection import fetch_all, fetch_one
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
+from pangi.adapters.outbound.persistence.sqlite.event_writer import SqliteRunEventWriter
 from pangi.application.contracts.run_queue import (
     RunCancellation,
     RunClaim,
@@ -34,6 +35,9 @@ from pangi.application.ports.runs import (
     RunPersistenceError,
     RunPrincipalUnavailableError,
     RunRequestConflictError,
+)
+from pangi.application.services.telemetry_redaction import (
+    core_telemetry_redaction_service,
 )
 from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.runs import (
@@ -102,14 +106,6 @@ def _canonical_json(value: object) -> str:
         separators=(",", ":"),
         sort_keys=True,
     )
-
-
-def _json_value(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(nested) for key, nested in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_value(nested) for nested in value]
-    return value
 
 
 def _attachments_json(run: Run) -> str:
@@ -251,8 +247,15 @@ def _summary_from_row(row: aiosqlite.Row) -> RunSummary:
 class SqliteRunStore:
     """Own Run persistence on the runtime's serialized SQLite transaction."""
 
-    def __init__(self, database: SqliteDatabase) -> None:
+    def __init__(
+        self,
+        database: SqliteDatabase,
+        event_writer: SqliteRunEventWriter | None = None,
+    ) -> None:
         self._database = database
+        self._event_writer = event_writer or SqliteRunEventWriter(
+            core_telemetry_redaction_service()
+        )
 
     @asynccontextmanager
     async def _runtime(self) -> AsyncIterator[None]:
@@ -439,23 +442,12 @@ class SqliteRunStore:
             ),
         )
 
-    @staticmethod
-    async def _insert_event(connection: aiosqlite.Connection, event: RunEvent) -> None:
-        await connection.execute(
-            "INSERT INTO run_events "
-            "(run_id, event_index, type, visibility, step_id, message, attributes_json, "
-            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                event.run_id,
-                event.index,
-                event.type,
-                event.visibility.value,
-                event.step_id,
-                event.message,
-                _canonical_json(_json_value(event.attributes)),
-                event.created_at.astimezone(UTC).isoformat(),
-            ),
-        )
+    async def _insert_event(
+        self,
+        connection: aiosqlite.Connection,
+        event: RunEvent,
+    ) -> None:
+        await self._event_writer.insert(connection, event)
 
     async def get_run(self, *, run_id: str, owner_user_id: str | None) -> Run | None:
         try:
@@ -809,9 +801,8 @@ class SqliteRunQueueStore(SqliteRunStore):
         finally:
             await cursor.close()
 
-    @classmethod
     async def _append_event(
-        cls,
+        self,
         connection: aiosqlite.Connection,
         run: Run,
         *,
@@ -829,7 +820,7 @@ class SqliteRunQueueStore(SqliteRunStore):
         )
         if row is None:
             raise RunQueuePersistenceError("The next Run Event index is unavailable")
-        await cls._insert_event(
+        await self._insert_event(
             connection,
             RunEvent(
                 run_id=run.id,
@@ -842,9 +833,8 @@ class SqliteRunQueueStore(SqliteRunStore):
             ),
         )
 
-    @classmethod
     async def _recover_one(
-        cls,
+        self,
         connection: aiosqlite.Connection,
         *,
         current: Run,
@@ -857,13 +847,13 @@ class SqliteRunQueueStore(SqliteRunStore):
             lease_expires_at=None,
             heartbeat_at=None,
         )
-        await cls._persist_transition(connection, current=current, changed=interrupted)
+        await self._persist_transition(connection, current=current, changed=interrupted)
         await connection.execute(
             "UPDATE run_steps SET state = 'interrupted', updated_at = ? "
             "WHERE run_id = ? AND state = 'running'",
             (at.isoformat(), current.id),
         )
-        await cls._append_event(
+        await self._append_event(
             connection,
             interrupted,
             event_type="run.interrupted",
@@ -906,12 +896,12 @@ class SqliteRunQueueStore(SqliteRunStore):
             event_type = "run.queued"
             visibility = EventVisibility.PUBLIC
             message = "Run requeued after interruption"
-        await cls._persist_transition(
+        await self._persist_transition(
             connection,
             current=interrupted,
             changed=recovered,
         )
-        await cls._append_event(
+        await self._append_event(
             connection,
             recovered,
             event_type=event_type,

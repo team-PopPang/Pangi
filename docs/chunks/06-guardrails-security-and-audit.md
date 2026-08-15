@@ -76,6 +76,12 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 허용 결과인 `SafeOutput`은 Sanitized Markdown·Evidence, Content Fingerprint, 정책 Version·Fingerprint와 안전한 변경 수치만 제공한다. 원문 Output·Evidence와 Rule Pattern·Replacement는 `repr`과 오류에 포함하지 않는다.
 - Output Guardrail은 답의 의미를 다시 추론하거나 Slack Block으로 변환하지 않는다. WBS-08은 `OutputCandidate`를 만들고 WBS-16 Renderer는 `SafeOutput`만 소비한다.
 - WBS-06.4.1은 Framework-free 공통 경계까지만 구현한다. 실제 Orchestrator 조립은 WBS-08, Slack별 구조·분할은 WBS-16, Log·Run Event 적용은 WBS-06.4.2와 WBS-17이 소유한다.
+- Log와 Run Event는 `core-telemetry-v1` 정책을 사용한다. 정책은 허용 Log Field, Message·구조화 데이터의 UTF-8 Byte Limit, 최대 깊이와 항목 수를 명시하고 Canonical SHA-256 Fingerprint를 제공한다.
+- Telemetry Redaction은 CRLF/CR→LF와 NFC 정규화 뒤에 기존 `core-secret-v1`을 적용한다. 결과에는 Sanitized Payload와 정책·Redaction Summary만 남기고 원문 값은 `repr`과 오류에서 제외한다.
+- Logging Filter는 `%` Argument를 한 번만 렌더링한 뒤 Message와 허용 Extra를 Redact한다. 임의 Extra는 버리고 Exception·Stack 원문은 제거하되 Exception Type만 보존한다. Filter 자체가 실패하면 원문 대신 고정된 안전 메시지를 기록한다.
+- 모든 SQLite Run Event Insert는 하나의 최종 Writer만 사용한다. 첫 `run.received`, Queue 상태 Event와 범용 Append가 저장 직전에 같은 Redaction을 통과하며, 실패하면 기존 Unit of Work가 상태 변경과 Event를 함께 Rollback한다.
+- Run Event Attribute는 Redaction과 별개로 Chain-of-Thought, Provider·Raw Prompt, Attachment Body, Slack 원문 Event, Tool Result와 `secret` Field를 재귀적으로 금지한다. HTTP JSON과 SSE는 저장된 Safe Event만 읽는다.
+- WBS-06.4.2는 표준 Logging Filter와 Run Event 최종 Writer까지만 소유한다. JSON Formatter·Metric·Trace·OpenTelemetry는 WBS-17, 과거 Event 일괄 재작성은 Migration 승인 범위로 남긴다.
 - 외부 Text는 Source/Trust Metadata를 가진 Envelope로 감싸며 내부 지시로 승격하지 않는다.
 - Audit은 Append-only이며 원문 Token/Prompt/Tool Result 대신 Version, Fingerprint와 Redacted Diff를 저장한다.
 - WBS-03 Unit of Work 위에서 `audit_events`의 Migration, Append-only 제약과 Repository를 이 WBS가 소유한다.
@@ -89,7 +95,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Tool Policy와 Approval 검증 Engine의 공통 단계를 구현한다.
 - [x] Output Sanitizer, Mention/Link Policy와 Secret Redaction을 구현한다.
 - [x] External Data Envelope와 Control Character/HTML 정규화를 구현한다.
-- [ ] JSON Log와 Event의 중앙 Redaction Filter를 구현한다.
+- [x] Log와 Run Event의 중앙 Redaction Filter·최종 Writer를 구현한다.
 - [ ] Audit Event Port, SQLite Adapter와 관리자 조회 API 기반을 만든다.
 - [ ] CSP, Frame, Content-Type, Same-origin과 기본 Bind 정책을 적용한다.
 - [ ] Guardrail/Audit 변경을 Eval 영향 대상으로 표시하는 Fingerprint를 만든다.
@@ -101,7 +107,8 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Secret, Stack Trace, 내부 Path와 Mention 폭주가 출력에서 제거되는지 확인한다.
 - [ ] 외부 문서의 지시가 System/Tool Policy를 바꾸지 못하는지 Contract Test를 실행한다.
 - [ ] 모든 필수 관리 Action이 Actor와 안전한 Diff를 Audit하는지 확인한다.
-- [ ] Audit/Log/Event에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
+- [x] Log와 Run Event 저장·JSON·SSE에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
+- [ ] Audit Event에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
 
 ## 1차 구현 결과
 
@@ -151,6 +158,17 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Broadcast Mention은 항상 중립화하고 일반 Mention은 정책 수를 넘긴 항목만 중립화한다. 한국어·Emoji를 자르지 않는 UTF-8 Byte 절단과 안전한 Marker를 적용한다.
 - 동일 입력·정책은 동일한 Sanitized Content·Fingerprint·Summary를 만들고, 이미 Sanitized된 Markdown을 다시 처리해도 내용이 변하지 않도록 Unit Test로 고정했다.
 - 아직 WBS-08의 `AgentResult`·Reducer, WBS-16의 Slack Renderer에 조립하지 않았다. 구조화 Log·Run Event Redaction은 WBS-06.4.2, Append-only Audit은 WBS-06.5로 남아 있으므로 WBS-06 상태는 `진행 중`이다.
+
+## 4차 2단계 구현 결과
+
+- Framework 의존성이 없는 `TelemetryRedactionPolicy`, 안전한 Log·Run Event Payload, 변경 Summary와 안정적인 Error Code 계약을 추가했다.
+- `core-telemetry-v1`은 Log·Event Message와 구조화 데이터의 UTF-8 Byte Limit, 재귀 깊이·항목 수, 허용 Log Field를 명시한다. 같은 정책은 같은 Canonical SHA-256 Fingerprint를 만든다.
+- `TelemetryRedactionService`가 CRLF/NFC 정규화와 `core-secret-v1` Redaction을 순서대로 적용한다. 금지 Event Field, 크기 초과, Cycle과 잘못된 구조는 원문을 포함하지 않는 오류로 실패 폐쇄한다.
+- 표준 Logging Filter가 `%` Argument와 허용 Extra를 Redact하고 임의 Extra, Exception 원문과 Stack을 제거한다. Exception Type은 보존하며 Filter 실패 시 고정된 안전 메시지만 남긴다.
+- `SqliteRunEventWriter`를 유일한 Event Insert 경계로 만들었다. 첫 `run.received`, Queue 전이·복구 Event와 범용 Append가 저장 직전에 같은 Redaction을 통과한다.
+- Event Redaction 실패는 기존 SQLite Unit of Work를 그대로 Rollback한다. 동시 Index와 Visibility 계약은 유지하고 JSON API와 SSE는 Redaction 완료 Event만 전달한다.
+- 정책 결정성·정규화·크기·Cycle·금지 Field, Logging Argument·Extra·Exception·Fallback, SQLite 전체 쓰기 경로와 JSON·SSE 비노출을 Unit·Architecture·Integration Test로 고정했다.
+- JSON Formatter, Metric, Trace와 OpenTelemetry는 WBS-17에 남겼다. 기존 DB Event를 일괄 재작성하거나 Schema·OpenAPI를 변경하지 않았다. 다음 구현 단위는 WBS-06.5 Append-only Audit이다.
 
 ## 완료 조건
 

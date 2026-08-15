@@ -2,7 +2,7 @@
 
 조직이 직접 설치하고 운영하는 경량 Agent Runtime이다.
 
-현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail, 중앙 Redaction·External Data Envelope, 공통 Tool Permission·Approval·Budget Guardrail과 최종 Output Guardrail까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
+현재 개발 단계는 Pre-alpha다. WBS-01부터 WBS-05까지 완료했고 WBS-06을 진행 중이다. Run Core, 영속 Queue·복구, 조회·취소·Event 전달 API, 보호된 Input Guardrail, 중앙 Redaction·External Data Envelope, 공통 Tool Permission·Approval·Budget Guardrail, 최종 Output Guardrail과 Log·Run Event Redaction까지 구현했다. 자연어 요청을 모델과 Tool로 실행하는 완성된 Agent Runtime은 아직 제공하지 않는다.
 
 ## 현재 구현 상태
 
@@ -13,7 +13,7 @@
 | 03. SQLite 영속성과 Migration | 완료 | 단일 Process Lock, 직렬화된 Unit of Work, Migration·Checksum·Backup, Snapshot 검증 |
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
-| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget과 최종 Output 공통 경계 |
+| 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output과 Log·Run Event Redaction 경계 |
 | 07~20 | 예정 | Model Routing, Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리한다. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있다.
@@ -96,7 +96,7 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 - 정규화된 외부 Content는 중앙 Redaction을 통과한 뒤 항상 `untrusted` Envelope로 생성된다. Content Fingerprint는 Redaction 완료 Text를 기준으로 계산한다.
 - Prompt Renderer는 Source와 Content를 Escape하므로 외부 Text가 `external_data`를 닫거나 새 System Tag를 만들 수 없다.
 
-이 기반은 아직 MCP, Web Fetch, Model Provider와 Log·Run Event에 연결되지 않았다. 각 실행 경계는 후속 WBS에서 중앙 Service와 Envelope를 사용한다.
+이 기반은 Log·Run Event에 연결됐다. MCP, Web Fetch와 Model Provider의 실제 입출력 경계는 후속 WBS에서 중앙 Service와 Envelope를 사용한다.
 
 ### Tool Permission·Approval·Budget 기반
 
@@ -122,12 +122,22 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 
 이 경계는 아직 WBS-08의 `AgentResult`·Reducer나 WBS-16의 Slack Renderer에 조립되지 않았다. 채널 Renderer는 공통 Guardrail을 우회하지 않고 `SafeOutput`만 받아야 한다.
 
+### Log와 Run Event Redaction
+
+- `core-telemetry-v1` 정책이 Log·Event Message와 구조화 데이터의 UTF-8 Byte, 재귀 깊이·항목 수, 허용 Log Field를 명시한다.
+- Telemetry Payload는 CRLF/NFC 정규화 뒤에 중앙 `core-secret-v1` Redaction을 통과한다. 결과와 오류 표현에는 원문 Secret을 남기지 않는다.
+- Logging Filter는 `%` Argument를 한 번만 렌더링하고 Message와 허용 Extra를 Redact한다. 임의 Extra, Exception 원문과 Stack은 제거하고 Exception Type만 보존한다.
+- 첫 `run.received`, Queue 상태 Event와 범용 Append는 하나의 SQLite 최종 Writer를 사용한다. 실패하면 같은 Transaction의 상태 변경과 Event를 함께 Rollback한다.
+- Run Event는 금지 Field를 재귀적으로 거부한다. 저장된 Safe Event만 기존 JSON API와 SSE를 통해 전달한다.
+
+JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구현한다. 기존 Event Schema와 HTTP/OpenAPI 계약은 바꾸지 않았다.
+
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
-- Log·Run Event Redaction과 Append-only Audit
+- Append-only Audit과 JSON Log Formatter·Metric·Trace
 - Model Provider Routing과 데이터 반출 정책
 - Root Orchestrator, 실행 Engine, MCP, Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
@@ -155,10 +165,19 @@ npm --prefix ui ci
 아래 예시는 Runtime Data를 저장소의 `.pangi/`에 만드는 프로젝트 로컬 모드다. `pangi init`이 이 경로를 `.gitignore`에 한 번만 추가한다.
 
 ```bash
+# 프로젝트 안에 `.pangi` 실행 환경을 만들고 최초 관리자용 Bootstrap URL을 발급한다.
 uv run pangi init --project-local --yes
+
+# `.pangi/pangi.toml`의 형식과 설정값이 유효한지 확인한다.
 uv run pangi config validate --project-local
+
+# 현재 DB 버전과 적용 대기 중인 Migration을 확인한다. 실제 적용은 하지 않는다.
 uv run pangi migrate plan --project-local
+
+# 외부 연동 검사를 건너뛰고 로컬 실행 환경을 읽기 전용으로 진단한다.
 uv run pangi doctor --project-local --offline
+
+# 현재 터미널에서 Pangi 서버를 시작한다.
 uv run pangi start --project-local
 ```
 
@@ -245,6 +264,18 @@ WBS-06.4.1에서 구현한 Secret·Stack·내부 Path 제거, HTML Escape, Markd
 ```bash
 uv run pytest \
   tests/unit/test_output_guardrails.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### Log와 Run Event Redaction만 검증
+
+WBS-06.4.2에서 구현한 정책 결정성, Log Argument·Extra·Exception 처리, SQLite 전체 Event 쓰기 경로와 JSON·SSE 비노출을 확인한다.
+
+```bash
+uv run pytest \
+  tests/unit/test_telemetry_redaction.py \
+  tests/unit/test_logging_redaction.py \
+  tests/integration/test_telemetry_delivery.py \
   tests/architecture/test_dependency_rules.py
 ```
 

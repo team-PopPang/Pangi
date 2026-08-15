@@ -5,6 +5,7 @@ from pangi.adapters.outbound.passwords import Argon2idPasswordHasher
 from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
+from pangi.adapters.outbound.persistence.sqlite.event_writer import SqliteRunEventWriter
 from pangi.adapters.outbound.persistence.sqlite.run_events import SqliteRunEventStore
 from pangi.adapters.outbound.persistence.sqlite.runs import (
     SqliteRunQueueStore,
@@ -22,6 +23,9 @@ from pangi.application.services.run_events import (
 )
 from pangi.application.services.run_queue import RunQueueService
 from pangi.application.services.runs import RunService
+from pangi.application.services.telemetry_redaction import (
+    core_telemetry_redaction_service,
+)
 from pangi.config import PangiConfig
 
 
@@ -35,6 +39,10 @@ def build_sqlite_database(paths: RuntimePaths, config: PangiConfig) -> SqliteDat
     """Build the single-connection runtime database."""
 
     return SqliteDatabase(paths, config.storage)
+
+
+def _build_run_event_writer() -> SqliteRunEventWriter:
+    return SqliteRunEventWriter(core_telemetry_redaction_service())
 
 
 def build_bootstrap_admin(
@@ -74,7 +82,7 @@ def build_auth_sessions(
 def build_run_service(database: SqliteDatabase) -> RunService:
     """Build Run creation and owner-scoped query use cases."""
 
-    return RunService(SqliteRunStore(database))
+    return RunService(SqliteRunStore(database, _build_run_event_writer()))
 
 
 def build_run_queue_service(
@@ -83,7 +91,10 @@ def build_run_queue_service(
 ) -> RunQueueService:
     """Build persistent queue use cases with an explicitly approved timing policy."""
 
-    return RunQueueService(SqliteRunQueueStore(database), policy)
+    return RunQueueService(
+        SqliteRunQueueStore(database, _build_run_event_writer()),
+        policy,
+    )
 
 
 def build_run_cancellation_service(
@@ -92,21 +103,23 @@ def build_run_cancellation_service(
     """Build owner-authorized Run cancellation without starting a worker runtime."""
 
     return RunCancellationService(
-        SqliteRunStore(database),
-        SqliteRunQueueStore(database),
+        SqliteRunStore(database, _build_run_event_writer()),
+        SqliteRunQueueStore(database, _build_run_event_writer()),
     )
 
 
 def build_run_event_service(database: SqliteDatabase) -> RunEventService:
     """Build owner- and visibility-scoped Run Event delivery."""
 
-    return RunEventService(SqliteRunEventStore(database))
+    return RunEventService(SqliteRunEventStore(database, _build_run_event_writer()))
 
 
 def build_run_queue_metric_service(database: SqliteDatabase) -> RunQueueMetricService:
     """Build administrator-only Queue metric delivery."""
 
-    return RunQueueMetricService(SqliteRunEventStore(database))
+    return RunQueueMetricService(
+        SqliteRunEventStore(database, _build_run_event_writer())
+    )
 
 
 def build_bootstrap_admin_for_cli(
