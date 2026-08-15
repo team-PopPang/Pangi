@@ -5,11 +5,16 @@ from pangi.adapters.outbound.passwords import Argon2idPasswordHasher
 from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
-from pangi.adapters.outbound.persistence.sqlite.runs import SqliteRunStore
+from pangi.adapters.outbound.persistence.sqlite.runs import (
+    SqliteRunQueueStore,
+    SqliteRunStore,
+)
 from pangi.adapters.outbound.persistence.sqlite.sessions import SqliteAuthSessionStore
 from pangi.application.contracts.paths import RuntimePaths
+from pangi.application.contracts.run_queue import RunQueuePolicy
 from pangi.application.services.auth import AuthSessionService
 from pangi.application.services.bootstrap_admin import BootstrapAdminService
+from pangi.application.services.run_queue import RunQueueService
 from pangi.application.services.runs import RunService
 from pangi.config import PangiConfig
 
@@ -64,6 +69,15 @@ def build_run_service(database: SqliteDatabase) -> RunService:
     """Build Run creation and owner-scoped query use cases."""
 
     return RunService(SqliteRunStore(database))
+
+
+def build_run_queue_service(
+    database: SqliteDatabase,
+    policy: RunQueuePolicy,
+) -> RunQueueService:
+    """Build persistent queue use cases with an explicitly approved timing policy."""
+
+    return RunQueueService(SqliteRunQueueStore(database), policy)
 
 
 def build_bootstrap_admin_for_cli(

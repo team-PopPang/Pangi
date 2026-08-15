@@ -5,17 +5,28 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import aiosqlite
 
 from pangi.adapters.outbound.persistence.sqlite.connection import fetch_all, fetch_one
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
+from pangi.application.contracts.run_queue import (
+    RunCancellation,
+    RunClaim,
+    RunRecoveryResult,
+)
 from pangi.application.contracts.runs import (
     RunCreateRecord,
     RunCreation,
     RunStoreQuery,
     RunSummary,
+)
+from pangi.application.ports.run_queue import (
+    RunQueueConflictError,
+    RunQueueNotFoundError,
+    RunQueuePersistenceError,
 )
 from pangi.application.ports.runs import (
     IdempotencyConflictError,
@@ -27,13 +38,16 @@ from pangi.application.ports.runs import (
 from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.runs import (
     AttachmentRef,
+    EventVisibility,
     Principal,
     PrincipalChannel,
     Run,
+    RunErrorCode,
     RunEvent,
     RunMode,
     RunRequest,
     RunState,
+    transition_run,
 )
 
 _RUN_COLUMNS = """
@@ -504,3 +518,409 @@ class SqliteRunStore:
         except aiosqlite.Error as error:
             raise RunPersistenceError("The Run store is unavailable") from error
         return tuple(_summary_from_row(row) for row in rows)
+
+
+class SqliteRunQueueStore(SqliteRunStore):
+    """Serialize Queue state, lease ownership, cancellation, and recovery."""
+
+    async def enqueue(
+        self,
+        *,
+        run_id: str,
+        expected_revision: int,
+        at: datetime,
+    ) -> Run:
+        timestamp = at.astimezone(UTC)
+        try:
+            async with self._runtime(), self._database.create() as unit_of_work:
+                row = await self._select_run(
+                    unit_of_work.connection,
+                    run_id=run_id,
+                    owner_user_id=None,
+                )
+                if row is None:
+                    raise RunQueueNotFoundError("The Run was not found")
+                current = _run_from_row(row)
+                if current.revision != expected_revision or current.state not in {
+                    RunState.RECEIVED,
+                    RunState.PLANNING,
+                    RunState.INTERRUPTED,
+                }:
+                    raise RunQueueConflictError("The Run cannot be queued")
+                queued = replace(
+                    transition_run(current, RunState.QUEUED, at=timestamp),
+                    worker_id=None,
+                    lease_expires_at=None,
+                    heartbeat_at=None,
+                    error_code=None,
+                )
+                await self._persist_transition(
+                    unit_of_work.connection,
+                    current=current,
+                    changed=queued,
+                )
+                await self._append_event(
+                    unit_of_work.connection,
+                    queued,
+                    event_type="run.queued",
+                    visibility=EventVisibility.PUBLIC,
+                    at=timestamp,
+                    message="Run queued",
+                    attributes={"reason": "ready"},
+                )
+                await unit_of_work.commit()
+                return queued
+        except aiosqlite.Error as error:
+            raise RunQueuePersistenceError("The Run queue is unavailable") from error
+
+    async def claim_next(
+        self,
+        *,
+        worker_id: str,
+        at: datetime,
+        lease_expires_at: datetime,
+    ) -> RunClaim | None:
+        timestamp = at.astimezone(UTC)
+        lease_until = lease_expires_at.astimezone(UTC)
+        if lease_until <= timestamp:
+            raise ValueError("lease_expires_at must be later than the claim time")
+        try:
+            async with self._runtime(), self._database.create() as unit_of_work:
+                row = await fetch_one(
+                    unit_of_work.connection,
+                    f"SELECT {_RUN_COLUMNS} FROM runs r "
+                    "JOIN users u ON u.id = r.principal_id "
+                    "WHERE r.state = 'queued' "
+                    "ORDER BY COALESCE(r.queued_at, r.created_at), r.created_at, r.id "
+                    "LIMIT 1",
+                )
+                if row is None:
+                    await unit_of_work.commit()
+                    return None
+                current = _run_from_row(row)
+                claimed = replace(
+                    transition_run(current, RunState.RUNNING, at=timestamp),
+                    worker_id=worker_id,
+                    heartbeat_at=timestamp,
+                    lease_expires_at=lease_until,
+                )
+                await self._persist_transition(
+                    unit_of_work.connection,
+                    current=current,
+                    changed=claimed,
+                )
+                await self._append_event(
+                    unit_of_work.connection,
+                    claimed,
+                    event_type="run.running",
+                    visibility=EventVisibility.PUBLIC,
+                    at=timestamp,
+                    message="Run started",
+                    attributes={},
+                )
+                await unit_of_work.commit()
+                return RunClaim(claimed)
+        except aiosqlite.Error as error:
+            raise RunQueuePersistenceError("The Run queue is unavailable") from error
+
+    async def heartbeat(
+        self,
+        *,
+        run_id: str,
+        worker_id: str,
+        at: datetime,
+        lease_expires_at: datetime,
+    ) -> bool:
+        timestamp = at.astimezone(UTC)
+        lease_until = lease_expires_at.astimezone(UTC)
+        if lease_until <= timestamp:
+            raise ValueError("lease_expires_at must be later than the heartbeat time")
+        try:
+            async with self._runtime(), self._database.create() as unit_of_work:
+                cursor = await unit_of_work.connection.execute(
+                    "UPDATE runs SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? "
+                    "WHERE id = ? AND state = 'running' AND worker_id = ? "
+                    "AND julianday(lease_expires_at) > julianday(?)",
+                    (
+                        timestamp.isoformat(),
+                        lease_until.isoformat(),
+                        timestamp.isoformat(),
+                        run_id,
+                        worker_id,
+                        timestamp.isoformat(),
+                    ),
+                )
+                try:
+                    renewed = cursor.rowcount == 1
+                finally:
+                    await cursor.close()
+                await unit_of_work.commit()
+                return renewed
+        except aiosqlite.Error as error:
+            raise RunQueuePersistenceError("The Run queue is unavailable") from error
+
+    async def cancel(self, *, run_id: str, at: datetime) -> RunCancellation:
+        timestamp = at.astimezone(UTC)
+        try:
+            async with self._runtime(), self._database.create() as unit_of_work:
+                row = await self._select_run(
+                    unit_of_work.connection,
+                    run_id=run_id,
+                    owner_user_id=None,
+                )
+                if row is None:
+                    raise RunQueueNotFoundError("The Run was not found")
+                current = _run_from_row(row)
+                if current.state is RunState.CANCELLED:
+                    await unit_of_work.commit()
+                    return RunCancellation(current, False)
+                if current.state not in {RunState.QUEUED, RunState.RUNNING}:
+                    raise RunQueueConflictError("The Run cannot be cancelled")
+                cancelled = replace(
+                    transition_run(current, RunState.CANCELLED, at=timestamp),
+                    worker_id=None,
+                    lease_expires_at=None,
+                    heartbeat_at=None,
+                )
+                await self._persist_transition(
+                    unit_of_work.connection,
+                    current=current,
+                    changed=cancelled,
+                )
+                await self._append_event(
+                    unit_of_work.connection,
+                    cancelled,
+                    event_type="run.cancelled",
+                    visibility=EventVisibility.PUBLIC,
+                    at=timestamp,
+                    message="Run cancelled",
+                    attributes={},
+                )
+                await unit_of_work.commit()
+                return RunCancellation(cancelled, True)
+        except aiosqlite.Error as error:
+            raise RunQueuePersistenceError("The Run queue is unavailable") from error
+
+    async def recover_expired(self, *, at: datetime) -> RunRecoveryResult:
+        timestamp = at.astimezone(UTC)
+        requeued: list[str] = []
+        failed: list[str] = []
+        try:
+            async with self._runtime(), self._database.create() as unit_of_work:
+                rows = await fetch_all(
+                    unit_of_work.connection,
+                    f"SELECT {_RUN_COLUMNS} FROM runs r "
+                    "JOIN users u ON u.id = r.principal_id "
+                    "WHERE r.state = 'running' "
+                    "AND julianday(r.lease_expires_at) <= julianday(?) "
+                    "ORDER BY r.lease_expires_at, r.id",
+                    (timestamp.isoformat(),),
+                )
+                for row in rows:
+                    recovered = await self._recover_one(
+                        unit_of_work.connection,
+                        current=_run_from_row(row),
+                        at=timestamp,
+                        reason="lease_expired",
+                    )
+                    if recovered.state is RunState.QUEUED:
+                        requeued.append(recovered.id)
+                    else:
+                        failed.append(recovered.id)
+                await unit_of_work.commit()
+        except aiosqlite.Error as error:
+            raise RunQueuePersistenceError("The Run queue is unavailable") from error
+        return RunRecoveryResult(tuple(requeued), tuple(failed))
+
+    async def abandon_claim(
+        self,
+        *,
+        run_id: str,
+        worker_id: str,
+        at: datetime,
+        reason: str,
+    ) -> RunRecoveryResult:
+        timestamp = at.astimezone(UTC)
+        try:
+            async with self._runtime(), self._database.create() as unit_of_work:
+                row = await self._select_run(
+                    unit_of_work.connection,
+                    run_id=run_id,
+                    owner_user_id=None,
+                )
+                if row is None:
+                    await unit_of_work.commit()
+                    return RunRecoveryResult()
+                current = _run_from_row(row)
+                if current.state is not RunState.RUNNING or current.worker_id != worker_id:
+                    await unit_of_work.commit()
+                    return RunRecoveryResult()
+                recovered = await self._recover_one(
+                    unit_of_work.connection,
+                    current=current,
+                    at=timestamp,
+                    reason=reason,
+                )
+                await unit_of_work.commit()
+        except aiosqlite.Error as error:
+            raise RunQueuePersistenceError("The Run queue is unavailable") from error
+        if recovered.state is RunState.QUEUED:
+            return RunRecoveryResult((recovered.id,), ())
+        return RunRecoveryResult((), (recovered.id,))
+
+    @staticmethod
+    async def _persist_transition(
+        connection: aiosqlite.Connection,
+        *,
+        current: Run,
+        changed: Run,
+    ) -> None:
+        cursor = await connection.execute(
+            "UPDATE runs SET state = ?, revision = ?, worker_id = ?, "
+            "lease_expires_at = ?, heartbeat_at = ?, warnings_json = ?, error_code = ?, "
+            "updated_at = ?, queued_at = CASE WHEN ? = 'queued' THEN ? ELSE queued_at END, "
+            "started_at = ?, finished_at = ? "
+            "WHERE id = ? AND state = ? AND revision = ?",
+            (
+                changed.state.value,
+                changed.revision,
+                changed.worker_id,
+                (
+                    changed.lease_expires_at.isoformat()
+                    if changed.lease_expires_at is not None
+                    else None
+                ),
+                changed.heartbeat_at.isoformat() if changed.heartbeat_at is not None else None,
+                _canonical_json(list(changed.warnings)),
+                changed.error_code,
+                changed.updated_at.isoformat(),
+                changed.state.value,
+                changed.updated_at.isoformat(),
+                changed.started_at.isoformat() if changed.started_at is not None else None,
+                changed.finished_at.isoformat() if changed.finished_at is not None else None,
+                current.id,
+                current.state.value,
+                current.revision,
+            ),
+        )
+        try:
+            if cursor.rowcount != 1:
+                raise RunQueueConflictError("The Run queue revision changed")
+        finally:
+            await cursor.close()
+
+    @classmethod
+    async def _append_event(
+        cls,
+        connection: aiosqlite.Connection,
+        run: Run,
+        *,
+        event_type: str,
+        visibility: EventVisibility,
+        at: datetime,
+        message: str,
+        attributes: Mapping[str, object],
+    ) -> None:
+        row = await fetch_one(
+            connection,
+            "SELECT COALESCE(MAX(event_index), 0) + 1 AS next_index "
+            "FROM run_events WHERE run_id = ?",
+            (run.id,),
+        )
+        if row is None:
+            raise RunQueuePersistenceError("The next Run Event index is unavailable")
+        await cls._insert_event(
+            connection,
+            RunEvent(
+                run_id=run.id,
+                index=int(row["next_index"]),
+                type=event_type,
+                visibility=visibility,
+                created_at=at,
+                message=message,
+                attributes=attributes,
+            ),
+        )
+
+    @classmethod
+    async def _recover_one(
+        cls,
+        connection: aiosqlite.Connection,
+        *,
+        current: Run,
+        at: datetime,
+        reason: str,
+    ) -> Run:
+        interrupted = replace(
+            transition_run(current, RunState.INTERRUPTED, at=at),
+            worker_id=None,
+            lease_expires_at=None,
+            heartbeat_at=None,
+        )
+        await cls._persist_transition(connection, current=current, changed=interrupted)
+        await connection.execute(
+            "UPDATE run_steps SET state = 'interrupted', updated_at = ? "
+            "WHERE run_id = ? AND state = 'running'",
+            (at.isoformat(), current.id),
+        )
+        await cls._append_event(
+            connection,
+            interrupted,
+            event_type="run.interrupted",
+            visibility=EventVisibility.ADMIN,
+            at=at,
+            message="Run execution interrupted",
+            attributes={"reason": reason},
+        )
+        steps = await fetch_all(
+            connection,
+            "SELECT idempotent FROM run_steps "
+            "WHERE run_id = ? AND state = 'interrupted'",
+            (current.id,),
+        )
+        has_non_idempotent_step = any(int(row["idempotent"]) == 0 for row in steps)
+        if has_non_idempotent_step:
+            await connection.execute(
+                "UPDATE run_steps SET state = 'failed', error_code = ?, "
+                "updated_at = ?, finished_at = ? "
+                "WHERE run_id = ? AND state = 'interrupted'",
+                (
+                    RunErrorCode.NON_IDEMPOTENT_RECOVERY.value,
+                    at.isoformat(),
+                    at.isoformat(),
+                    current.id,
+                ),
+            )
+            recovered = replace(
+                transition_run(interrupted, RunState.FAILED, at=at),
+                error_code=RunErrorCode.NON_IDEMPOTENT_RECOVERY.value,
+            )
+            event_type = "run.failed"
+            visibility = EventVisibility.PUBLIC
+            message = "Run recovery stopped"
+        else:
+            recovered = replace(
+                transition_run(interrupted, RunState.QUEUED, at=at),
+                error_code=None,
+            )
+            event_type = "run.queued"
+            visibility = EventVisibility.PUBLIC
+            message = "Run requeued after interruption"
+        await cls._persist_transition(
+            connection,
+            current=interrupted,
+            changed=recovered,
+        )
+        await cls._append_event(
+            connection,
+            recovered,
+            event_type=event_type,
+            visibility=visibility,
+            at=at,
+            message=message,
+            attributes={
+                "reason": reason,
+                "retryable": not has_non_idempotent_step,
+            },
+        )
+        return recovered

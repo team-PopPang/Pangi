@@ -72,9 +72,9 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Run 생성과 첫 Event의 원자적 저장을 구현한다.
 - [x] `api_idempotency_records`와 Run 생성 Idempotency를 같은 Transaction에 연결한다.
 - [x] Run 검색의 Stable Cursor 계약을 구현한다.
-- [ ] Queue 조회, `BEGIN IMMEDIATE` Claim과 동시 실행 Semaphore를 구현한다.
-- [ ] Lease, Heartbeat, Cancel과 Startup Recovery를 구현한다.
-- [ ] Idempotent/Non-idempotent 복구 정책을 연결한다.
+- [x] Queue 조회, `BEGIN IMMEDIATE` Claim과 동시 실행 Semaphore를 구현한다.
+- [x] Lease, Heartbeat, Cancel과 Startup Recovery를 구현한다.
+- [x] Idempotent/Non-idempotent 복구 정책을 연결한다.
 - [ ] Event Store와 Visibility Filter를 구현한다.
 - [x] Run 목록·상세 조회의 Resource Owner 조건을 구현한다.
 - [ ] Run 취소·Event 조회의 Resource Owner 조건을 구현한다.
@@ -84,9 +84,9 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 ## 검증 체크리스트
 
 - [x] 모든 허용/금지 상태 전이를 Unit Test로 고정한다.
-- [ ] 동시 Worker Claim에서 같은 Run이 한 번만 실행되는지 확인한다.
-- [ ] Process 중단 뒤 Queue와 Lease Recovery를 Integration Test로 확인한다.
-- [ ] Non-idempotent Step이 자동 재실행되지 않는지 확인한다.
+- [x] 동시 Worker Claim에서 같은 Run이 한 번만 실행되는지 확인한다.
+- [x] Process 중단 뒤 Queue와 Lease Recovery를 Integration Test로 확인한다.
+- [x] Non-idempotent Step이 자동 재실행되지 않는지 확인한다.
 - [x] 같은 Idempotency Key의 Run이 중복 생성되지 않는지 확인한다.
 - [x] Cursor 재사용에서 Run이 중복되거나 누락되지 않는지 확인한다.
 - [x] 다른 사용자의 Run 목록·상세 조회를 거부하는지 확인한다.
@@ -114,6 +114,17 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 목록은 `(created_at DESC, id DESC)` Keyset Cursor를 사용하고 Cursor를 Actor·Owner Scope·Filter에 묶는다. 같은 생성 시각의 Run, 페이지 사이에 추가된 Run, 다른 Scope에서의 재사용과 손상된 Cursor 거부를 Test로 고정했다.
 - Member, Skill Author와 System은 자신의 Run만, Admin은 전체 Run을 조회한다. 목록에는 Metadata만 포함하고 Owner/Admin 검사를 통과한 상세 조회에서만 정규화된 Request를 복원한다.
 - 영속 Queue·Lease·복구·취소는 3차, Run API·Event 조회·SSE는 4차 구현 단위로 남아 있으므로 WBS-05 상태는 `진행 중`으로 유지한다.
+
+## 3차 구현 결과
+
+- `runs.state=queued`와 기존 Queue Index를 사용하고 `BEGIN IMMEDIATE` Transaction 안에서 `queued_at`, `created_at`, `id` 순서의 Run을 하나만 Claim한다.
+- Claim은 Run을 `running`으로 전환하면서 Worker ID, Lease와 Heartbeat를 원자적으로 저장한다. 상태 변경은 Revision CAS를 사용하고 Heartbeat는 유효한 Lease의 현재 Worker만 갱신한다.
+- `asyncio.Event` 기반 Wake-up과 `max_concurrent_runs` Semaphore, 활성 Task Registry를 가진 Process-local Queue Runtime을 추가했다.
+- 대기·실행 Run을 원자적으로 취소하고 이미 취소된 Run의 재요청은 같은 결과를 반환한다. 취소 뒤 오래된 Worker의 Heartbeat와 상태 쓰기는 거부한다.
+- Startup과 Worker 종료에서 중단된 Run을 복구한다. 실행 중이던 Step이 없거나 모두 Idempotent면 재대기하고, Non-idempotent Step이 있으면 `non_idempotent_recovery`로 Run과 중단 Step을 실패시킨다.
+- Queue 상태 변경과 `run.queued`, `run.running`, `run.interrupted`, `run.cancelled`, `run.failed` Event를 같은 Transaction에 저장한다.
+- Lease Duration과 Heartbeat Interval은 `RunQueuePolicy`로 주입한다. 운영 Baseline 없이 공개 설정 기본값을 고정하지 않았고 Test는 명시적인 시간 정책을 사용한다.
+- 실제 Root Orchestrator와 실행 Handler는 WBS-08에서, Owner 기반 취소 API·Event 조회·SSE·Queue Metric은 WBS-05.4에서 연결하므로 WBS-05 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 
