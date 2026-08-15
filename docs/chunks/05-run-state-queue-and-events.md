@@ -51,8 +51,12 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - WBS-03 Unit of Work 위에서 `runs`, `run_steps`, `run_events`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
 - `api_idempotency_records`를 같은 Unit of Work에 두고 `principal_id + route_key + idempotency_key`로 Run 생성 Replay를 판별한다. 인증·Bootstrap Lifecycle API에는 적용하지 않는다.
 - `runs.idempotency_key`는 추적용 값이며 전역 Unique로 만들지 않는다. Replay 유일성은 `api_idempotency_records`의 복합 Key만 소유한다.
+- `route_key`는 요청 본문이 아니라 신뢰할 수 있는 Inbound Adapter가 전달한다. Request Fingerprint는 Channel, Text, Thread, Explicit Skill, Schedule과 순서가 보존된 Attachment Metadata를 포함하고, 재시도마다 달라지는 Request ID·생성 시각·Idempotency Key는 제외한다.
+- Idempotency Record의 기본 TTL은 24시간이다. 같은 복합 Key를 다시 사용할 때 만료된 Record만 Transaction 안에서 제거하고 새 Run을 만든다. TTL 안의 같은 Fingerprint는 기존 Run을 Replay하고 다른 Fingerprint는 안정적인 충돌 오류로 거부한다.
 - Restart 뒤 Queue가 실행 입력을 복구할 수 있도록 정규화된 Request Text와 Attachment 참조를 저장한다. Slack Event 원본 JSON, Attachment 본문, Provider Prompt와 Tool Result 원문은 저장하지 않는다.
-- Run 검색은 Stable Sort Key를 포함한 불투명 Cursor를 사용하고 Run 상세·취소·Event 조회는 역할 검사 뒤 Owner 조건을 다시 검사한다.
+- Run 검색은 `(created_at DESC, id DESC)` Keyset과 Versioned JSON을 URL-safe Base64로 인코딩한 불투명 Cursor를 사용한다. Cursor는 Actor ID·Role, Effective Owner Scope와 상태·Trigger Filter의 Fingerprint에 묶어 다른 조회 조건에서 재사용할 수 없게 한다.
+- Member, Skill Author와 System은 자신의 Run만 조회하고 Admin은 전체 Run을 조회한다. 비활성 사용자와 소유자가 다른 Run의 상세 조회는 존재 여부가 드러나지 않도록 동일한 Not Found로 처리한다.
+- 목록은 정규화된 Request Text와 Attachment를 제외한 Metadata Summary만 반환한다. 상세 조회는 Owner/Admin 검사를 통과한 뒤에만 전체 정규화 Request를 복원한다.
 - Worker는 `BEGIN IMMEDIATE`에서 가장 오래된 Queue Row를 `running`으로 Claim하고 Worker ID, Lease, Heartbeat를 저장한다.
 - Run 상태 전이는 Domain Policy가 허용한 Edge만 사용하고 Repository Update에 Expected Revision을 포함한다.
 - Required Step 실패는 Run 실패, Optional Step 실패는 별도 `partial` Run 상태를 만들지 않고 Warning을 가진 `completed` 결과로 구분한다.
@@ -65,14 +69,15 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Principal, RunRequest, Run, RunStep과 RunEvent 계약을 정의한다.
 - [x] Run/Step State Machine과 오류 코드를 구현한다.
 - [x] Run Core Table과 Idempotency Record Migration·제약을 구현한다.
-- [ ] Run 생성과 첫 Event의 원자적 저장을 구현한다.
-- [ ] `api_idempotency_records`와 Run 생성 Idempotency를 같은 Transaction에 연결한다.
-- [ ] Run 검색의 Stable Cursor 계약을 구현한다.
+- [x] Run 생성과 첫 Event의 원자적 저장을 구현한다.
+- [x] `api_idempotency_records`와 Run 생성 Idempotency를 같은 Transaction에 연결한다.
+- [x] Run 검색의 Stable Cursor 계약을 구현한다.
 - [ ] Queue 조회, `BEGIN IMMEDIATE` Claim과 동시 실행 Semaphore를 구현한다.
 - [ ] Lease, Heartbeat, Cancel과 Startup Recovery를 구현한다.
 - [ ] Idempotent/Non-idempotent 복구 정책을 연결한다.
 - [ ] Event Store와 Visibility Filter를 구현한다.
-- [ ] Run 상세·취소·Event 조회의 Resource Owner 조건을 구현한다.
+- [x] Run 목록·상세 조회의 Resource Owner 조건을 구현한다.
+- [ ] Run 취소·Event 조회의 Resource Owner 조건을 구현한다.
 - [ ] Run 상세/검색/취소/SSE API를 구현한다.
 - [ ] 오래된 `running`과 `queued` Run에 대한 운영 Metric을 연결한다.
 
@@ -82,9 +87,10 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [ ] 동시 Worker Claim에서 같은 Run이 한 번만 실행되는지 확인한다.
 - [ ] Process 중단 뒤 Queue와 Lease Recovery를 Integration Test로 확인한다.
 - [ ] Non-idempotent Step이 자동 재실행되지 않는지 확인한다.
-- [ ] 같은 Idempotency Key의 Run이 중복 생성되지 않는지 확인한다.
-- [ ] Cursor 재사용에서 Run이 중복되거나 누락되지 않는지 확인한다.
-- [ ] 다른 사용자의 Run 상세·취소·Event 조회를 거부하는지 확인한다.
+- [x] 같은 Idempotency Key의 Run이 중복 생성되지 않는지 확인한다.
+- [x] Cursor 재사용에서 Run이 중복되거나 누락되지 않는지 확인한다.
+- [x] 다른 사용자의 Run 목록·상세 조회를 거부하는지 확인한다.
+- [ ] 다른 사용자의 Run 취소·Event 조회를 거부하는지 확인한다.
 - [ ] Event Index가 중복되거나 역전되지 않는지 확인한다.
 - [ ] SSE 재연결에서 Last Event 이후 항목만 전달되는지 확인한다.
 - [ ] Event와 API에 Chain-of-Thought/원문 Prompt/Secret이 없는지 검사한다.
@@ -99,6 +105,15 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Idempotency Replay는 `principal_id + route_key + idempotency_key` 복합 Key가 소유하고 `runs.idempotency_key`는 전역 Unique로 만들지 않았다.
 - Event Attribute는 Chain-of-Thought, Provider Prompt, Slack 원본 Event, Attachment 본문과 Tool Result 원문용 Key를 거부한다.
 - 실제 Run 저장 Use Case, Worker와 API/SSE가 남아 있으므로 WBS-05 상태는 `진행 중`으로 유지한다.
+
+## 2차 구현 결과
+
+- Framework 의존성이 없는 Run 생성·상세·목록 계약과 Application Service, SQLite Store를 추가했다.
+- Run 생성 시 `received` Run과 공개 `run.received` 첫 Event, 처리 완료 Idempotency Record를 하나의 Transaction으로 저장한다. 중간 실패는 세 Record를 모두 Rollback한다.
+- 같은 Principal·Route·Idempotency Key와 같은 Fingerprint는 기존 Run을 반환하고, 다른 Fingerprint는 충돌로 거부한다. 만료 기준은 24시간이며 해당 Key를 다시 사용할 때 만료 Record를 정리한다.
+- 목록은 `(created_at DESC, id DESC)` Keyset Cursor를 사용하고 Cursor를 Actor·Owner Scope·Filter에 묶는다. 같은 생성 시각의 Run, 페이지 사이에 추가된 Run, 다른 Scope에서의 재사용과 손상된 Cursor 거부를 Test로 고정했다.
+- Member, Skill Author와 System은 자신의 Run만, Admin은 전체 Run을 조회한다. 목록에는 Metadata만 포함하고 Owner/Admin 검사를 통과한 상세 조회에서만 정규화된 Request를 복원한다.
+- 영속 Queue·Lease·복구·취소는 3차, Run API·Event 조회·SSE는 4차 구현 단위로 남아 있으므로 WBS-05 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 
