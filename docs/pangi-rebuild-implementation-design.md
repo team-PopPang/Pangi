@@ -717,6 +717,12 @@ Claim에는 `worker_id`, `lease_expires_at`, `heartbeat_at`을 기록한다. 단
 
 Restart 뒤 `queued` Run을 복구하려면 실행 입력도 함께 영속해야 한다. `runs`에는 Channel Adapter가 정규화한 Request Text와 Attachment 참조만 저장한다. Slack Event 원본 JSON, Attachment 본문, Provider Prompt와 Tool Result 원문은 저장하지 않는다.
 
+Run 생성의 Idempotency Scope는 `principal_id + route_key + idempotency_key`다. `route_key`는 요청 본문이 아니라 신뢰할 수 있는 Inbound Adapter가 전달한다. Request Fingerprint는 Channel, Text, Thread, Explicit Skill, Schedule과 순서가 보존된 Attachment Metadata를 포함하고 Request ID, 생성 시각과 Idempotency Key처럼 재시도마다 바뀔 수 있는 Transport Metadata는 제외한다. 기본 TTL은 24시간이며, TTL 안의 같은 Fingerprint는 기존 Run을 반환하고 다른 Fingerprint는 `idempotency_conflict`로 거부한다. 만료된 Record는 해당 복합 Key를 다시 사용할 때 생성 Transaction 안에서 정리한다.
+
+Run 목록은 `(created_at DESC, id DESC)` Keyset Pagination을 사용한다. Cursor는 Version, 마지막 생성 시각과 Run ID, Actor ID·Role, Effective Owner Scope, 상태·Trigger Filter로 만든 Query Fingerprint를 담은 URL-safe Base64 문자열이다. Cursor의 구조나 조회 Scope가 다르면 `invalid_run_cursor`로 거부한다.
+
+Member, Skill Author와 System은 자신의 Run만 조회하고 Admin은 전체 Run을 조회한다. 비활성 사용자와 다른 소유자의 상세 조회는 동일한 `run_not_found`로 응답한다. 목록은 정규화된 Request Text와 Attachment를 제외한 Metadata Summary만 반환하고, 상세 조회는 Owner/Admin 검사를 통과한 뒤 전체 정규화 Request를 복원한다.
+
 ## 8. Core 계약
 
 ### 8.1 RunRequest
