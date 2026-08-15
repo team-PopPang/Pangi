@@ -566,7 +566,7 @@ Layer별 책임은 다음과 같다.
 | MCP Registry | 연결, Tool Discovery, OAuth Token, Health, Policy를 관리한다. | 모델 의사결정 |
 | Model Policy Engine | Data Class와 Provider/Model/Region Egress를 검사한다. | 답변 생성, Provider 임의 Fallback |
 | Result Reducer | 표준 결과를 안정된 Markdown 구조로 합친다. | 새로운 사실 생성 |
-| Output Guardrail | Secret, 길이, 허용 Link, Channel 형식을 검사한다. | 답 내용 재추론 |
+| Output Guardrail | 최종 Markdown·Evidence의 Secret, UTF-8 길이, HTML, Mention, Link와 내부 정보를 검사한다. | 답 내용 재추론, Channel 형식 변환 |
 | Skill Runtime | 선언형 Workflow를 Compile하고 실행한다. | 임의 Python Module Import |
 | Scheduler | Due Schedule을 Claim하고 `RunRequest`를 만든다. | Runtime 우회 실행 |
 | Eval Runner | Stub Connector로 행동 계약을 반복 검증한다. | 운영 Credential 사용 |
@@ -3422,17 +3422,22 @@ Tool 이름과 설명만 보고 Read/Write를 추정하지 않는다. Admin이 T
 
 ### 21.4 Output Guardrail
 
-- Secret Pattern
-- Pangi 자체 API Key/Token Prefix
-- 연결 Credential Field
-- 허용되지 않은 HTML
-- Slack Mention 폭주
-- 최대 길이
-- 외부 Link Scheme
-- Stack Trace와 내부 Path
-- Evidence Link
+모델이 만든 Direct Answer와 Reducer가 합성한 결과는 모두 비신뢰 `OutputCandidate`다. Channel Adapter는 원문을 직접 받지 않고 공통 Guardrail이 허용한 `SafeOutput`만 받는다.
 
-Redaction은 마지막 방어선이다. Secret이 Model Context에 들어가지 않도록 Tool Result 단계에서 먼저 제거한다.
+처리 순서는 다음과 같이 고정한다.
+
+1. Markdown과 Evidence의 CRLF/CR을 LF로 바꾸고 Unicode NFC로 정규화한다.
+2. Markdown과 모든 Evidence Link의 UTF-8 Byte 합이 명시적 입력 Limit 안인지 검사한다.
+3. 중앙 Versioned Redaction으로 Secret Pattern, Pangi API Key·Token Prefix와 Credential 할당을 제거한다.
+4. Versioned Rule로 Stack Trace와 Unix·Windows 내부 Path를 제거한다.
+5. Raw HTML과 Channel Angle Markup의 `<`, `>`를 Escape한다.
+6. Markdown Inline·Reference Link와 Evidence Link에 같은 Scheme 정책을 적용한다. `javascript`, `data`, `file`, `vbscript`, Protocol-relative와 허용되지 않은 Scheme은 제거한다.
+7. Broadcast Mention은 항상 중립화하고 일반 Mention은 정책 Budget을 넘긴 항목을 중립화한다.
+8. 최종 Markdown을 UTF-8 Byte 기준으로 안전하게 자르고 Marker를 붙인다. Sanitizing 뒤 빈 출력은 거부한다.
+
+정책에는 입력·출력 Byte, Evidence 개수·개별 Byte, Mention 수, 허용 Scheme·상대 Link 여부, Broadcast Mention, 내부 정보 Rule과 절단 Marker를 모두 명시한다. 허용 결과는 Content Fingerprint, 정책 Version·Fingerprint와 변경 횟수만 Metadata로 제공하며 원문 Output·Evidence와 Rule 본문은 오류나 객체 표현에 포함하지 않는다.
+
+Output Guardrail은 답의 의미를 다시 판단하거나 Markdown을 Slack Block으로 바꾸지 않는다. WBS-08은 최종 `OutputCandidate`를 만들고 WBS-16은 `SafeOutput`만 Channel 형식으로 변환한다. Redaction은 마지막 방어선이며 Secret이 Model Context에 들어가지 않도록 Tool Result 단계에서도 먼저 제거한다.
 
 ### 21.5 Dashboard와 Network
 

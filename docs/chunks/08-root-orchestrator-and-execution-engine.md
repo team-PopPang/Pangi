@@ -45,6 +45,7 @@
 - Root 결과를 받은 뒤 의미를 바꾸기 위한 재호출이나 Semantic Retry를 금지한다.
 - Reducer는 Dependency 순서, Evidence URI Dedup, Warning/실패 Source와 Citation을 결정적으로 구성한다.
 - 모순 해석이 필요하면 최초 Decision에 포함된 Synthesis Task만 실행한다.
+- Direct Answer와 Reducer 결과는 같은 `OutputCandidate`로 변환해 WBS-06.4.1 Output Guardrail을 통과시킨다. Channel Port에는 원문 Candidate가 아니라 허용된 `SafeOutput`만 전달한다.
 
 ## 구현 체크리스트
 

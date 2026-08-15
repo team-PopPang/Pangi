@@ -40,7 +40,7 @@ Run/Step/Model/Tool/Schedule의 운영 상태를 Metric·Log·Trace로 관찰하
 ## 기술 설계
 
 - Metric은 Run Trigger/State/Mode, 호출 수/지연, Queue, Schedule, Eval, Guardrail과 Policy 결정을 Stable Label로 기록한다.
-- Log는 Request/Run/Step ID와 Error Code만 구조화하고 중앙 Redaction을 통과한다.
+- Log는 Request/Run/Step ID와 Error Code만 구조화하고 WBS-06.4.2의 공통 Log·Run Event Redaction을 통과한다. 이 WBS의 JSON Formatter는 Redaction 완료 Field만 직렬화한다.
 - SQLite Event가 기본 Trace이며 OpenTelemetry는 선택 Extra다.
 - Aggregate Job은 Instance 현지 날짜, 동일 Idempotency 중복 제거와 Eval/System 제외 규칙을 사용한다.
 - Eligible Population은 날짜/Timezone/Source Version Snapshot으로 고정해 과거 분모를 현재 사용자 수로 바꾸지 않는다.

@@ -45,7 +45,7 @@ Slack Socket Mode/HTTP Events와 API 요청을 공통 RunRequest/Queue 경로로
 - `team_id:event_id`를 Idempotency Key, `thread_ts`를 Thread Key로 사용한다.
 - Adapter는 인증된 Principal과 정규화된 Attachment를 포함한 RunRequest만 만들고 Queue Commit 뒤 Ack/Progress를 처리한다.
 - 하나의 Progress Message를 갱신하고 완료 응답은 별도 Message와 Run Detail Link로 보낸다.
-- Renderer는 Markdown 구조를 Slack Block/Text Limit에 맞게 의미 단위로 나누고 `@channel/@here`와 사용자 Mention을 기본 Escape한다.
+- Renderer는 WBS-06.4.1의 `SafeOutput`만 입력으로 받고 Markdown 구조를 Slack Block/Text Limit에 맞게 의미 단위로 나눈다. 공통 Guardrail이 중립화한 Mention과 제거한 Link를 다시 활성화하거나 원문 Output을 직접 Rendering하지 않는다.
 - Block Action은 서명된 Stable Action ID와 요청자/Run 소유권을 검증한 뒤 Approval/Cancel Use Case만 호출한다.
 - Scheduler는 저장된 Destination에 새 Thread를 만들되 실행 시 Channel 권한을 다시 확인한다.
 

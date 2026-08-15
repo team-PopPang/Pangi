@@ -25,11 +25,12 @@
 
 WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현한다. 단계 수와 범위는 고정값이 아니다. 새로운 위험 경계나 별도 검증 Gate가 필요해 분해를 구체적으로 바꿔야 하면 영향 범위를 정리해 사용자 또는 제품 책임자의 승인을 받은 뒤 조정한다.
 
-1. **신뢰 계약과 Input Guardrail**: 신뢰 수준·판정 계약, Principal·입력·첨부·Explicit Skill·Rate Limit 검증과 보호된 Run 제출 경계를 구현한다.
-2. **중앙 Redaction과 External Data Envelope**: 비신뢰 외부 데이터의 출처·신뢰 Metadata와 Secret-safe 중앙 Redaction 경계를 구현한다.
-3. **Tool Permission·Approval·Budget**: Stable Tool ID, Scope, Schema, 권한·승인과 호출·Byte·Timeout Budget을 검증한다.
-4. **Output Guardrail과 Log·Event Redaction**: 최종 출력, Mention·Link·HTML·Stack Trace와 Log/Event 유출을 차단한다.
-5. **Append-only Audit**: Audit 계약·저장소·관리자 조회 기반과 필수 관리 Action 기록을 구현한다.
+1. **신뢰 계약과 Input Guardrail (WBS-06.1)**: 신뢰 수준·판정 계약, Principal·입력·첨부·Explicit Skill·Rate Limit 검증과 보호된 Run 제출 경계를 구현한다.
+2. **중앙 Redaction과 External Data Envelope (WBS-06.2)**: 비신뢰 외부 데이터의 출처·신뢰 Metadata와 Secret-safe 중앙 Redaction 경계를 구현한다.
+3. **Tool Permission·Approval·Budget (WBS-06.3)**: Stable Tool ID, Scope, Schema, 권한·승인과 호출·Byte·Timeout Budget을 검증한다.
+4. **Output Guardrail (WBS-06.4.1)**: 최종 Markdown과 Evidence의 Secret·내부 정보·HTML·Link·Mention·길이를 공통 경계에서 정규화한다.
+5. **Log·Run Event Redaction (WBS-06.4.2)**: 구조화 Log와 Run Event가 영속화·출력되기 전에 중앙 Redaction을 강제한다.
+6. **Append-only Audit (WBS-06.5)**: Audit 계약·저장소·관리자 조회 기반과 필수 관리 Action 기록을 구현한다.
 
 ## 범위
 
@@ -68,7 +69,13 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Approval은 Actor, Run, Tool, Argument와 Policy Fingerprint에 묶고 만료와 User/Admin 승인 주체를 검증한다. Destructive Tool의 Admin Approval 적용 범위는 암묵적 기본값 대신 명시 Policy가 결정한다.
 - Run·Tool 단위 Call Budget은 정책 Version이 바뀌어도 누적하며 실제 실행을 시도한 호출은 실패해도 환불하지 않는다. Argument는 Canonical JSON UTF-8 Byte로 제한한다.
 - Timeout과 Result Byte Limit은 허용된 `GuardedToolCall`에 필수 실행 제한으로 전달한다. 실제 MCP Transport 차단과 영속 Budget Ledger는 WBS-09 Adapter가 소유한다.
-- Output Guardrail은 Secret Pattern, Token Prefix, HTML, Mention, 길이, Link Scheme, Stack Trace와 Evidence를 검사한다.
+- Output Guardrail은 WBS-08의 Direct Answer 또는 Reducer가 만든 최종 Markdown과 Evidence Link를 `OutputCandidate`로 받는다. 입력은 모델 생성 여부와 관계없이 항상 `untrusted`다.
+- 처리 순서는 CRLF/CR→LF와 NFC 정규화, 전체 입력 UTF-8 Byte Limit, `core-secret-v1` 중앙 Redaction, Versioned Stack Trace·내부 Path 제거, Raw HTML Angle Bracket Escape, Markdown·Evidence Link 검사, Mention 제한, UTF-8 안전 절단, 빈 출력 거부로 고정한다.
+- 허용 Link Scheme, 상대 Link 허용 여부, 일반 Mention 수, Evidence 개수·개별 Byte와 입출력 Byte Limit은 `OutputGuardrailPolicy`에 명시한다. `javascript`, `data`, `file`, `vbscript`는 Allowlist에도 넣을 수 없고 Protocol-relative Link와 허용되지 않은 Scheme은 제거하되 Link Label은 보존한다.
+- `@channel`, `@here`, `@everyone` 같은 Broadcast Mention은 항상 전각 `＠`로 중립화하고 일반 Mention은 정책 수를 넘긴 항목만 중립화한다. Channel별 Mention 재활성화는 이 공통 경계 밖에서 허용하지 않는다.
+- 허용 결과인 `SafeOutput`은 Sanitized Markdown·Evidence, Content Fingerprint, 정책 Version·Fingerprint와 안전한 변경 수치만 제공한다. 원문 Output·Evidence와 Rule Pattern·Replacement는 `repr`과 오류에 포함하지 않는다.
+- Output Guardrail은 답의 의미를 다시 추론하거나 Slack Block으로 변환하지 않는다. WBS-08은 `OutputCandidate`를 만들고 WBS-16 Renderer는 `SafeOutput`만 소비한다.
+- WBS-06.4.1은 Framework-free 공통 경계까지만 구현한다. 실제 Orchestrator 조립은 WBS-08, Slack별 구조·분할은 WBS-16, Log·Run Event 적용은 WBS-06.4.2와 WBS-17이 소유한다.
 - 외부 Text는 Source/Trust Metadata를 가진 Envelope로 감싸며 내부 지시로 승격하지 않는다.
 - Audit은 Append-only이며 원문 Token/Prompt/Tool Result 대신 Version, Fingerprint와 Redacted Diff를 저장한다.
 - WBS-03 Unit of Work 위에서 `audit_events`의 Migration, Append-only 제약과 Repository를 이 WBS가 소유한다.
@@ -80,7 +87,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Input 정규화, 크기/MIME/Rate Rule과 기존 Idempotency 경계 앞의 보호된 Run 제출을 구현한다.
 - [x] Versioned 중앙 Redaction Policy·Service와 안전한 Result Summary를 구현한다.
 - [x] Tool Policy와 Approval 검증 Engine의 공통 단계를 구현한다.
-- [ ] Output Sanitizer, Mention/Link Policy와 Secret Redaction을 구현한다.
+- [x] Output Sanitizer, Mention/Link Policy와 Secret Redaction을 구현한다.
 - [x] External Data Envelope와 Control Character/HTML 정규화를 구현한다.
 - [ ] JSON Log와 Event의 중앙 Redaction Filter를 구현한다.
 - [ ] Audit Event Port, SQLite Adapter와 관리자 조회 API 기반을 만든다.
@@ -91,7 +98,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 
 - [x] 비활성 Principal, 대형 입력, 금지 MIME를 차단하고 허용된 중복 요청이 Run 하나로 Replay되는지 확인한다.
 - [x] Deny Tool, 다른 사용자 Connection과 승인 없는 Write 호출이 실행되지 않는지 확인한다.
-- [ ] Secret, Stack Trace, 내부 Path와 Mention 폭주가 출력에서 제거되는지 확인한다.
+- [x] Secret, Stack Trace, 내부 Path와 Mention 폭주가 출력에서 제거되는지 확인한다.
 - [ ] 외부 문서의 지시가 System/Tool Policy를 바꾸지 못하는지 Contract Test를 실행한다.
 - [ ] 모든 필수 관리 Action이 Actor와 안전한 Diff를 Audit하는지 확인한다.
 - [ ] Audit/Log/Event에 Secret 원문이 없는지 Fixture 기반으로 검사한다.
@@ -133,6 +140,17 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Argument와 Approval Reference, Connection ID·Owner와 실제 Tool Name은 요청·정책·해석 결과·오류의 `repr`에서 제외한다. 판정에는 Stable Tool ID, 정책 Version·Fingerprint, Permission과 안전한 Byte·Call Metadata만 남긴다.
 - 실제 Registry, JSON Schema Adapter, Approval·Invocation 영속화, MCP Timeout·Result Stream Byte 차단과 Tool Result 정규화는 WBS-09에 남긴다.
 - Output·Log·Run Event Redaction과 Append-only Audit이 남아 있으므로 WBS-06 상태는 `진행 중`으로 유지한다.
+
+## 4차 1단계 구현 결과
+
+- Framework 의존성이 없는 Output Guardrail Stage·Outcome·Error Code와 `OutputCandidate`, `SafeOutput`, 정책·판정·변경 Summary 계약을 추가했다.
+- 모든 입출력·Evidence·Mention Limit, 허용 Link Scheme·상대 Link 여부, Broadcast Mention, Stack·Path Rule과 절단 Marker를 `OutputGuardrailPolicy`에 명시하고 Canonical SHA-256 정책 Fingerprint를 계산한다. 조직 공통 기본값은 추가하지 않았다.
+- `OutputGuardrailService`가 CRLF/NFC와 UTF-8 Byte Limit을 적용한 뒤 기존 `core-secret-v1` Redaction Service를 Markdown과 Evidence에 함께 사용한다.
+- Python Traceback, Node Stack Frame, Unix·Windows 내부 Path를 Versioned Rule로 제거하고 Raw HTML·Slack Angle Markup을 Escape한다. Pattern과 Replacement는 계약 표현에 노출하지 않는다.
+- Markdown Inline·Reference Link와 Evidence Link가 같은 Scheme 정책을 사용한다. 허용된 HTTPS·상대 Link는 보존하고 `javascript`, `data`, `file`, Protocol-relative Link는 제거하며 Inline Link Label은 남긴다.
+- Broadcast Mention은 항상 중립화하고 일반 Mention은 정책 수를 넘긴 항목만 중립화한다. 한국어·Emoji를 자르지 않는 UTF-8 Byte 절단과 안전한 Marker를 적용한다.
+- 동일 입력·정책은 동일한 Sanitized Content·Fingerprint·Summary를 만들고, 이미 Sanitized된 Markdown을 다시 처리해도 내용이 변하지 않도록 Unit Test로 고정했다.
+- 아직 WBS-08의 `AgentResult`·Reducer, WBS-16의 Slack Renderer에 조립하지 않았다. 구조화 Log·Run Event Redaction은 WBS-06.4.2, Append-only Audit은 WBS-06.5로 남아 있으므로 WBS-06 상태는 `진행 중`이다.
 
 ## 완료 조건
 
