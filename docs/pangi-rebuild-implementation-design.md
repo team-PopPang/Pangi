@@ -1963,6 +1963,10 @@ Red Team은 운영 DB와 Credential을 사용하지 않는다. In-memory MCP Stu
 - Result Reducer
 - Renderer
 
+WBS-06.6의 `policy-impact-v1`은 Policy Kind·Stable ID·Version·기존 SHA-256 Fingerprint만 `PolicyFingerprintReference`로 받는다. `PolicyImpactSnapshot`은 참조를 Policy Key로 정렬하고 Schema Version과 함께 Canonical SHA-256 영향 Fingerprint를 계산한다. Policy 원문, Rule, Connection 정보, Secret과 외부 Content는 Snapshot에 포함하지 않는다.
+
+Baseline과 Candidate 비교는 추가·삭제·변경된 Policy Key를 결정적으로 반환한다. 이 계약은 변경 식별까지만 소유한다. 영향 Eval Suite 선택·실행·활성화 Gate와 Snapshot 영속화는 WBS-15가 구현한다.
+
 Gate:
 
 - Critical Case: 100% 통과
@@ -3599,6 +3603,7 @@ DAU/WAU/MAU 목표값은 제품 출시 전에 임의로 정하지 않는다. Pil
 - Redaction
 - Migration
 - Retention
+- 보안 정책 영향 Snapshot의 순서 독립성, 변경 감지와 안전한 Metadata
 
 ### 23.2 Contract
 
@@ -3613,6 +3618,7 @@ DAU/WAU/MAU 목표값은 제품 출시 전에 임의로 정하지 않는다. Pil
 - Schedule `request|skill` OpenAPI XOR와 `RunRequest` 변환
 - API Key 생성 1회 원문 반환·이후 Metadata-only 계약
 - IP Allowlist Impact Fingerprint와 Trusted Proxy 해석
+- External Data의 `untrusted` Envelope와 System·Tool Policy 비승격 계약
 
 ### 23.3 Integration
 
