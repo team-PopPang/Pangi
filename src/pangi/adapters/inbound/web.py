@@ -18,11 +18,17 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import RequestResponseEndpoint
 
 from pangi._version import __version__
+from pangi.adapters.inbound.web_contracts import (
+    BootstrapAdminRequest,
+    BootstrapAdminResponse,
+    ErrorEnvelope,
+    LoginRequest,
+    SessionEnvelope,
+)
 from pangi.application.contracts.auth import AuthenticatedPrincipal, IssuedSession
 from pangi.application.ports.auth import (
     AuthenticationError,
@@ -57,28 +63,14 @@ _CONTENT_SECURITY_POLICY = "; ".join(
         "form-action 'self'",
     )
 )
-_RESERVED_ROUTE_ROOTS = frozenset({"api", "assets", "health"})
+_RESERVED_ROUTE_ROOTS = frozenset(
+    {"api", "assets", "docs", "health", "openapi.json", "redoc"}
+)
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 _SESSION_COOKIE = "pangi_session"
 _CSRF_COOKIE = "pangi_csrf"
 _SECURE_SESSION_COOKIE = "__Host-pangi_session"
 _SECURE_CSRF_COOKIE = "__Host-pangi_csrf"
-
-
-class _BootstrapAdminRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-
-    token: str = Field(min_length=20, max_length=256)
-    local_id: str = Field(min_length=3, max_length=80)
-    display_name: str = Field(min_length=1, max_length=80)
-    password: str = Field(min_length=12, max_length=256)
-
-
-class _LoginRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
-
-    local_id: str = Field(min_length=1, max_length=80)
-    password: str = Field(min_length=1, max_length=256)
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,14 +231,13 @@ def create_web_app(
         headers: dict[str, str] | None = None,
     ) -> JSONResponse:
         request_id = str(getattr(request.state, "request_id", "req_unavailable"))
+        envelope = ErrorEnvelope.create(
+            code=code,
+            message=message,
+            request_id=request_id,
+        )
         return JSONResponse(
-            {
-                "error": {
-                    "code": code,
-                    "message": message,
-                    "request_id": request_id,
-                }
-            },
+            envelope.model_dump(mode="json"),
             status_code=status_code,
             headers=headers,
         )
@@ -396,11 +387,23 @@ def create_web_app(
         report = readiness_probe.report()
         return JSONResponse(report.as_dict(), status_code=200 if report.ready else 503)
 
-    @app.post("/api/v1/bootstrap/admin", include_in_schema=False)
+    @app.post(
+        "/api/v1/bootstrap/admin",
+        operation_id="createBootstrapAdmin",
+        response_model=BootstrapAdminResponse,
+        status_code=201,
+        responses={
+            400: {"model": ErrorEnvelope, "description": "Bootstrap grant unavailable"},
+            403: {"model": ErrorEnvelope, "description": "Origin rejected"},
+            409: {"model": ErrorEnvelope, "description": "Bootstrap state conflict"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+        },
+    )
     async def create_bootstrap_admin(
-        payload: _BootstrapAdminRequest,
+        payload: BootstrapAdminRequest,
         request: Request,
-    ) -> JSONResponse:
+    ) -> BootstrapAdminResponse | JSONResponse:
         if not _origin_allowed(request, required=False):
             return error_response(
                 request,
@@ -443,10 +446,35 @@ def create_web_app(
                 code="identity_unavailable",
                 message="The requested local identity is unavailable",
             )
-        return JSONResponse({"admin": result.as_dict()}, status_code=201)
+        return BootstrapAdminResponse.from_contract(result)
 
-    @app.post("/api/v1/auth/login", include_in_schema=False)
-    async def login(payload: _LoginRequest, request: Request) -> JSONResponse:
+    @app.post(
+        "/api/v1/auth/login",
+        operation_id="login",
+        response_model=SessionEnvelope,
+        responses={
+            400: {"model": ErrorEnvelope, "description": "Secure transport required"},
+            401: {"model": ErrorEnvelope, "description": "Credentials rejected"},
+            403: {"model": ErrorEnvelope, "description": "Origin rejected"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            429: {
+                "model": ErrorEnvelope,
+                "description": "Login rate limit exceeded",
+                "headers": {
+                    "Retry-After": {
+                        "description": "Seconds before another login attempt",
+                        "schema": {"type": "integer", "minimum": 1},
+                    }
+                },
+            },
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+        },
+    )
+    async def login(
+        payload: LoginRequest,
+        request: Request,
+        response: Response,
+    ) -> SessionEnvelope | JSONResponse:
         if not _allows_session_transport(request):
             return error_response(
                 request,
@@ -467,28 +495,53 @@ def create_web_app(
             password=payload.password,
             source=source,
         )
-        response = JSONResponse({"session": issued.view.as_dict()})
         _set_session_cookies(response, request, issued)
-        return response
+        return SessionEnvelope.from_contract(issued.view)
 
-    @app.get("/api/v1/auth/session", include_in_schema=False)
-    async def session(request: Request) -> JSONResponse:
+    @app.get(
+        "/api/v1/auth/session",
+        operation_id="getAuthSession",
+        response_model=SessionEnvelope,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+        },
+    )
+    async def session(request: Request) -> SessionEnvelope:
         view = await auth_sessions.current_session(session_token=_session_token(request))
-        return JSONResponse({"session": view.as_dict()})
+        return SessionEnvelope.from_contract(view)
 
-    @app.post("/api/v1/auth/session/rotate", include_in_schema=False)
-    async def rotate_session(request: Request) -> JSONResponse:
+    @app.post(
+        "/api/v1/auth/session/rotate",
+        operation_id="rotateAuthSession",
+        response_model=SessionEnvelope,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "CSRF or origin rejected"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+        },
+    )
+    async def rotate_session(request: Request, response: Response) -> SessionEnvelope:
         if not _origin_allowed(request, required=True):
             raise CsrfRejectedError("The request origin is invalid")
         issued = await auth_sessions.rotate(
             session_token=_session_token(request),
             csrf_token=_csrf_token(request),
         )
-        response = JSONResponse({"session": issued.view.as_dict()})
         _set_session_cookies(response, request, issued)
-        return response
+        return SessionEnvelope.from_contract(issued.view)
 
-    @app.post("/api/v1/auth/logout", include_in_schema=False)
+    @app.post(
+        "/api/v1/auth/logout",
+        operation_id="logout",
+        response_class=Response,
+        status_code=204,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "CSRF or origin rejected"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+        },
+    )
     async def logout(request: Request) -> Response:
         if not _origin_allowed(request, required=True):
             raise CsrfRejectedError("The request origin is invalid")

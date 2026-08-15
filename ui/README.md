@@ -15,3 +15,5 @@ npm ci
 npm run check
 npm run build
 ```
+
+Admin API 계약을 변경했다면 저장소 루트에서 `scripts/export_openapi.py`를 실행한 뒤 `npm run api:generate`로 `src/api/generated.ts`를 갱신한다. `npm run check`와 `npm run build`는 Commit된 OpenAPI Type이 최신인지 먼저 검사한다.

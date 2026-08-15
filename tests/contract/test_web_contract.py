@@ -159,6 +159,9 @@ def test_health_spa_assets_and_security_headers_are_stable(tmp_path: Path) -> No
         asset = client.get("/assets/main-deadbeef.js")
         missing_api = client.get("/api/v1/missing")
         missing_asset = client.get("/assets/missing.js")
+        runtime_openapi = client.get("/openapi.json")
+        runtime_docs = client.get("/docs")
+        runtime_redoc = client.get("/redoc")
 
         assert live.status_code == 200
         assert live.json()["product"] == "pangi"
@@ -173,6 +176,9 @@ def test_health_spa_assets_and_security_headers_are_stable(tmp_path: Path) -> No
         assert missing_api.json()["error"]["code"] == "not_found"
         assert missing_api.json()["error"]["request_id"].startswith("req_")
         assert missing_asset.status_code == 404
+        assert runtime_openapi.status_code == 404
+        assert runtime_docs.status_code == 404
+        assert runtime_redoc.status_code == 404
         assert live.headers["x-content-type-options"] == "nosniff"
         assert live.headers["x-frame-options"] == "DENY"
         assert "frame-ancestors 'none'" in live.headers["content-security-policy"]

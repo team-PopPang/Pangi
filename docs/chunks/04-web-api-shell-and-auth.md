@@ -75,7 +75,7 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 - [ ] Slack/Reverse Proxy OIDC Adapter Protocol을 정의한다.
 - [x] 최소 React/Vite SPA Shell과 Visual Token 기반을 구현한다.
 - [ ] 전체 Sidebar와 공통 Layout을 구현한다.
-- [ ] OpenAPI 생성 Type과 Frontend API Client를 연결한다.
+- [x] OpenAPI 생성 Type과 Frontend API Client를 연결한다.
 - [x] `/health/live`와 `/health/ready`를 만든다.
 - [ ] SSE 공통 Transport를 만든다.
 - [x] Fingerprinted Asset과 SPA Fallback Cache 정책을 설정한다.
@@ -88,7 +88,7 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 - [x] CSRF 또는 동일 출처 근거가 없는 상태 변경 요청을 거부하는지 확인한다.
 - [ ] 같은 Idempotency Key 요청이 중복 Mutation을 만들지 않는지 확인한다.
 - [x] Bootstrap Error Envelope에 Stack Trace, 내부 Path와 Secret이 없는지 검사한다.
-- [ ] OpenAPI와 Frontend Type Drift Test를 실행한다.
+- [x] OpenAPI와 Frontend Type Drift Test를 실행한다.
 - [x] SPA Route, Asset Cache와 Live/Ready를 E2E로 확인한다.
 - [ ] SSE 연결을 E2E로 확인한다.
 
@@ -126,6 +126,15 @@ WBS 번호와 문서는 늘리지 않고 아래 실행 단위를 여러 PR로 �
 - `/login` UI, 인증된 Shell Gate, 회전 권장 Session의 단일 회전 요청과 Logout을 연결했다. Bootstrap 성공 화면은 실제 Login 경로를 안내한다.
 - Session 생성·만료·회전·폐기, 비활성 사용자, 로그인 제한, Cookie 속성, CSRF·Origin, 역할 Dependency와 Error Envelope를 자동 테스트로 고정했다.
 - 실제 기능 API와 연결할 Idempotency·Cursor, Resource Owner 검사, Slack/Reverse Proxy OIDC와 전체 Admin Layout은 후속 범위이므로 WBS-04 상태는 `진행 중`이다.
+
+## 4차 구현 결과
+
+- Bootstrap과 Local Session API 다섯 개에 안정적인 Operation ID, 명시적 요청·성공 응답·공통 Error Envelope Schema와 실제 상태 코드별 오류 계약을 추가했다.
+- 운영 App의 `/openapi.json`, `/docs`, `/redoc`은 404로 유지한다. 별도의 Schema 전용 조립 경로가 Runtime 설정·Secret·SQLite·Runtime Data 없이 결정적인 OpenAPI JSON을 빌드 시 생성한다.
+- Commit하는 OpenAPI JSON에서 `openapi-typescript`로 TypeScript Type을 생성하고, Backend Schema와 OpenAPI Artifact 및 Frontend 생성 Type의 Drift를 각각 실패시키는 Gate를 추가했다.
+- 공통 Frontend API Client가 Same-origin Cookie, JSON Body, CSRF Header, 204 응답, Error Envelope, Request ID와 `Retry-After`를 한 경계에서 처리한다.
+- Bootstrap, Login, Session 확인·회전과 Logout UI의 직접 `fetch`와 수기 Type을 생성 Type 기반 Client 호출로 교체했다.
+- 실제 기능 API와 함께 검증해야 하는 Idempotency·Cursor·Resource Owner, 지원 Header 결정이 필요한 Slack/Reverse Proxy OIDC, 전체 Admin Layout과 SSE는 후속 범위이므로 WBS-04 상태는 `진행 중`이다.
 
 ## 완료 조건
 

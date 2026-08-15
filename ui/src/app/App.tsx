@@ -1,38 +1,9 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate } from "react-router-dom";
 
+import { adminApi, ApiError, type SessionInfo } from "../api/client";
+
 const plannedSections = ["연동", "도구", "모델 정책", "메모리", "스케줄", "스킬"];
-
-type Principal = {
-  user_id: string;
-  display_name: string;
-  role: "member" | "skill_author" | "admin" | "system";
-  status: "active" | "disabled";
-};
-
-type SessionInfo = {
-  principal: Principal;
-  expires_at: string;
-  rotation_due_at: string;
-  rotation_due: boolean;
-};
-
-type SessionResponse = { session: SessionInfo };
-
-function readCookie(name: string): string | null {
-  const prefix = `${encodeURIComponent(name)}=`;
-  for (const item of document.cookie.split(";")) {
-    const cookie = item.trim();
-    if (cookie.startsWith(prefix)) {
-      return decodeURIComponent(cookie.slice(prefix.length));
-    }
-  }
-  return null;
-}
-
-function csrfToken(): string | null {
-  return readCookie("__Host-pangi_csrf") ?? readCookie("pangi_csrf");
-}
 
 function PublicPage({ children }: { children: ReactNode }) {
   return (
@@ -90,14 +61,12 @@ function BootstrapAdmin() {
     event.preventDefault();
     setState("saving");
     try {
-      const response = await fetch("/api/v1/bootstrap/admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, local_id: localId, display_name: displayName, password }),
+      await adminApi.createBootstrapAdmin({
+        token,
+        local_id: localId,
+        display_name: displayName,
+        password,
       });
-      if (!response.ok) {
-        throw new Error("bootstrap failed");
-      }
       setToken("");
       setPassword("");
       setState("success");
@@ -181,35 +150,22 @@ function Login() {
   const [state, setState] = useState<"idle" | "saving" | "error" | "limited">("idle");
 
   useEffect(() => {
-    void fetch("/api/v1/auth/session").then((response) => {
-      if (response.ok) {
-        navigate("/", { replace: true });
-      }
-    });
+    void adminApi.getSession().then(
+      () => navigate("/", { replace: true }),
+      () => undefined,
+    );
   }, [navigate]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setState("saving");
     try {
-      const response = await fetch("/api/v1/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ local_id: localId, password }),
-      });
+      await adminApi.login({ local_id: localId, password });
       setPassword("");
-      if (response.status === 429) {
-        setState("limited");
-        return;
-      }
-      if (!response.ok) {
-        setState("error");
-        return;
-      }
       navigate("/", { replace: true });
-    } catch {
+    } catch (error) {
       setPassword("");
-      setState("error");
+      setState(error instanceof ApiError && error.status === 429 ? "limited" : "error");
     }
   }
 
@@ -271,31 +227,24 @@ function AuthenticatedShell() {
     let active = true;
     async function loadSession() {
       try {
-        const response = await fetch("/api/v1/auth/session");
-        if (response.status === 401) {
-          navigate("/login", { replace: true });
-          return;
-        }
-        if (!response.ok) {
-          throw new Error("session failed");
-        }
-        let payload = await response.json() as SessionResponse;
+        let payload = await adminApi.getSession();
         if (payload.session.rotation_due) {
-          const csrf = csrfToken();
-          if (csrf !== null) {
-            const rotated = await fetch("/api/v1/auth/session/rotate", {
-              method: "POST",
-              headers: { "X-CSRF-Token": csrf },
-            });
-            if (rotated.ok) {
-              payload = await rotated.json() as SessionResponse;
+          try {
+            payload = await adminApi.rotateSession();
+          } catch (error) {
+            if (!(error instanceof ApiError) || error.code === "network_error") {
+              throw error;
             }
           }
         }
         if (active) {
           setSession(payload.session);
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          navigate("/login", { replace: true });
+          return;
+        }
         if (active) {
           setError(true);
         }
@@ -308,19 +257,8 @@ function AuthenticatedShell() {
   }, [navigate]);
 
   async function logout() {
-    const csrf = csrfToken();
-    if (csrf === null) {
-      setError(true);
-      return;
-    }
     try {
-      const response = await fetch("/api/v1/auth/logout", {
-        method: "POST",
-        headers: { "X-CSRF-Token": csrf },
-      });
-      if (!response.ok) {
-        throw new Error("logout failed");
-      }
+      await adminApi.logout();
       navigate("/login", { replace: true });
     } catch {
       setError(true);
