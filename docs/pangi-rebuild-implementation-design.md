@@ -717,6 +717,12 @@ Claim에는 `worker_id`, `lease_expires_at`, `heartbeat_at`을 기록한다. 단
 
 Restart 뒤 `queued` Run을 복구하려면 실행 입력도 함께 영속해야 한다. `runs`에는 Channel Adapter가 정규화한 Request Text와 Attachment 참조만 저장한다. Slack Event 원본 JSON, Attachment 본문, Provider Prompt와 Tool Result 원문은 저장하지 않는다.
 
+Queue Claim은 `queued_at`, `created_at`, `id` 오름차순으로 결정하고 `BEGIN IMMEDIATE` 안에서 `queued → running` 전이와 Worker 소유권을 함께 Commit한다. 상태 변경은 Expected Revision을 사용하지만 주기적인 Heartbeat는 Revision을 증가시키지 않는다. 대신 `state=running`, 현재 `worker_id`, 아직 만료되지 않은 Lease를 모두 만족할 때만 Lease를 연장해 취소나 복구와 경합한 오래된 Worker의 쓰기를 막는다.
+
+Process-local Dispatcher는 Commit 뒤 `asyncio.Event`로 깨어나고 `max_concurrent_runs` Semaphore 안에서 주입된 실행 Handler를 호출한다. Handler 계약과 Queue Runtime은 WBS-05가 소유하지만 실제 Root Decision, 모델과 Tool 실행은 WBS-08에서 연결한다. Lease Duration과 Heartbeat Interval은 운영 Baseline 전까지 공개 설정 기본값으로 고정하지 않고 `RunQueuePolicy`로 주입한다.
+
+Startup은 Lease가 만료된 `running` Run을 먼저 `interrupted`로 기록한다. 실행 중이던 Step이 없거나 모두 Idempotent면 Run을 다시 `queued`로 전환하고, Non-idempotent Step이 하나라도 있으면 자동 재실행하지 않고 `non_idempotent_recovery`로 실패시킨다. 대기·실행 Run의 취소는 DB 상태를 먼저 `cancelled`로 확정한 뒤 같은 Process의 활성 Task에 취소 신호를 전달한다.
+
 Run 생성의 Idempotency Scope는 `principal_id + route_key + idempotency_key`다. `route_key`는 요청 본문이 아니라 신뢰할 수 있는 Inbound Adapter가 전달한다. Request Fingerprint는 Channel, Text, Thread, Explicit Skill, Schedule과 순서가 보존된 Attachment Metadata를 포함하고 Request ID, 생성 시각과 Idempotency Key처럼 재시도마다 바뀔 수 있는 Transport Metadata는 제외한다. 기본 TTL은 24시간이며, TTL 안의 같은 Fingerprint는 기존 Run을 반환하고 다른 Fingerprint는 `idempotency_conflict`로 거부한다. 만료된 Record는 해당 복합 Key를 다시 사용할 때 생성 Transaction 안에서 정리한다.
 
 Run 목록은 `(created_at DESC, id DESC)` Keyset Pagination을 사용한다. Cursor는 Version, 마지막 생성 시각과 Run ID, Actor ID·Role, Effective Owner Scope, 상태·Trigger Filter로 만든 Query Fingerprint를 담은 URL-safe Base64 문자열이다. Cursor의 구조나 조회 Scope가 다르면 `invalid_run_cursor`로 거부한다.
