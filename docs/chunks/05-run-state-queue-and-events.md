@@ -26,7 +26,8 @@
 - Run 상태 Machine과 실패/Partial Result 계약
 - SQLite 영속 Queue, Worker Claim, Lease/Heartbeat와 Semaphore
 - Startup Recovery, Cancel과 Idempotent Retry 기준
-- Event Index, Visibility와 SSE 조회
+- Run 생성 Idempotency와 검색 Cursor
+- Resource Owner 검사, Event Index, Visibility와 SSE 조회
 
 ## 범위 밖
 
@@ -39,6 +40,8 @@
 
 - `runs.state=queued`를 Queue로 사용하고 요청 저장 Transaction이 첫 Event를 함께 기록한다.
 - WBS-03 Unit of Work 위에서 `runs`, `run_steps`, `run_events`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
+- `api_idempotency_records`를 같은 Unit of Work에 두고 `principal_id + route_key + idempotency_key`로 Run 생성 Replay를 판별한다. 인증·Bootstrap Lifecycle API에는 적용하지 않는다.
+- Run 검색은 Stable Sort Key를 포함한 불투명 Cursor를 사용하고 Run 상세·취소·Event 조회는 역할 검사 뒤 Owner 조건을 다시 검사한다.
 - Worker는 `BEGIN IMMEDIATE`에서 가장 오래된 Queue Row를 `running`으로 Claim하고 Worker ID, Lease, Heartbeat를 저장한다.
 - Run 상태 전이는 Domain Policy가 허용한 Edge만 사용하고 Repository Update에 Expected Revision을 포함한다.
 - Required Step 실패는 Run 실패, Optional Step 실패는 Warning을 가진 Partial Result로 구분한다.
@@ -51,10 +54,13 @@
 - [ ] Principal, RunRequest, Run, RunStep과 RunEvent 계약을 정의한다.
 - [ ] Run/Step State Machine과 오류 코드를 구현한다.
 - [ ] Run 생성과 첫 Event의 원자적 저장을 구현한다.
+- [ ] `api_idempotency_records`와 Run 생성 Idempotency를 같은 Transaction에 연결한다.
+- [ ] Run 검색의 Stable Cursor 계약을 구현한다.
 - [ ] Queue 조회, `BEGIN IMMEDIATE` Claim과 동시 실행 Semaphore를 구현한다.
 - [ ] Lease, Heartbeat, Cancel과 Startup Recovery를 구현한다.
 - [ ] Idempotent/Non-idempotent 복구 정책을 연결한다.
 - [ ] Event Store와 Visibility Filter를 구현한다.
+- [ ] Run 상세·취소·Event 조회의 Resource Owner 조건을 구현한다.
 - [ ] Run 상세/검색/취소/SSE API를 구현한다.
 - [ ] 오래된 `running`과 `queued` Run에 대한 운영 Metric을 연결한다.
 
@@ -64,6 +70,9 @@
 - [ ] 동시 Worker Claim에서 같은 Run이 한 번만 실행되는지 확인한다.
 - [ ] Process 중단 뒤 Queue와 Lease Recovery를 Integration Test로 확인한다.
 - [ ] Non-idempotent Step이 자동 재실행되지 않는지 확인한다.
+- [ ] 같은 Idempotency Key의 Run이 중복 생성되지 않는지 확인한다.
+- [ ] Cursor 재사용에서 Run이 중복되거나 누락되지 않는지 확인한다.
+- [ ] 다른 사용자의 Run 상세·취소·Event 조회를 거부하는지 확인한다.
 - [ ] Event Index가 중복되거나 역전되지 않는지 확인한다.
 - [ ] SSE 재연결에서 Last Event 이후 항목만 전달되는지 확인한다.
 - [ ] Event와 API에 Chain-of-Thought/원문 Prompt/Secret이 없는지 검사한다.

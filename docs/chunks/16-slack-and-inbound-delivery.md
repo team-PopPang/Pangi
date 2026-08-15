@@ -22,6 +22,7 @@ Slack Socket Mode/HTTP Events와 API 요청을 공통 RunRequest/Queue 경로로
 
 ## 범위
 
+- Slack OpenID Connect와 Dashboard Identity·Session 연결
 - Slack Socket Mode와 선택형 HTTP Events Adapter
 - Signature/Timestamp, Workspace/User/Channel Identity와 Idempotency
 - Event/Command/Block Action→RunRequest 변환
@@ -40,6 +41,7 @@ Slack Socket Mode/HTTP Events와 API 요청을 공통 RunRequest/Queue 경로로
 ## 기술 설계
 
 - Socket Mode를 기본으로 하고 HTTP Events는 Signature와 허용 Timestamp Window를 검증한다.
+- Slack OpenID Connect는 검증된 Workspace/User Subject를 기존 `auth_identities(provider='slack')`와 User·Session 경계에 연결하며 Event 서명 검증과 분리한다.
 - `team_id:event_id`를 Idempotency Key, `thread_ts`를 Thread Key로 사용한다.
 - Adapter는 인증된 Principal과 정규화된 Attachment를 포함한 RunRequest만 만들고 Queue Commit 뒤 Ack/Progress를 처리한다.
 - 하나의 Progress Message를 갱신하고 완료 응답은 별도 Message와 Run Detail Link로 보낸다.
@@ -50,6 +52,7 @@ Slack Socket Mode/HTTP Events와 API 요청을 공통 RunRequest/Queue 경로로
 ## 구현 체크리스트
 
 - [ ] Slack App Config Schema와 Socket/HTTP Adapter Protocol을 구현한다.
+- [ ] Slack OpenID Connect와 기존 User·Session 연결을 구현한다.
 - [ ] Signature/Timestamp/Workspace/User/Channel 인증을 구현한다.
 - [ ] Mention, Command, Block Action을 RunRequest/Use Case로 변환한다.
 - [ ] Event Idempotency와 Queue Commit 뒤 Ack를 구현한다.
@@ -62,6 +65,7 @@ Slack Socket Mode/HTTP Events와 API 요청을 공통 RunRequest/Queue 경로로
 ## 검증 체크리스트
 
 - [ ] 같은 Event Retry가 Run을 한 번만 만드는지 확인한다.
+- [ ] 잘못된 OIDC State·Nonce·Issuer·Audience와 연결되지 않은 Identity를 거부한다.
 - [ ] 잘못된 Signature/Timestamp/Workspace 요청을 Ack 전후 안전하게 거부한다.
 - [ ] Adapter의 모델/Tool 직접 호출이 Architecture Test에서 실패하는지 확인한다.
 - [ ] Thread, Progress Update와 최종 Message 순서를 Contract Test로 고정한다.
@@ -71,6 +75,7 @@ Slack Socket Mode/HTTP Events와 API 요청을 공통 RunRequest/Queue 경로로
 
 ## 완료 조건
 
+- Slack OpenID Connect로 연결된 사용자가 기존 Dashboard Session 경계를 사용한다.
 - Slack Socket Mode Mention이 공통 Queue를 통해 처리된다.
 - Duplicate Event로 중복 Run이 발생하지 않는다.
 - 진행 상태와 최종 응답이 같은 Thread에 안전하게 전달된다.

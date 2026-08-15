@@ -31,8 +31,8 @@
 | 01 | [Foundation과 Package 경계](01-foundation-and-package-boundaries.md) | 저장소 Skeleton, Dependency 방향과 Public API 경계를 고정한다. | 없음 | 완료 |
 | 02 | [설정·Runtime Data·CLI](02-configuration-runtime-data-and-cli.md) | 설정, 데이터 경로, `init/start/status/doctor`의 첫 실행 경로를 만든다. | 01 | 완료 |
 | 03 | [SQLite 영속성과 Migration](03-sqlite-persistence-and-migrations.md) | 단일 Process SQLite Profile, Unit of Work, Migration과 DB Snapshot 기반을 만든다. | 01, 02 | 완료 |
-| 04 | [Web/API Shell과 인증](04-web-api-shell-and-auth.md) | FastAPI, Admin SPA Shell, Bootstrap 인증과 공통 API 계약을 만든다. | 01, 02, 03 | 진행 중 |
-| 05 | [Run 상태·Queue·Event](05-run-state-queue-and-events.md) | Run 계약, 영속 Queue, Lease, Event와 복구 흐름을 만든다. | 03, 04 | 예정 |
+| 04 | [Web/API Shell과 인증](04-web-api-shell-and-auth.md) | FastAPI, Admin SPA Shell, Local Bootstrap·Session과 공통 API/OpenAPI 계약을 만든다. | 01, 02, 03 | 완료 |
+| 05 | [Run 상태·Queue·Event](05-run-state-queue-and-events.md) | Run 계약, 영속 Queue, Idempotency·Cursor·SSE와 복구 흐름을 만든다. | 03, 04 | 예정 |
 | 06 | [Guardrail·보안·Audit](06-guardrails-security-and-audit.md) | 입력·Tool·출력 경계와 Audit 정책을 코드로 강제한다. | 02, 03, 05 | 예정 |
 | 07 | [Model Routing과 Egress Policy](07-model-routing-and-egress-policy.md) | Provider Adapter와 데이터 분류 기반 모델 반출 정책을 만든다. | 02, 03, 06 | 예정 |
 | 08 | [Root Orchestrator와 실행 Engine](08-root-orchestrator-and-execution-engine.md) | Root 1회 Decision, Plan 검증, 실행과 결정적 결과 합성을 만든다. | 05, 06, 07 | 예정 |
@@ -43,9 +43,9 @@
 | 13 | [Memory](13-memory.md) | 수동 승인 Memory, Scope 선택, Revision과 주입 Budget을 만든다. | 03, 04, 06, 11 | 예정 |
 | 14 | [Scheduler](14-scheduler.md) | `request|skill` Target, Claim/Misfire, 공휴일과 Calendar UI를 만든다. | 05, 08, 11, 13 | 예정 |
 | 15 | [Eval과 Red Team](15-eval-and-red-team.md) | Trace Grader, Critical Gate와 승인형 공격 Case 생성을 만든다. | 05~14 | 예정 |
-| 16 | [Slack과 Inbound Delivery](16-slack-and-inbound-delivery.md) | Slack/API 요청 수신, Queue 연결, 진행 상태와 안전한 응답 전달을 만든다. | 04~11, 14 | 예정 |
+| 16 | [Slack과 Inbound Delivery](16-slack-and-inbound-delivery.md) | Slack OIDC와 요청 수신, Queue 연결, 진행 상태와 안전한 응답 전달을 만든다. | 04~11, 14 | 예정 |
 | 17 | [Analytics·관측성·Feedback](17-analytics-observability-and-feedback.md) | Metric/Log/Trace, 조직 채택 지표와 Feedback→Eval 흐름을 만든다. | 05, 11, 14~16 | 예정 |
-| 18 | [Admin API Key와 IP Policy](18-admin-api-keys-and-ip-policy.md) | API Key 수명주기, CIDR Allowlist, Lockout 방지와 관리 화면을 만든다. | 03, 04, 06, 17 | 예정 |
+| 18 | [Admin API Key와 IP Policy](18-admin-api-keys-and-ip-policy.md) | Reverse Proxy OIDC, API Key, CIDR Allowlist와 Lockout 방지를 만든다. | 03, 04, 06, 17 | 예정 |
 | 19 | [Package·운영·Upgrade](19-packaging-operations-and-upgrade.md) | Wheel/UI 배포, Service, Backup, Upgrade/Rollback과 Release CI를 만든다. | 01~18 | 예정 |
 | 20 | [Capability Pack과 AB180 Parity](20-capability-packs-and-parity.md) | 8개 공개 사례와 격리 Software Delivery Pack을 Release Gate로 완성한다. | 09~19 | 예정 |
 
