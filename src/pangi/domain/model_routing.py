@@ -89,3 +89,12 @@ class ModelFinishReason(StrEnum):
     LENGTH = "length"
     CONTENT_FILTERED = "content_filtered"
     UNKNOWN = "unknown"
+
+
+class ModelInvocationState(StrEnum):
+    """Persisted lifecycle states for one logical Model call."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    DENIED = "denied"

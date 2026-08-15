@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지 완료했고 WBS-06과 WBS-07을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter와 Model Retry 계약까지 추가했지만 Runtime 실행 흐름에는 아직 연결하지 않았어요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지 완료했고 WBS-06과 WBS-07을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약과 안전한 Policy·Invocation 영속화까지 추가했지만 Runtime 실행 흐름에는 아직 연결하지 않았어요.
 
 ## 현재 구현 상태
 
@@ -14,7 +14,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
-| 07. Model Routing과 Egress Policy | 진행 중 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증과 Transport Retry |
+| 07. Model Routing과 Egress Policy | 진행 중 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation SQLite 영속화와 내부 Run Event |
 | 08~20 | 예정 | Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
@@ -170,16 +170,22 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 - SDK 자체 Retry를 끄고 Pangi가 Timeout, Rate Limit과 일시적인 서버 오류만 재시도해요. 하나의 Logical Call에서 발생한 실제 Provider Request 수를 따로 반환해요.
 - Provider 응답은 요청한 JSON Schema로 다시 검증해요. JSON이나 Schema가 잘못되면 Semantic Retry 없이 안전하게 실패해요.
 - Token Usage, 전체 Duration, Provider Latency와 종료 사유를 공통 응답 계약으로 변환해요.
+- SQLite Migration 5는 Versioned Model Policy Snapshot과 Model Invocation을 저장해요. 같은 Policy 이름에는 Active Version을 하나만 허용하고 Active 규칙의 변경·삭제를 거부해요.
+- 허용된 Logical Call은 Provider를 호출하기 전에 `running` Invocation과 `model.policy_allowed` 내부 Event를 저장해요. 저장에 실패하면 Provider를 호출하지 않아요.
+- Policy가 호출을 차단하면 Provider 요청 없이 `denied` Invocation과 `model.policy_denied` 내부 Event를 같은 Transaction에 저장해요.
+- Provider 호출이 끝나면 Token, Duration, Provider Request 수와 성공·실패 상태를 `model.invocation_completed` 내부 Event와 함께 저장해요. Provider Network 요청 중에는 SQLite Transaction을 유지하지 않아요.
+- 원문 Logical Call ID는 저장하지 않고 Fingerprint만 남겨요. Prompt, Redaction 이후 실제 입력, 구조화 Model Output과 Credential은 SQLite와 Run Event에 저장하지 않아요.
+- 같은 Run에서 같은 Logical Call을 다시 실행하면 Provider 호출 전에 거부해요. 영속화 실패 때문에 Provider를 다시 호출하지도 않아요.
 - Prompt, Output Schema와 구조화 Provider Output은 결과·오류·객체 표현에 포함하지 않아요.
 
-실제 Credential·Model 설정과 Runtime 조립, 호출 Metadata의 SQLite 영속화, 정책 결정 Event와 Model Policy 관리 화면은 후속 WBS-07 단계에서 구현해요.
+실제 Credential·Model 설정과 Runtime 조립, Model Policy 관리 API·화면, 활성화·폐기 흐름과 WBS-15 Eval Gate는 후속 WBS-07 단계에서 구현해요.
 
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Engine·Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
-- Model Provider Credential·Runtime 조립, 사용량·호출 Event 영속화, Policy 관리 화면
+- Model Provider Credential·Runtime 조립, Policy 관리 API·화면과 Eval 기반 활성화 Gate
 - Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
 - Slack 요청 수신과 응답 전달
@@ -261,9 +267,9 @@ uv run pytest
 uv run python scripts/export_openapi.py --check
 ```
 
-### Model Routing과 Provider Adapter만 검증
+### Model Routing과 Egress Policy만 검증
 
-WBS-07에서 구현한 Egress Policy, OpenAI·Bedrock 요청 변환, 구조화 출력 검증과 Transport Retry 경계를 확인하세요.
+WBS-07.1~07.3에서 구현한 Egress Policy, OpenAI·Bedrock 요청 변환, 구조화 출력 검증, Transport Retry와 Policy·Invocation 영속화를 확인하세요.
 
 ```bash
 uv run pytest \
@@ -271,6 +277,8 @@ uv run pytest \
   tests/unit/test_model_provider_adapters.py \
   tests/contract/test_model_egress_contract.py \
   tests/contract/test_model_provider_retry_contract.py \
+  tests/integration/test_model_routing_persistence.py \
+  tests/integration/test_sqlite_migrations.py \
   tests/architecture/test_dependency_rules.py \
   tests/smoke/test_cli.py
 ```
@@ -368,17 +376,6 @@ uv run pytest \
   tests/contract/test_guardrail_security_contract.py \
   tests/unit/test_external_data_service.py \
   tests/unit/test_tool_guardrails.py \
-  tests/architecture/test_dependency_rules.py
-```
-
-### Model Routing과 Egress Policy만 검증
-
-WBS-07.1에서 구현한 Model 계약, Data Class 합성, 후보 Allow/Deny Matrix, Redaction 선행 실행과 Provider 호출 차단 경계를 확인하세요.
-
-```bash
-uv run pytest \
-  tests/unit/test_model_routing.py \
-  tests/contract/test_model_egress_contract.py \
   tests/architecture/test_dependency_rules.py
 ```
 

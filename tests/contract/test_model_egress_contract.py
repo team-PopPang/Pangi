@@ -7,6 +7,12 @@ import asyncio
 import pytest
 
 from pangi.adapters.outbound.model_providers.json_schema import JsonSchemaOutputValidator
+from pangi.application.contracts.model_persistence import (
+    ModelInvocationContext,
+    ModelInvocationDenial,
+    ModelInvocationFinish,
+    ModelInvocationStart,
+)
 from pangi.application.contracts.model_routing import (
     GuardedModelRequest,
     ModelCallRequest,
@@ -51,6 +57,22 @@ class ContractProvider:
     async def invoke(self, request: GuardedModelRequest) -> ModelProviderResponse:
         self.calls.append(request)
         return ModelProviderResponse('{"answer":"safe"}')
+
+
+class ContractInvocations:
+    def __init__(self) -> None:
+        self.started: list[ModelInvocationStart] = []
+        self.denied: list[ModelInvocationDenial] = []
+        self.finished: list[ModelInvocationFinish] = []
+
+    async def start(self, invocation: ModelInvocationStart) -> None:
+        self.started.append(invocation)
+
+    async def deny(self, invocation: ModelInvocationDenial) -> None:
+        self.denied.append(invocation)
+
+    async def finish(self, invocation: ModelInvocationFinish) -> None:
+        self.finished.append(invocation)
 
 
 def _profile() -> ModelProfile:
@@ -110,6 +132,7 @@ def _request(data_class: DataClass, content: str) -> ModelCallRequest:
 
 def test_denied_data_never_calls_provider_and_allowed_data_is_redacted_first() -> None:
     provider = ContractProvider()
+    invocations = ContractInvocations()
     policy_service = ModelPolicyService(
         profiles=ContractProfiles(_profile()),
         policies=ContractPolicies(_policy()),
@@ -119,14 +142,27 @@ def test_denied_data_never_calls_provider_and_allowed_data_is_redacted_first() -
         policy_service,
         provider=provider,
         output_validator=JsonSchemaOutputValidator(),
+        invocations=invocations,
     )
+    context = ModelInvocationContext("contract-run-00001")
 
     with pytest.raises(ModelPolicyBlockedError):
-        asyncio.run(execution.execute(_request(DataClass.RESTRICTED, "restricted")))
+        asyncio.run(
+            execution.execute(
+                _request(DataClass.RESTRICTED, "restricted"),
+                context=context,
+            )
+        )
     assert provider.calls == []
+    assert len(invocations.denied) == 1
 
     secret = "sk-contract-secret-12345"
-    asyncio.run(execution.execute(_request(DataClass.INTERNAL, secret)))
+    asyncio.run(
+        execution.execute(
+            _request(DataClass.INTERNAL, secret),
+            context=context,
+        )
+    )
 
     assert len(provider.calls) == 1
     assert secret not in provider.calls[0].sources[0].content
@@ -134,3 +170,4 @@ def test_denied_data_never_calls_provider_and_allowed_data_is_redacted_first() -
     assert provider.calls[0].sources[0].canonical_data_json == (
         '{"password":"[REDACTED]"}'
     )
+    assert len(invocations.started) == len(invocations.finished) == 1

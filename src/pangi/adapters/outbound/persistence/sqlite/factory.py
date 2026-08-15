@@ -10,6 +10,10 @@ from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
 from pangi.adapters.outbound.persistence.sqlite.event_writer import SqliteRunEventWriter
+from pangi.adapters.outbound.persistence.sqlite.model_routing import (
+    SqliteModelInvocationRecorder,
+    SqliteModelPolicyRepository,
+)
 from pangi.adapters.outbound.persistence.sqlite.run_events import SqliteRunEventStore
 from pangi.adapters.outbound.persistence.sqlite.runs import (
     SqliteRunQueueStore,
@@ -147,6 +151,22 @@ def build_run_queue_metric_service(database: SqliteDatabase) -> RunQueueMetricSe
     return RunQueueMetricService(
         SqliteRunEventStore(database, _build_run_event_writer())
     )
+
+
+def build_model_policy_repository(
+    database: SqliteDatabase,
+) -> SqliteModelPolicyRepository:
+    """Build versioned Model Policy persistence on the shared SQLite runtime."""
+
+    return SqliteModelPolicyRepository(database)
+
+
+def build_model_invocation_recorder(
+    database: SqliteDatabase,
+) -> SqliteModelInvocationRecorder:
+    """Build mandatory Model Invocation and internal Event persistence."""
+
+    return SqliteModelInvocationRecorder(database, _build_run_event_writer())
 
 
 def build_bootstrap_admin_for_cli(

@@ -6,6 +6,9 @@ RUN_EVENT_FORBIDDEN_ATTRIBUTE_KEYS = frozenset(
     {
         "attachment_body",
         "chain_of_thought",
+        "model_input",
+        "model_output",
+        "prompt",
         "provider_prompt",
         "raw_prompt",
         "secret",
