@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
@@ -11,6 +11,7 @@ import aiosqlite
 
 from pangi.adapters.outbound.persistence.sqlite.connection import fetch_all, fetch_one
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
+from pangi.adapters.outbound.persistence.sqlite.event_writer import SqliteRunEventWriter
 from pangi.application.contracts.run_events import (
     RunEventDraft,
     RunEventStoreBatch,
@@ -21,24 +22,10 @@ from pangi.application.ports.run_events import (
     RunEventPersistenceError,
     RunQueueMetricPersistenceError,
 )
+from pangi.application.services.telemetry_redaction import (
+    core_telemetry_redaction_service,
+)
 from pangi.domain.runs import EventVisibility, RunEvent, RunState
-
-
-def _json_value(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(nested) for key, nested in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_value(nested) for nested in value]
-    return value
-
-
-def _canonical_json(value: object) -> str:
-    return json.dumps(
-        _json_value(value),
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
 
 
 def _required_datetime(row: aiosqlite.Row, name: str) -> datetime:
@@ -70,8 +57,15 @@ def _event_from_row(row: aiosqlite.Row) -> RunEvent:
 class SqliteRunEventStore:
     """Assign Event indexes and execute short, serialized SQLite reads."""
 
-    def __init__(self, database: SqliteDatabase) -> None:
+    def __init__(
+        self,
+        database: SqliteDatabase,
+        event_writer: SqliteRunEventWriter | None = None,
+    ) -> None:
         self._database = database
+        self._event_writer = event_writer or SqliteRunEventWriter(
+            core_telemetry_redaction_service()
+        )
 
     @asynccontextmanager
     async def _runtime(self) -> AsyncIterator[None]:
@@ -104,21 +98,13 @@ class SqliteRunEventStore:
                     raise RunEventPersistenceError(
                         "The next Run Event index is unavailable"
                     )
-                event = draft.to_event(index=int(next_index["value"]))
-                await unit_of_work.connection.execute(
-                    "INSERT INTO run_events "
-                    "(run_id, event_index, type, visibility, step_id, message, "
-                    "attributes_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        event.run_id,
-                        event.index,
-                        event.type,
-                        event.visibility.value,
-                        event.step_id,
-                        event.message,
-                        _canonical_json(event.attributes),
-                        event.created_at.astimezone(UTC).isoformat(),
-                    ),
+                event = self._event_writer.prepare_draft(
+                    draft,
+                    index=int(next_index["value"]),
+                )
+                event = await self._event_writer.insert(
+                    unit_of_work.connection,
+                    event,
                 )
                 await unit_of_work.commit()
                 return event

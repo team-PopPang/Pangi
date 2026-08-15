@@ -63,6 +63,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 중단된 Non-idempotent Step은 자동 재실행하지 않고 실패로 종료한다.
 - Event는 `run_id + index`로 순서를 보장하고 Public/Admin/Internal Visibility를 적용한다.
 - Event Attribute는 구조화 Summary와 Fingerprint만 저장하고 Chain-of-Thought, Prompt와 Tool Result 원문을 금지한다.
+- WBS-06.4.2의 단일 SQLite Event Writer가 첫 Event, Queue Event와 범용 Append를 저장 직전에 정규화·Redact한다. Event 실패는 같은 Transaction의 Run·Queue 상태 변경과 함께 Rollback한다.
 - Run 목록과 상세는 Owner Scope를 적용하고, 목록 응답에는 요청 본문과 Attachment를 포함하지 않는다. 상세 응답도 Idempotency Key, Worker ID, Lease와 Heartbeat는 노출하지 않는다.
 - Run 취소는 `queued`와 `running`에서만 허용하며, Session 인증과 Owner/Admin 검사 뒤 Same-origin·CSRF 검증을 통과해야 한다.
 - Event HTTP 조회에서 Owner는 `public`, Admin은 `public`과 `admin`만 볼 수 있다. `internal` Event는 어떤 HTTP 역할에도 반환하지 않는다.
@@ -142,6 +143,12 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Admin 전용 `GET /api/v1/runs/metrics`가 Queue 깊이, 실행 수, 만료 Lease 수와 가장 오래된 대기 시간을 식별자 없이 반환한다.
 - OpenAPI 산출물, Frontend 생성 Type, JSON API Client와 `EventSource` Helper를 동기화했다. Run 화면과 Navigation 활성화는 WBS-12 범위로 남겼다.
 - Owner·Visibility·동시 Event Index·CSRF·`Last-Event-ID`·Terminal 종료·Poll 대기 경계·Metric을 Contract와 Integration Test로 검증했으므로 WBS-05를 완료한다.
+
+## WBS-06.4.2 연계 결과
+
+- WBS-05가 소유한 세 Event 쓰기 경로를 WBS-06의 단일 최종 Writer로 통합했다. Event Index, Visibility와 Transaction 소유권은 WBS-05에 그대로 둔다.
+- Message와 Attribute는 저장 직전에 CRLF/NFC 정규화와 중앙 Secret Redaction을 통과한다. 금지 Field와 크기·재귀 제한을 위반하면 안전한 오류로 거부한다.
+- SQLite 원문, Owner/Admin JSON 응답과 SSE Frame에 Secret이 남지 않는지 Integration Test로 고정했다. DB Schema와 HTTP/OpenAPI 계약은 바꾸지 않았다.
 
 ## 완료 조건
 

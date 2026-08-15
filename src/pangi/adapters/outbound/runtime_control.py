@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from collections.abc import Awaitable, Callable
 from http.client import HTTPConnection, HTTPException
 
 import uvicorn
 
+from pangi.adapters.outbound.logging import (
+    TelemetryRedactionFilter,
+    install_telemetry_redaction_filter,
+)
 from pangi.application.contracts.runtime_status import RuntimeState, RuntimeStatus
 from pangi.application.ports.runtime_control import RuntimeUnavailableError
+from pangi.application.services.telemetry_redaction import (
+    core_telemetry_redaction_service,
+)
 
 
 class UnavailableRuntimeControl:
@@ -39,11 +47,15 @@ class UvicornRuntimeControl:
         host: str,
         port: int,
         probe_timeout_seconds: float = 1.0,
+        telemetry_filter: logging.Filter | None = None,
     ) -> None:
         self._app = app
         self._host = host
         self._port = port
         self._probe_timeout_seconds = probe_timeout_seconds
+        self._telemetry_filter = telemetry_filter or TelemetryRedactionFilter(
+            core_telemetry_redaction_service()
+        )
 
     def start(self) -> None:
         config = uvicorn.Config(
@@ -54,6 +66,7 @@ class UvicornRuntimeControl:
             access_log=False,
             log_level="critical",
         )
+        install_telemetry_redaction_filter(self._telemetry_filter)
         server = uvicorn.Server(config)
         print(
             f"Starting Pangi on {self._host}:{self._port}",

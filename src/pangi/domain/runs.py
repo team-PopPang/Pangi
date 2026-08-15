@@ -11,21 +11,11 @@ from math import isfinite
 from types import MappingProxyType
 
 from pangi.domain.auth import UserRole
+from pangi.domain.telemetry import RUN_EVENT_FORBIDDEN_ATTRIBUTE_KEYS
 
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[!-~]{1,255}$")
 _EVENT_TYPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
-_FORBIDDEN_ATTRIBUTE_KEYS = frozenset(
-    {
-        "attachment_body",
-        "chain_of_thought",
-        "provider_prompt",
-        "raw_prompt",
-        "secret",
-        "slack_event",
-        "tool_result",
-    }
-)
 
 
 class PrincipalChannel(StrEnum):
@@ -459,7 +449,7 @@ def _validate_attribute_keys(value: object) -> None:
             if not isinstance(key, str):
                 raise RunContractError("event attribute keys must be strings")
             normalized = key.strip().casefold().replace("-", "_")
-            if normalized in _FORBIDDEN_ATTRIBUTE_KEYS:
+            if normalized in RUN_EVENT_FORBIDDEN_ATTRIBUTE_KEYS:
                 raise RunContractError(f"event attribute is forbidden: {key}")
             _validate_attribute_keys(nested)
     elif isinstance(value, (list, tuple)):

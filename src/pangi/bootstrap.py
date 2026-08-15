@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from pangi.adapters.inbound.cli import CliDependencies, create_app
 from pangi.adapters.inbound.web import create_web_app
 from pangi.adapters.outbound.initialization import FileSystemInitializer
+from pangi.adapters.outbound.logging import TelemetryRedactionFilter
 from pangi.adapters.outbound.persistence.sqlite.factory import (
     build_auth_sessions,
     build_bootstrap_admin,
@@ -25,6 +26,9 @@ from pangi.adapters.outbound.runtime_readiness import LocalRuntimeReadinessProbe
 from pangi.adapters.outbound.system_checks import build_doctor_service
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.ports.runtime import RuntimeBackend
+from pangi.application.services.telemetry_redaction import (
+    core_telemetry_redaction_service,
+)
 from pangi.config import PangiConfig
 from pangi.runtime import PangiRuntime
 
@@ -65,6 +69,9 @@ def _build_runtime_control(
         app=create_asgi_app(paths, config),
         host=config.server.host,
         port=config.server.port,
+        telemetry_filter=TelemetryRedactionFilter(
+            core_telemetry_redaction_service()
+        ),
     )
 
 

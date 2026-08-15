@@ -102,3 +102,13 @@ def test_inbound_and_outbound_adapters_do_not_import_each_other() -> None:
     assert not any(name.startswith("pangi.adapters.outbound") for name in inbound_imports)
     assert not any(name.startswith("pangi.adapters.inbound") for name in outbound_imports)
 
+
+def test_run_events_have_one_final_sqlite_write_boundary() -> None:
+    insert_owners = []
+    for path in PANGI_ROOT.rglob("*.py"):
+        if "INSERT INTO run_events" in path.read_text("utf-8"):
+            insert_owners.append(path.relative_to(SOURCE_ROOT).as_posix())
+
+    assert sorted(insert_owners) == [
+        "pangi/adapters/outbound/persistence/sqlite/event_writer.py"
+    ]

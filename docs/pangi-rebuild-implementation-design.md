@@ -829,6 +829,10 @@ class RunEvent:
     attributes: Mapping[str, object] = field(default_factory=dict)
 ```
 
+모든 Event는 SQLite에 Insert하기 직전에 `core-telemetry-v1` 경계를 통과한다. 이 경계는 CRLF/CR을 LF로 바꾸고 Unicode NFC로 정규화한 뒤 `core-secret-v1` Redaction을 적용한다. Message와 Attribute의 UTF-8 Byte, 재귀 깊이와 항목 수를 제한하며 원문 Prompt, Tool Result, Chain-of-Thought와 Secret 전용 Field를 거부한다.
+
+첫 `run.received`, Queue 상태 Event와 범용 Append는 하나의 최종 Writer만 사용한다. Writer 실패는 Run·Queue 상태와 Event를 함께 다루는 Unit of Work를 Rollback한다. JSON API와 SSE는 이 Writer가 저장한 Safe Event만 읽는다.
+
 Event Type은 Namespace를 사용한다.
 
 - `guardrail.accepted`, `guardrail.blocked`
@@ -3509,12 +3513,11 @@ Audit Metadata에는 이전/이후의 안전한 Summary와 Fingerprint를 남긴
 
 ### 22.2 Log
 
-- JSON Structured Log
-- `request_id`, `run_id`, `step_id`
-- Error Code와 Exception Type
-- Secret Redaction Filter
-- Prompt/Tool Result 원문 미기록
-- Admin Debug Mode도 Secret을 기록하지 않음
+- WBS-06.4.2의 최종 Handler Filter가 Log Message와 허용 Field를 `core-telemetry-v1`과 `core-secret-v1`로 정규화·Redact한다.
+- Filter는 `%` Argument를 한 번만 렌더링하고 `request_id`, `run_id`, `step_id`, Error Code 같은 허용 Field만 보존한다.
+- Exception과 Stack 원문은 기록하지 않고 Exception Type만 보존한다.
+- Filter가 Payload를 처리하지 못하면 원문 대신 고정된 안전 메시지를 기록한다. Admin Debug Mode도 이 Filter를 우회하지 않는다.
+- WBS-17의 JSON Structured Log Formatter는 Redaction 완료 Record만 직렬화한다. Metric·Trace와 선택형 OpenTelemetry도 WBS-17이 소유한다.
 
 ### 22.3 Trace
 
