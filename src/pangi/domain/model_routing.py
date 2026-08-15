@@ -36,6 +36,13 @@ class ModelPurpose(StrEnum):
     RED_TEAM = "red_team"
 
 
+class ModelMessageRole(StrEnum):
+    """Portable message roles supported by every built-in Model Provider."""
+
+    SYSTEM = "system"
+    USER = "user"
+
+
 class ModelRetention(StrEnum):
     PROVIDER_DEFAULT = "provider_default"
     ZERO_RETENTION = "zero_retention"
@@ -68,5 +75,17 @@ class ModelProviderErrorCode(StrEnum):
     UNAVAILABLE = "model_provider_unavailable"
     RATE_LIMITED = "model_provider_rate_limited"
     TIMEOUT = "model_provider_timeout"
+    AUTHENTICATION = "model_provider_authentication"
+    INVALID_REQUEST = "model_provider_invalid_request"
+    CONTENT_FILTERED = "model_provider_content_filtered"
     INVALID_STRUCTURED_OUTPUT = "model_invalid_structured_output"
     UNKNOWN = "model_provider_unknown"
+
+
+class ModelFinishReason(StrEnum):
+    """Provider-neutral reasons for a Model response ending."""
+
+    STOP = "stop"
+    LENGTH = "length"
+    CONTENT_FILTERED = "content_filtered"
+    UNKNOWN = "unknown"

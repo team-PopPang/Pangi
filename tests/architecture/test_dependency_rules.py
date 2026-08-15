@@ -10,8 +10,11 @@ PANGI_ROOT = SOURCE_ROOT / "pangi"
 FORBIDDEN_FRAMEWORK_ROOTS = {
     "aiosqlite",
     "anthropic",
+    "boto3",
+    "botocore",
     "fastapi",
     "httpx",
+    "jsonschema",
     "mcp",
     "openai",
     "pydantic",

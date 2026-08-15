@@ -9,6 +9,7 @@ from pangi.application.contracts.model_routing import (
     ModelEgressPolicy,
     ModelProfile,
     ModelProviderResponse,
+    StructuredOutputSchema,
 )
 
 
@@ -29,5 +30,17 @@ class ModelEgressPolicyProvider(Protocol):
 class ModelProvider(Protocol):
     async def invoke(self, request: GuardedModelRequest) -> ModelProviderResponse:
         """Execute only a request admitted and redacted by the Egress boundary."""
+
+        ...
+
+
+class StructuredOutputValidator(Protocol):
+    def is_valid(
+        self,
+        *,
+        schema: StructuredOutputSchema,
+        canonical_output_json: str,
+    ) -> bool:
+        """Return whether one parsed Provider output satisfies the requested schema."""
 
         ...
