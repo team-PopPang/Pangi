@@ -165,10 +165,19 @@ npm --prefix ui ci
 아래 예시는 Runtime Data를 저장소의 `.pangi/`에 만드는 프로젝트 로컬 모드다. `pangi init`이 이 경로를 `.gitignore`에 한 번만 추가한다.
 
 ```bash
+# 프로젝트 안에 `.pangi` 실행 환경을 만들고 최초 관리자용 Bootstrap URL을 발급한다.
 uv run pangi init --project-local --yes
+
+# `.pangi/pangi.toml`의 형식과 설정값이 유효한지 확인한다.
 uv run pangi config validate --project-local
+
+# 현재 DB 버전과 적용 대기 중인 Migration을 확인한다. 실제 적용은 하지 않는다.
 uv run pangi migrate plan --project-local
+
+# 외부 연동 검사를 건너뛰고 로컬 실행 환경을 읽기 전용으로 진단한다.
 uv run pangi doctor --project-local --offline
+
+# 현재 터미널에서 Pangi 서버를 시작한다.
 uv run pangi start --project-local
 ```
 
