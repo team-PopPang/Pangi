@@ -58,19 +58,27 @@ input {
   font-size: 14px;
 }
 
-.app-shell {
+.admin-shell {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
 }
 
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  padding: 24px 18px;
+.desktop-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
   background: var(--bg);
   border-right: 1px solid var(--border);
+}
+
+.sidebar-content {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: 24px;
+  padding: 20px 18px;
 }
 
 .brand {
@@ -78,8 +86,10 @@ input {
   align-items: center;
   gap: 10px;
   padding: 0 10px;
+  color: var(--text);
   font-size: 18px;
   font-weight: 700;
+  text-decoration: none;
 }
 
 .brand-mark,
@@ -174,13 +184,34 @@ input {
   border-radius: 9px;
 }
 
-.sidebar nav {
+.sidebar-navigation {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  gap: 22px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.sidebar-navigation nav {
   display: grid;
   gap: 4px;
 }
 
+.nav-group h2 {
+  margin: 0 12px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .nav-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 10px 12px;
   color: var(--text-muted);
   border-radius: var(--radius-control);
@@ -196,6 +227,13 @@ input {
 
 .nav-item.disabled {
   cursor: default;
+  opacity: 0.72;
+}
+
+.nav-planned {
+  color: #98a2b3;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .sidebar-note {
@@ -205,7 +243,7 @@ input {
   line-height: 1.5;
 }
 
-.session-summary {
+.drawer-account {
   display: grid;
   gap: 4px;
   margin-top: auto;
@@ -217,14 +255,12 @@ input {
   font-size: 13px;
 }
 
-.session-summary span {
+.drawer-account span {
   color: var(--text-muted);
   font-size: 12px;
 }
 
 .logout-button {
-  justify-self: start;
-  margin-top: 8px;
   padding: 0;
   color: var(--primary);
   background: none;
@@ -233,11 +269,87 @@ input {
   font-weight: 700;
 }
 
-.session-summary + .sidebar-note {
+.logout-button:hover {
+  color: var(--primary-hover);
+}
+
+.drawer-account .logout-button {
+  justify-self: start;
+  margin-top: 8px;
+}
+
+.drawer-account + .sidebar-note {
   margin-top: 0;
 }
 
-.content {
+.admin-page {
+  min-width: 0;
+}
+
+.topbar {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: flex;
+  min-height: var(--topbar-height);
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 8px var(--page-padding);
+  background: rgb(255 255 255 / 96%);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-title,
+.topbar-account div {
+  display: grid;
+  gap: 2px;
+}
+
+.topbar-title strong,
+.topbar-account strong {
+  font-size: 13px;
+}
+
+.topbar-title span,
+.topbar-account span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.topbar-account {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  text-align: right;
+}
+
+.topbar-account .logout-button {
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.menu-button {
+  display: none;
+  width: 40px;
+  height: 40px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.menu-button span {
+  display: block;
+  height: 2px;
+  margin: 3px 0;
+  background: var(--text);
+  border-radius: 999px;
+}
+
+.admin-content {
   width: 100%;
   max-width: var(--content-max-width);
   margin: 0 auto;
@@ -323,6 +435,106 @@ h2 {
   border-radius: 14px;
 }
 
+.drawer-layer,
+.drawer-backdrop,
+.mobile-drawer {
+  position: fixed;
+  inset: 0;
+}
+
+.drawer-layer {
+  z-index: 40;
+}
+
+.drawer-backdrop {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: rgb(16 24 40 / 42%);
+  border: 0;
+  cursor: pointer;
+}
+
+.mobile-drawer {
+  z-index: 1;
+  right: auto;
+  display: flex;
+  width: min(88vw, 340px);
+  height: 100dvh;
+  flex-direction: column;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.drawer-header {
+  display: flex;
+  min-height: var(--topbar-height);
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 18px 8px 28px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.drawer-close {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  place-items: center;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.mobile-drawer .sidebar-content {
+  flex: 1;
+  height: auto;
+  overflow: hidden;
+}
+
+.menu-button:focus-visible,
+.drawer-close:focus-visible,
+.logout-button:focus-visible,
+.brand:focus-visible,
+.nav-item:focus-visible {
+  outline: 3px solid rgb(61 82 109 / 24%);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1023px) {
+  .admin-shell {
+    display: block;
+  }
+
+  .desktop-sidebar {
+    display: none;
+  }
+
+  .topbar {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .menu-button {
+    display: block;
+    flex: 0 0 auto;
+  }
+
+  .topbar-title {
+    margin-right: auto;
+  }
+
+  .admin-content {
+    padding: 36px 24px;
+  }
+}
+
 @media (max-width: 767px) {
   .public-shell {
     padding: 20px;
@@ -332,19 +544,22 @@ h2 {
     margin-top: 44px;
   }
 
-  .app-shell {
-    display: block;
-  }
-
-  .sidebar {
-    display: none;
-  }
-
-  .content {
+  .admin-content {
     padding: 28px 20px;
   }
 
   .page-header {
     flex-direction: column;
+  }
+}
+
+@media (max-width: 559px) {
+  .topbar-title,
+  .topbar-account div {
+    display: none;
+  }
+
+  .topbar-account {
+    margin-left: auto;
   }
 }

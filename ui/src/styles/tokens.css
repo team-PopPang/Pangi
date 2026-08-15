@@ -1,5 +1,6 @@
 :root {
   --sidebar-width: 248px;
+  --topbar-height: 64px;
   --content-max-width: 1440px;
   --page-padding: 32px;
   --bg: #ffffff;
@@ -9,7 +10,9 @@
   --text: #1d2939;
   --text-muted: #667085;
   --primary: #3d526d;
+  --primary-hover: #2f425a;
   --success: #55c59b;
+  --danger: #d92d20;
   --radius-card: 12px;
   --radius-control: 8px;
   color: var(--text);
