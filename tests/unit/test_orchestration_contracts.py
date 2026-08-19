@@ -110,3 +110,17 @@ def test_orchestrator_decision_hides_model_generated_content() -> None:
             mode=RunMode.DELEGATE,
             tasks=[task],  # type: ignore[arg-type]
         )
+    with pytest.raises(ValueError, match="at most 20"):
+        DelegatedTask(
+            id="collect-issues",
+            subagent="github-research",
+            objective="Collect issues.",
+            connection_hints=tuple(f"connection-{index}" for index in range(21)),
+        )
+    with pytest.raises(ValueError, match="at most 50"):
+        DelegatedTask(
+            id="collect-issues",
+            subagent="github-research",
+            objective="Collect issues.",
+            allowed_tool_hints=tuple(f"tool-{index}" for index in range(51)),
+        )

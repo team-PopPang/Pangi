@@ -14,8 +14,11 @@ from pangi.domain.runs import RunMode
 HARD_MAX_TASKS = 5
 HARD_MAX_TASK_TIMEOUT_SECONDS = 180
 HARD_MAX_RUN_TIMEOUT_SECONDS = 600
+HARD_MAX_CONNECTION_HINTS = 20
+HARD_MAX_TOOL_HINTS = 50
 
-_STABLE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
+STABLE_ORCHESTRATION_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$"
+_STABLE_IDENTIFIER = re.compile(STABLE_ORCHESTRATION_IDENTIFIER_PATTERN)
 
 
 class CompositionMode(StrEnum):
@@ -50,14 +53,20 @@ class DelegatedTask:
         _validate_identifier(self.id, field_name="task id")
         _validate_identifier(self.subagent, field_name="subagent")
         _validate_text(self.objective, field_name="task objective", limit=10_000)
-        _validate_identifier_tuple(self.depends_on, field_name="task dependencies")
+        _validate_identifier_tuple(
+            self.depends_on,
+            field_name="task dependencies",
+            maximum=HARD_MAX_TASKS,
+        )
         _validate_identifier_tuple(
             self.connection_hints,
             field_name="connection hints",
+            maximum=HARD_MAX_CONNECTION_HINTS,
         )
         _validate_identifier_tuple(
             self.allowed_tool_hints,
             field_name="allowed tool hints",
+            maximum=HARD_MAX_TOOL_HINTS,
         )
         _validate_integer_range(
             self.timeout_seconds,
@@ -230,9 +239,16 @@ def _validate_identifier(value: object, *, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a stable identifier")
 
 
-def _validate_identifier_tuple(value: object, *, field_name: str) -> None:
+def _validate_identifier_tuple(
+    value: object,
+    *,
+    field_name: str,
+    maximum: int,
+) -> None:
     if not isinstance(value, tuple):
         raise ValueError(f"{field_name} must be an immutable tuple")
+    if len(value) > maximum:
+        raise ValueError(f"{field_name} must contain at most {maximum} values")
     for item in value:
         _validate_identifier(item, field_name=field_name)
 

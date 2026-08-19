@@ -49,6 +49,9 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 ## 기술 설계
 
 - Root Context에는 Subagent/Skill/Connection의 최소 Catalog와 Decision JSON Schema만 넣고 Tool Schema/Memory 원문은 제외한다.
+- Root Context의 Catalog는 Principal 범위에서 한 번 조회한 불변 Snapshot을 사용한다. 같은 Snapshot에서 Prompt Data와 Validator 허용 이름을 파생해 호출 중 Registry 변경의 영향을 차단한다.
+- Catalog 종류별 항목은 최대 100개, Canonical Data는 최대 100KB로 제한한다. 설명과 Trigger는 고정 System 규칙이 아니라 구조화된 Data로 전달한다.
+- 사용자 요청 Data Class는 신뢰된 호출자가 비어 있지 않은 집합으로 명시한다. Root가 임의로 `public`이나 `internal`을 선택하지 않는다.
 - Direct는 `direct_answer`만, Delegate는 1~5개의 DAG Task만, Skill은 활성 이름 하나만 허용한다.
 - Hint는 권한으로 사용하지 않고 Execution 단계에서 Policy와 현재 Connection을 다시 검사한다.
 - Dependency Cycle, Unknown Subagent, 초과 Budget과 부적절한 Synthesis를 Plan Validator가 거부한다.
@@ -64,8 +67,8 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 ## 구현 체크리스트
 
 - [x] Decision/Task/AgentResult/Evidence Schema를 정의한다.
-- [ ] Root Prompt/Context Builder와 사용자 입력 Data Envelope를 구현한다.
-- [ ] Trigger별 Root logical call Budget을 구현한다.
+- [x] Root Prompt/Context Builder와 사용자 입력 Data Envelope를 구현한다.
+- [x] Trigger별 Root logical call Budget을 구현한다.
 - [x] Mode별 XOR, DAG, Registry, Task/Timeout/Composition Validator를 구현한다.
 - [ ] Direct Result 경로와 Delegate 실행 Plan을 구현한다.
 - [ ] Dependency 기반 Execution Engine과 Required/Optional 실패 처리를 구현한다.
@@ -75,10 +78,10 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 
 ## 검증 체크리스트
 
-- [ ] 일반 자연어, Guardrail 차단, 명시 Skill별 Root 호출 수를 검증한다.
+- [x] 일반 자연어, Guardrail 차단, 명시 Skill별 Root 호출 수를 검증한다.
 - [x] 잘못된 Mode XOR, Cycle, Unknown Subagent와 초과 Task를 거부한다.
 - [ ] Decision 실패 뒤 Tool/Subagent 호출이 0건인지 확인한다.
-- [ ] Provider Transport Retry가 Logical Call을 늘리지 않는지 확인한다.
+- [x] Provider Transport Retry가 Logical Call을 늘리지 않는지 확인한다.
 - [ ] Optional 실패와 Required 실패의 Run 상태/출력이 다른지 확인한다.
 - [ ] 동일 AgentResult 입력이 동일 Reducer 출력을 만드는지 Property Test를 실행한다.
 - [ ] Root 재계획과 Delegation Depth 증가를 불변식 테스트로 차단한다.
@@ -99,6 +102,16 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - DAG의 Critical Path Timeout을 Run Budget과 비교하고 최초 Decision 순서를 Tie-breaker로 사용해 결정적인 위상 정렬 결과를 만든다.
 - Synthesis는 등록된 `synthesis` Task 하나가 둘 이상의 선행 결과를 받고 DAG의 Terminal Sink일 때만 허용한다.
 - 실제 Root Context·Model 호출, Run Step 저장·실행, Reducer, Output Guardrail과 Run 생성 API 연결은 후속 단계로 유지한다.
+
+## 2차 구현 결과
+
+- `RootCatalogSnapshot`은 Principal 범위의 Subagent·Skill·Connection 최소 설명을 불변 Tuple로 정렬한다. Prompt와 Plan Validator는 같은 Snapshot을 사용하며 종류별 100개와 Canonical 100KB 상한을 넘으면 Model 호출 전에 실패한다.
+- `root-orchestration-v1` System 규칙은 Root가 한 번만 계획하고 Tool 실행·재계획·비공개 사고 과정 노출을 하지 않도록 지시한다. Catalog 설명과 사용자 요청은 고정 규칙에 섞지 않고 Canonical JSON Data로 전달한다.
+- 사용자 Envelope는 정규화된 Text, Channel과 Attachment의 표시 Metadata만 포함한다. Principal·Request·Idempotency·Thread·Attachment Reference와 Fingerprint는 Root 입력에서 제외한다.
+- `orchestrator-decision-v1` JSON Schema는 모든 Field와 `additionalProperties=false`, Task·Timeout·Hint Hard Limit을 고정한다. Framework-free Parser가 Canonical JSON을 `OrchestratorDecision`으로 변환하고 원문 없는 안정적인 오류만 반환한다.
+- `RootOrchestratorService`는 Catalog를 요청당 한 번 읽는다. 명시 Skill은 Model 호출 0회로 검증하고, 일반·Scheduler 자연어는 결정적인 `root-orchestration:<run_id>` Logical Call을 기존 Egress·Redaction·Invocation 경계로 정확히 한 번 보낸다.
+- Provider Transport Retry는 하나의 Root Model Executor 호출 결과로 계측한다. Model·Parser·Plan 실패 뒤 Semantic Retry는 수행하지 않는다.
+- 실제 Registry Adapter와 Provider Runtime 조립, Run 상태 전이·Queue Handler·실행 Engine은 후속 단계로 유지한다.
 
 ## 미결정 사항
 
