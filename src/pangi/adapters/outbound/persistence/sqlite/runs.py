@@ -287,9 +287,7 @@ class SqliteRunStore:
                     or str(principal["status"]) != UserStatus.ACTIVE.value
                     or str(principal["role"]) != run.request.principal.role.value
                 ):
-                    raise RunPrincipalUnavailableError(
-                        "The Run Principal is unavailable"
-                    )
+                    raise RunPrincipalUnavailableError("The Run Principal is unavailable")
 
                 await unit_of_work.connection.execute(
                     "DELETE FROM api_idempotency_records "
@@ -356,9 +354,7 @@ class SqliteRunStore:
                 )
                 try:
                     if cursor.rowcount != 1:
-                        raise RunPersistenceError(
-                            "The idempotency result could not be finalized"
-                        )
+                        raise RunPersistenceError("The idempotency result could not be finalized")
                 finally:
                     await cursor.close()
                 await unit_of_work.commit()
@@ -380,13 +376,9 @@ class SqliteRunStore:
         request_fingerprint: str,
     ) -> Run:
         if str(existing["request_fingerprint"]) != request_fingerprint:
-            raise IdempotencyConflictError(
-                "The idempotency key was used for a different request"
-            )
+            raise IdempotencyConflictError("The idempotency key was used for a different request")
         if str(existing["state"]) != "completed" or existing["run_id"] is None:
-            raise IdempotencyUnavailableError(
-                "The idempotent result is not available"
-            )
+            raise IdempotencyUnavailableError("The idempotent result is not available")
         run_id = str(existing["run_id"])
         try:
             response = json.loads(str(existing["response_json"]))
@@ -679,6 +671,11 @@ class SqliteRunQueueStore(SqliteRunStore):
                     current=current,
                     changed=cancelled,
                 )
+                await unit_of_work.connection.execute(
+                    "UPDATE run_steps SET state = 'cancelled', updated_at = ?, "
+                    "finished_at = ? WHERE run_id = ? AND state IN ('queued', 'running')",
+                    (timestamp.isoformat(), timestamp.isoformat(), cancelled.id),
+                )
                 await self._append_event(
                     unit_of_work.connection,
                     cancelled,
@@ -864,8 +861,7 @@ class SqliteRunQueueStore(SqliteRunStore):
         )
         steps = await fetch_all(
             connection,
-            "SELECT idempotent FROM run_steps "
-            "WHERE run_id = ? AND state = 'interrupted'",
+            "SELECT idempotent FROM run_steps WHERE run_id = ? AND state = 'interrupted'",
             (current.id,),
         )
         has_non_idempotent_step = any(int(row["idempotent"]) == 0 for row in steps)

@@ -41,9 +41,7 @@ async def _create_probe_table(database: SqliteDatabase) -> None:
 
 async def _probe_values(database: SqliteDatabase) -> list[str]:
     async with database.create() as unit_of_work:
-        cursor = await unit_of_work.connection.execute(
-            "SELECT value FROM uow_probe ORDER BY id"
-        )
+        cursor = await unit_of_work.connection.execute("SELECT value FROM uow_probe ORDER BY id")
         try:
             return [str(row[0]) for row in await cursor.fetchall()]
         finally:
@@ -62,7 +60,7 @@ def test_start_applies_migrations_once_and_close_is_idempotent(tmp_path: Path) -
             runtime_connection = unit_of_work.connection
             row = await fetch_one(unit_of_work.connection, "PRAGMA user_version")
             assert row is not None
-            assert int(row[0]) == 6
+            assert int(row[0]) == 7
         async with database.create() as unit_of_work:
             assert unit_of_work.connection is runtime_connection
         await database.close()

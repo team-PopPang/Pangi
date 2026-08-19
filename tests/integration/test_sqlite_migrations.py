@@ -53,11 +53,11 @@ def test_plan_is_read_only_and_apply_is_idempotent(tmp_path: Path) -> None:
     second = asyncio.run(admin.apply())
 
     assert not plan.database_exists
-    assert [migration.version for migration in plan.pending] == [1, 2, 3, 4, 5, 6]
+    assert [migration.version for migration in plan.pending] == [1, 2, 3, 4, 5, 6, 7]
     assert paths.database_file.exists()
-    assert first.current_version == 6
-    assert [migration.version for migration in first.applied] == [1, 2, 3, 4, 5, 6]
-    assert second.current_version == 6
+    assert first.current_version == 7
+    assert [migration.version for migration in first.applied] == [1, 2, 3, 4, 5, 6, 7]
+    assert second.current_version == 7
     assert second.applied == ()
     assert second.backup_file is None
 
@@ -86,7 +86,7 @@ def test_sqlite_connection_profile_is_enforced(tmp_path: Path) -> None:
         finally:
             await connection.close()
 
-    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 6)
+    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 7)
 
 
 def test_applied_migration_checksum_change_is_rejected(tmp_path: Path) -> None:
@@ -216,15 +216,23 @@ def test_packaged_auth_migration_upgrades_v1_with_verified_backup(tmp_path: Path
     assert {"users", "auth_identities", "auth_sessions", "bootstrap_grants"} <= tables
     with sqlite3.connect(result.backup_file) as backup:
         assert backup.execute("PRAGMA user_version").fetchone() == (1,)
-        assert backup.execute(
-            "SELECT name FROM sqlite_master WHERE name = 'users'"
-        ).fetchone() is None
+        assert (
+            backup.execute("SELECT name FROM sqlite_master WHERE name = 'users'").fetchone() is None
+        )
 
 
 def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: Path) -> None:
     paths, config = _initialized_runtime(tmp_path)
     packaged = PackageMigrationRegistry().load()
-    first, auth, run_core, audit, model_routing, model_policy_management = packaged
+    (
+        first,
+        auth,
+        run_core,
+        audit,
+        model_routing,
+        model_policy_management,
+        orchestration_execution,
+    ) = packaged
     asyncio.run(
         SqliteMigrationAdmin(
             paths,
@@ -235,18 +243,19 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
 
     result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
 
-    assert result.current_version == 6
+    assert result.current_version == 7
     assert [migration.name for migration in result.applied] == [
         run_core.descriptor.name,
         audit.descriptor.name,
         model_routing.descriptor.name,
         model_policy_management.descriptor.name,
+        orchestration_execution.descriptor.name,
     ]
     assert result.backup_file is not None
     manifest_file = result.backup_file.with_name(f"{result.backup_file.name}.manifest.json")
     verification = asyncio.run(SqliteSnapshotStore(paths).verify(manifest_file))
     assert verification.package_compatible
-    assert verification.artifact.manifest.migration_target_version == 6
+    assert verification.artifact.manifest.migration_target_version == 7
     with sqlite3.connect(paths.database_file) as connection:
         tables = {
             row[0]
@@ -254,7 +263,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (7,)
     assert {
         "runs",
         "run_steps",
@@ -263,12 +272,13 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         "audit_events",
         "model_policies",
         "model_invocations",
+        "run_execution_plans",
     } <= tables
     with sqlite3.connect(result.backup_file) as backup:
         assert backup.execute("PRAGMA user_version").fetchone() == (2,)
-        assert backup.execute(
-            "SELECT name FROM sqlite_master WHERE name = 'runs'"
-        ).fetchone() is None
+        assert (
+            backup.execute("SELECT name FROM sqlite_master WHERE name = 'runs'").fetchone() is None
+        )
 
 
 def test_auth_schema_enforces_roles_identity_shape_and_single_open_grant(
@@ -302,14 +312,12 @@ def test_auth_schema_enforces_roles_identity_shape_and_single_open_grant(
                 ),
             )
         connection.execute(
-            "INSERT INTO bootstrap_grants "
-            "VALUES (?, ?, ?, NULL, NULL, NULL, ?)",
+            "INSERT INTO bootstrap_grants VALUES (?, ?, ?, NULL, NULL, NULL, ?)",
             ("bootstrap-grant-001", "a" * 64, timestamp, timestamp),
         )
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(
-                "INSERT INTO bootstrap_grants "
-                "VALUES (?, ?, ?, NULL, NULL, NULL, ?)",
+                "INSERT INTO bootstrap_grants VALUES (?, ?, ?, NULL, NULL, NULL, ?)",
                 ("bootstrap-grant-002", "b" * 64, timestamp, timestamp),
             )
 

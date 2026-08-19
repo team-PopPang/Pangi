@@ -2109,7 +2109,8 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 | `schedules` | id, owner_user_id, kind, cron, timezone, target_type, request_text_ciphertext, request_key_version, request_fingerprint, skill_version_id, input_json, holiday_policy, holiday_calendar_version_id, next_run_at, revision, state | Target XOR, revision 증가 | 14 |
 | `schedule_runs` | id, schedule_id, scheduled_for, run_id, state, skip_reason | schedule+scheduled_for Unique | 14 |
 | `runs` | id, request_id, principal_id, trigger, state, mode, skill_version_id, normalized request, idempotency_key, revision, worker_id, lease_expires_at, heartbeat_at, timestamps | request_id Unique, idempotency_key는 비고유 | 05 |
-| `run_steps` | id, run_id, node_id, type, state, requirement, idempotent, attempt, depends_on_json, timestamps, error_code | run+node+attempt Unique | 05 |
+| `run_steps` | id, run_id, node_id, type, state, requirement, idempotent, attempt, depends_on_json, task_json, result_json, result_fingerprint, timestamps, error_code | run+node+attempt Unique | 05, 08 |
+| `run_execution_plans` | run_id, mode, schema_version, plan_json, plan_fingerprint, created_at | run PK, 불변 Plan | 08 |
 | `run_events` | run_id, event_index, type, visibility, step_id, message, attributes_json, created_at | run+index Unique | 05 |
 | `model_policies` | id, name, version, rules_json, fingerprint, state, eval_run_id | Active Version 불변 | 07 |
 | `model_invocations` | run_id, step_id, role, provider, model, region, policy_id, data_classes_json, source_kinds_json, redaction_count, input_fingerprint, logical_calls, provider_requests, token, duration, state | 원문 Prompt 미저장 | 07 |
@@ -2148,6 +2149,7 @@ erDiagram
     SKILL_VERSIONS o|--o{ SCHEDULES : optional_skill_target
     SCHEDULES ||--o{ SCHEDULE_RUNS : triggers
     USERS ||--o{ RUNS : requests
+    RUNS ||--o| RUN_EXECUTION_PLANS : materializes
     RUNS ||--o{ RUN_STEPS : contains
     RUNS ||--o{ RUN_EVENTS : emits
     RUN_STEPS ||--o{ MODEL_INVOCATIONS : invokes
