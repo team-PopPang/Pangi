@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07을 완료했고 WBS-06을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard까지 추가했지만 Model Runtime과 WBS-15 Eval 실행기에는 아직 연결하지 않았어요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07을 완료했고 WBS-06·08을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. Root Decision, Plan 검증·영속화, Dependency 실행과 안전한 결과 합성 기반도 구현했지만 아직 실제 Run 생성·Queue Runtime과 Model Provider에는 조립하지 않았어요.
 
 ## 현재 구현 상태
 
@@ -15,7 +15,8 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
 | 07. Model Routing과 Egress Policy | 완료 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation 영속화·계측, 관리자 조회·영향 분석·실패 폐쇄 Eval 활성화 Gate API와 읽기 전용 Dashboard |
-| 08~20 | 예정 | Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
+| 08. Root Orchestrator와 실행 Engine | 진행 중 | Direct·Delegate·Skill Decision, Catalog Context와 단일 Root 호출, Plan 검증·영속화, Dependency 실행·복구, 결정적 Reducer와 Output Guardrail 연결 |
+| 09~20 | 예정 | MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
 
@@ -189,6 +190,18 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 
 실제 Credential·Model 설정과 Runtime 조립, 사용처 Registry와 WBS-15 Eval 실행기는 후속 단계에서 구현해요.
 
+### Root Orchestrator와 실행 Engine 기반
+
+- Direct, Delegate와 Skill Decision 계약과 엄격한 XOR·DAG·Registry·Task 수·Timeout 검증을 제공해요.
+- Root Context는 Principal 범위의 Subagent·Skill·Connection 최소 Catalog Snapshot과 정규화된 사용자 Data만 포함해요. 일반 자연어는 Root Model을 정확히 한 번 호출하고 명시 Skill은 호출하지 않아요.
+- 검증된 Plan과 Canonical Task·Redaction 완료 `AgentResult`를 SQLite에 저장해요. 같은 Plan Replay는 허용하고 다른 Plan 덮어쓰기는 거부해요.
+- Dependency가 완료된 Step만 Plan 순서와 주입된 동시 실행 상한 안에서 실행해요. Required·Optional 실패, Timeout, 취소, Lease 소유권과 Idempotent 복구 규칙을 적용해요.
+- Reducer는 Result 입력 순서와 관계없이 Plan 순서로 Summary, Warning과 Evidence를 구성해요. Evidence URI 중복은 첫 항목만 유지해요.
+- Synthesis Mode는 최초 DAG의 Terminal Synthesis Result만 본문으로 사용하며 합성 중 Model이나 Subagent를 다시 호출하지 않아요.
+- Direct Answer와 Delegate 결과는 같은 Output Guardrail을 통과해요. 이후 경계에는 Secret·내부 경로·위험 Link·Mention을 처리한 `SafeOutput`만 제공해요.
+
+이 기반은 아직 보호된 Run 생성 API, Queue Handler와 실제 Model Provider·Subagent Runtime에 조립되지 않았어요. Run의 `composing → completed|failed` 저장과 Decision·Validation Event도 다음 WBS-08 단계에 남아 있어요.
+
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Engine·Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
@@ -312,6 +325,23 @@ uv run pytest \
   tests/integration/test_run_persistence.py \
   tests/integration/test_run_queue_persistence.py \
   tests/integration/test_run_event_delivery.py
+```
+
+### Root Orchestrator와 실행 Engine만 검증
+
+WBS-08.1~08.4에서 구현한 Decision·Plan 검증, Root 단일 호출, Plan·Result 영속화, Dependency 실행과 결정적 Reducer·Output Guardrail 연결을 확인하세요.
+
+```bash
+uv run pytest \
+  tests/unit/test_orchestration_contracts.py \
+  tests/unit/test_plan_validator.py \
+  tests/unit/test_root_context.py \
+  tests/unit/test_root_orchestrator.py \
+  tests/unit/test_orchestration_execution_contracts.py \
+  tests/unit/test_result_reducer.py \
+  tests/contract/test_root_orchestration_model_contract.py \
+  tests/integration/test_orchestration_execution.py \
+  tests/architecture/test_dependency_rules.py
 ```
 
 ### Input Guardrail만 검증

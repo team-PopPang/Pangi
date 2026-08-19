@@ -67,6 +67,10 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Reducer는 Dependency 순서, Evidence URI Dedup, Warning/실패 Source와 Citation을 결정적으로 구성한다.
 - 모순 해석이 필요하면 최초 Decision에 포함된 Synthesis Task만 실행한다.
 - Direct Answer와 Reducer 결과는 같은 `OutputCandidate`로 변환해 WBS-06.4.1 Output Guardrail을 통과시킨다. Channel Port에는 원문 Candidate가 아니라 허용된 `SafeOutput`만 전달한다.
+- Reducer는 입력 Result Tuple 순서를 신뢰하지 않고 Task ID로 최초 Plan 순서를 복원한다. 중복·알 수 없는 Result, Required Result 누락, 실패 Run과 Mode·Outcome 불일치는 합성 전에 안정적인 Error Code로 거부한다.
+- Evidence URI는 CRLF와 Unicode NFC를 정규화하고 Padding을 제거한 값을 기준으로 첫 항목만 유지한다. URI가 없는 Evidence는 독립 Source로 보존하며 Evidence Excerpt와 Fact를 새로운 사실처럼 본문에 확장하지 않는다.
+- Deterministic 합성은 성공·Partial Summary를 Plan 순서로 배치하고 Task Source가 붙은 Warning과 Source Citation을 구성한다. Synthesis 합성은 최초 DAG의 Terminal Synthesis Result만 본문으로 사용하되 전체 Plan의 Evidence와 Warning은 보존한다.
+- `OrchestrationOutputComposer`는 Reducer가 만든 원문 Candidate를 내부에서만 다루고 기존 Output Guardrail의 `SafeOutput`만 반환한다. Guardrail 차단과 예상하지 못한 실패의 오류 표현에는 Candidate 원문을 포함하지 않는다.
 
 ## 구현 체크리스트
 
@@ -76,7 +80,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Mode별 XOR, DAG, Registry, Task/Timeout/Composition Validator를 구현한다.
 - [x] Direct Result 경로와 Delegate 실행 Plan을 구현한다.
 - [x] Dependency 기반 Execution Engine과 Required/Optional 실패 처리를 구현한다.
-- [ ] Deterministic Reducer와 Synthesis Task 연결을 구현한다.
+- [x] Deterministic Reducer와 Synthesis Task 연결을 구현한다.
 - [ ] Decision, Logical Call, Provider Request와 Validation 실패 Event를 기록한다.
 - [ ] API의 Run 생성 경로를 Orchestrator Use Case에 연결한다.
 
@@ -87,7 +91,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [ ] Decision 실패 뒤 Tool/Subagent 호출이 0건인지 확인한다.
 - [x] Provider Transport Retry가 Logical Call을 늘리지 않는지 확인한다.
 - [x] Optional 실패와 Required 실패의 Run 상태/출력이 다른지 확인한다.
-- [ ] 동일 AgentResult 입력이 동일 Reducer 출력을 만드는지 Property Test를 실행한다.
+- [x] 동일 AgentResult 입력이 동일 Reducer 출력을 만드는지 Property Test를 실행한다.
 - [ ] Root 재계획과 Delegation Depth 증가를 불변식 테스트로 차단한다.
 
 ## 완료 조건
@@ -126,6 +130,16 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Direct는 Subagent Executor 호출 없이 `composing`으로 이동한다. Required 실패는 대기 Step을 취소하고 Run을 `failed`로 종료하며 Optional 실패만 있으면 Warning과 함께 `composing`으로 이동한다.
 - 모든 Step·Run 쓰기는 현재 Worker와 유효 Lease를 확인한다. 완료 Result는 복구 뒤 재사용하고 중단된 Idempotent Step만 다음 Attempt를 만들며 취소된 Run의 대기·실행 Step도 같은 Transaction에서 종료한다.
 - 실제 Subagent·MCP Tool Loop, Reducer·Output Guardrail, Skill 실행과 Root→Queue Runtime 최종 조립은 WBS-08.4~08.5와 WBS-09~11에 남긴다.
+
+## 4차 구현 결과
+
+- `DeterministicResultReducer`가 `PreparedExecutionPlan`과 `ExecutionOutcome`의 정합성을 먼저 검사하고 입력 Result Tuple과 관계없이 최초 Plan 순서로 본문, Warning과 Evidence를 구성한다. 실패 Run, Mode 불일치, 중복·알 수 없는 Result와 Required Result 누락은 합성 전에 원문 없는 안정적인 오류로 거부한다.
+- Deterministic 합성은 성공·Partial Result Summary만 Plan 순서로 배치한다. Partial과 Optional 실패는 Task ID와 안정적인 Error Code가 붙은 Warning으로 남기며 새로운 Fact를 만들거나 Evidence Excerpt를 본문으로 확장하지 않는다.
+- Evidence는 Plan과 Result 내부 순서를 유지한다. CRLF·NFC와 Padding을 정규화한 URI가 중복되면 첫 Evidence만 남기고 URI가 없는 Evidence는 독립 Source로 보존한다.
+- `synthesis_subagent`는 검증된 DAG의 Terminal Synthesis Result 하나만 최종 본문으로 사용한다. 선행 Summary를 다시 이어 붙이거나 Reducer에서 Model·Subagent를 추가 호출하지 않으며 전체 Plan의 Evidence와 Warning은 보존한다.
+- `OrchestrationOutputComposer`가 Direct Answer와 Delegate Reducer 결과를 같은 `OutputCandidate`로 만든 뒤 기존 WBS-06.4.1 Output Guardrail에 전달한다. 호출자에게는 허용된 `SafeOutput`만 반환하고 차단·실패 오류에는 Candidate 원문을 넣지 않는다.
+- 최대 Task 수 안에서 Result 순열을 전부 바꾸는 Test로 Markdown, Evidence 순서와 `SafeOutput` Content Fingerprint의 결정성을 고정했다. 영속 Execution Engine과 Synthesis를 함께 실행하는 Test는 계획된 세 Task만 호출되고 합성 시 추가 Executor 호출이 없음을 확인한다.
+- `composing → completed|failed` 영속화, Output Event, Run 생성 API와 Queue Handler·Provider Runtime 최종 조립은 WBS-08.5에 남긴다.
 
 ## 미결정 사항
 
