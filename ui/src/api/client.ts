@@ -20,6 +20,12 @@ export type RunEventListEnvelope =
 export type RunEvent = components["schemas"]["RunEventResponse"];
 export type RunQueueMetrics =
   operations["getRunQueueMetrics"]["responses"][200]["content"]["application/json"];
+export type ModelPolicyListQuery = NonNullable<
+  operations["listModelPolicies"]["parameters"]["query"]
+>;
+export type ModelPolicyListEnvelope =
+  operations["listModelPolicies"]["responses"][200]["content"]["application/json"];
+export type ModelPolicyListItem = components["schemas"]["ModelPolicyListItemResponse"];
 
 type ErrorEnvelope = components["schemas"]["ErrorEnvelope"];
 
@@ -122,6 +128,20 @@ function runListPath(query: RunListQuery): string {
   }
   const serialized = search.toString();
   return serialized === "" ? "/api/v1/runs" : `/api/v1/runs?${serialized}`;
+}
+
+function modelPolicyListPath(query: ModelPolicyListQuery): string {
+  const search = new URLSearchParams();
+  if (query.cursor !== undefined && query.cursor !== null) {
+    search.set("cursor", query.cursor);
+  }
+  if (query.limit !== undefined) {
+    search.set("limit", String(query.limit));
+  }
+  const serialized = search.toString();
+  return serialized === ""
+    ? "/api/v1/model-policies"
+    : `/api/v1/model-policies?${serialized}`;
 }
 
 async function request<T>(path: string, options: RequestOptions): Promise<T> {
@@ -231,6 +251,10 @@ export const adminApi = {
 
   getRunQueueMetrics(): Promise<RunQueueMetrics> {
     return request("/api/v1/runs/metrics", { method: "GET" });
+  },
+
+  listModelPolicies(query: ModelPolicyListQuery = {}): Promise<ModelPolicyListEnvelope> {
+    return request(modelPolicyListPath(query), { method: "GET" });
   },
 };
 

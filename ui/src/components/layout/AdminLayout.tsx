@@ -37,12 +37,17 @@ const roleLabels: Record<SessionInfo["principal"]["role"], string> = {
 
 function NavigationItems({
   items,
+  role,
   onNavigate,
 }: {
   items: readonly NavigationItem[];
+  role: SessionInfo["principal"]["role"];
   onNavigate?: () => void;
 }) {
   return items.map((item) => {
+    if (item.roles !== undefined && !item.roles.includes(role)) {
+      return null;
+    }
     if (!item.available) {
       return (
         <span className="nav-item disabled" aria-disabled="true" key={item.path}>
@@ -82,13 +87,21 @@ function SidebarContent({
       </Link>
       <div className="sidebar-navigation">
         <nav aria-label="관리자 메뉴">
-          <NavigationItems items={primaryNavigation} onNavigate={onNavigate} />
+          <NavigationItems
+            items={primaryNavigation}
+            role={session.principal.role}
+            onNavigate={onNavigate}
+          />
         </nav>
         {isAdmin ? (
           <section className="nav-group" aria-labelledby={adminNavigationTitle}>
             <h2 id={adminNavigationTitle}>관리자 전용</h2>
             <nav aria-label="관리자 전용 메뉴">
-              <NavigationItems items={adminNavigation} onNavigate={onNavigate} />
+              <NavigationItems
+                items={adminNavigation}
+                role={session.principal.role}
+                onNavigate={onNavigate}
+              />
             </nav>
           </section>
         ) : null}

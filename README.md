@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지 완료했고 WBS-06과 WBS-07을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화와 관리자용 Policy 조회·활성화 Gate API까지 추가했지만 Model Runtime과 WBS-15 Eval 실행기에는 아직 연결하지 않았어요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07을 완료했고 WBS-06을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard까지 추가했지만 Model Runtime과 WBS-15 Eval 실행기에는 아직 연결하지 않았어요.
 
 ## 현재 구현 상태
 
@@ -14,7 +14,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 04. Web/API Shell과 인증 | 완료 | FastAPI Runtime, React Admin Shell, Bootstrap Admin, Local Login·Session·CSRF·역할 검사, OpenAPI Type 동기화 |
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
-| 07. Model Routing과 Egress Policy | 진행 중 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation 영속화·계측, 관리자 조회·영향 분석과 실패 폐쇄 Eval 활성화 Gate API |
+| 07. Model Routing과 Egress Policy | 완료 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation 영속화·계측, 관리자 조회·영향 분석·실패 폐쇄 Eval 활성화 Gate API와 읽기 전용 Dashboard |
 | 08~20 | 예정 | Orchestrator, MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
@@ -182,15 +182,19 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 - Policy 평가와 활성화 API는 `(policy_id, version)`을 경로에 명시하고 Same-origin·CSRF·관리자 권한을 검사해요. 활성화는 `Idempotency-Key`, Candidate·Impact Fingerprint와 Eval Run ID가 모두 일치해야 해요.
 - 승인된 활성화는 기존 Active 폐기, Candidate 활성화, Eval Run 연결, Audit와 Idempotency 결과를 하나의 Transaction으로 저장해요. 중간에 실패하면 모두 Rollback해요.
 - 실제 Eval Suite 선택·실행은 WBS-15 범위예요. 현재 Runtime은 실패 폐쇄 Gateway를 사용하므로 WBS-15가 연결되기 전에는 Eval 요청과 활성화를 허용하지 않아요.
+- 관리자 전용 `/model-policies` 화면에서 Policy Version 상태, Egress 허용 범위와 물리 Model Profile을 확인할 수 있어요.
+- 최근 7일 허용·거부 횟수, Purpose, 거부 사유와 Draft 변경 영향을 읽기 전용으로 확인할 수 있어요.
+- Consumer와 필수 Eval Suite가 아직 연결되지 않은 상태를 실제 빈 목록과 구분해 안내해요.
+- Model Policy 목록은 Cursor로 다음 페이지를 이어서 조회해요. 로딩, 빈 목록, 오류, 권한 없음과 모바일 화면 상태를 각각 처리해요.
 
-실제 Credential·Model 설정과 Runtime 조립, Model Policy Dashboard, 사용처 Registry와 WBS-15 Eval 실행기는 후속 단계에서 구현해요.
+실제 Credential·Model 설정과 Runtime 조립, 사용처 Registry와 WBS-15 Eval 실행기는 후속 단계에서 구현해요.
 
 ## 아직 구현되지 않은 기능
 
 - Root Orchestrator와 실제 실행 Engine·Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
-- Model Provider Credential·Runtime 조립, Model Policy Dashboard와 WBS-15 Eval 실행기 연결
+- Model Provider Credential·Runtime 조립, 사용처 Registry와 WBS-15 Eval 실행기 연결
 - Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
 - Slack 요청 수신과 응답 전달
@@ -274,7 +278,7 @@ uv run python scripts/export_openapi.py --check
 
 ### Model Routing과 Egress Policy만 검증
 
-WBS-07.1~07.4.1에서 구현한 Egress Policy, OpenAI·Bedrock 요청 변환, 구조화 출력 검증, Transport Retry, Policy·Invocation 영속화와 관리자 조회·활성화 Gate API를 확인하세요.
+WBS-07.1~07.4.2에서 구현한 Egress Policy, OpenAI·Bedrock 요청 변환, 구조화 출력 검증, Transport Retry, Policy·Invocation 영속화, 관리자 조회·활성화 Gate API와 Dashboard를 확인하세요.
 
 ```bash
 uv run pytest \
@@ -289,6 +293,9 @@ uv run pytest \
   tests/integration/test_sqlite_migrations.py \
   tests/architecture/test_dependency_rules.py \
   tests/smoke/test_cli.py
+
+npm --prefix ui run check
+npm --prefix ui run build
 ```
 
 ### Run 기능만 검증

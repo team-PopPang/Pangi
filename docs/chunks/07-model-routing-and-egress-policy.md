@@ -37,7 +37,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Model Profile, Request Policy와 Egress Policy
 - Data Classification, Redaction과 Candidate 선택
 - 구조화 출력과 Provider Retry 계측
-- Model Policy 관리/영향 분석 API 기반
+- Model Policy 관리/영향 분석 API와 읽기 전용 Dashboard
 
 ## 범위 밖
 
@@ -70,7 +70,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] OpenAI와 Bedrock Adapter의 선택 설치 Skeleton을 만든다.
 - [x] Logical Call, Provider Request, Token, Duration과 정책 결정 Event를 기록한다.
 - [x] Policy 영향 분석, Eval 실행 연동과 활성화 API를 구현한다.
-- [ ] Dashboard에서 Policy, 사용처와 최근 허용/거부 Summary를 조회할 기반을 만든다.
+- [x] Dashboard에서 Policy, 사용처와 최근 허용/거부 Summary를 조회할 기반을 만든다.
 
 ## 검증 체크리스트
 
@@ -135,6 +135,18 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 동일한 `Idempotency-Key`와 요청 Fingerprint는 기존 활성화 결과를 재생하고 다른 요청은 충돌로 거부한다. Audit 저장 실패는 Policy 상태와 Idempotency Record까지 모두 Rollback한다.
 - 관리자 권한, Same-origin·CSRF, Cursor·OpenAPI·Error Envelope와 원문 Prompt·출력·Credential 비노출을 Unit·Integration·Contract Test로 고정했다.
 - Model Policy Dashboard가 남아 있으므로 WBS-07 상태는 `진행 중`으로 유지한다.
+
+## 5차 구현 결과
+
+- 인증된 Admin Shell에 `/model-policies` Route를 추가하고 관리자에게만 Model Policy Navigation을 노출한다. 일반 사용자가 주소를 직접 입력하면 API를 호출하지 않고 권한 안내 화면을 표시한다.
+- 생성된 OpenAPI Type을 사용하는 Model Policy 목록 Client를 추가했다. `cursor`와 `limit`을 Query로 전달하고 다음 Page를 기존 목록에 중복 없이 이어 붙인다.
+- Policy Version의 `draft`, `active`, `retired` 상태와 Egress Provider·Model·Region·Purpose·Data Class·Source Kind를 읽기 전용으로 표시한다.
+- 물리 Model Profile의 우선순위, Retention, Raw Content와 지원 범위를 함께 표시한다.
+- 최근 7일 허용·거부 횟수, Purpose, 거부 사유와 Draft 변경 영향 Fingerprint를 원문 Prompt·입력·출력 없이 표시한다.
+- Consumer Registry와 Eval 실행기가 아직 연결되지 않은 상태를 실제 사용처 없음으로 표현하지 않는다. Dashboard와 Candidate 영향 영역에서 후속 WBS 연동 전 상태를 명시한다.
+- 최초 로딩, 빈 목록, 조회 실패·재시도, 인증 만료, 권한 없음과 다음 Page 로딩을 구분한다. 상태를 Text로도 표시하고 모바일 Drawer와 키보드 Focus 흐름을 유지한다.
+- TypeScript 검사와 Vite Build를 통과했다. 실제 정책 Fixture로 Desktop, 390px Mobile, Drawer, 빈 목록, Cursor 추가 조회와 일반 사용자 직접 접근을 Browser에서 확인했다.
+- WBS-15의 Eval 실행과 WBS-08 이후 Consumer Registry는 각 WBS 범위로 유지한다. WBS-07이 소유한 Model Routing·Egress Policy 계약, 영속화·관리 API와 Dashboard가 완성돼 상태를 `완료`로 변경한다.
 
 ## 완료 조건
 

@@ -1,14 +1,17 @@
+import type { SessionInfo } from "../api/client";
+
 export type NavigationItem = Readonly<{
   label: string;
   path: string;
   available: boolean;
+  roles?: readonly SessionInfo["principal"]["role"][];
 }>;
 
 export const primaryNavigation = [
   { label: "개요", path: "/", available: true },
   { label: "연동", path: "/connections", available: false },
   { label: "도구", path: "/tools", available: false },
-  { label: "모델 정책", path: "/model-policies", available: false },
+  { label: "모델 정책", path: "/model-policies", available: true, roles: ["admin"] },
   { label: "메모리", path: "/memory", available: false },
   { label: "스케줄", path: "/schedules", available: false },
   { label: "스킬", path: "/skills", available: false },
