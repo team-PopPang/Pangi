@@ -28,7 +28,8 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 1. **Model 호출 계약과 Egress Policy 결정 경계(WBS-07.1)**: Model 요청·응답·오류, Versioned Profile·Egress Policy, Data Class 합성, 후보 필터와 Redaction 선행 실행 경계를 구현한다.
 2. **선택 설치 Provider Adapter와 Retry 계약(WBS-07.2)**: OpenAI·Bedrock 선택 설치 Skeleton, 구조화 출력 검증과 Transport Retry 경계를 구현한다.
 3. **Model Policy·Invocation 영속화와 계측(WBS-07.3)**: 정책·호출 Migration, Logical Call·Provider Request·Token·Duration과 안전한 결정 Event를 구현한다.
-4. **Model Policy 관리와 영향 조회(WBS-07.4)**: 관리 API·Dashboard 기반, 안전한 Diff·Audit와 WBS-15 Eval 활성화 Gate 연동점을 구현한다.
+4. **Model Policy 조회·영향 Eval 연동·활성화 Gate API(WBS-07.4.1)**: Version 식별 관리 API, 안전한 Diff·Audit와 WBS-15 Eval 활성화 Gate 연동점을 구현한다.
+5. **Model Policy Dashboard(WBS-07.4.2)**: Policy·사용처 연동 상태와 최근 허용/거부 Summary를 조회하는 관리자 화면을 구현한다.
 
 ## 범위
 
@@ -68,7 +69,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Provider/Model/Region/Purpose/Retention 후보 필터를 구현한다.
 - [x] OpenAI와 Bedrock Adapter의 선택 설치 Skeleton을 만든다.
 - [x] Logical Call, Provider Request, Token, Duration과 정책 결정 Event를 기록한다.
-- [ ] Policy 영향 분석, Eval 실행과 활성화 API를 구현한다.
+- [x] Policy 영향 분석, Eval 실행 연동과 활성화 API를 구현한다.
 - [ ] Dashboard에서 Policy, 사용처와 최근 허용/거부 Summary를 조회할 기반을 만든다.
 
 ## 검증 체크리스트
@@ -78,7 +79,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] 허용 후보가 없을 때 Provider 호출이 0건인지 확인한다.
 - [x] Network Retry와 Logical Call 수가 분리되는지 Contract Test를 실행한다.
 - [x] Provider가 잘못된 구조화 출력을 반환할 때 안전하게 실패하는지 확인한다.
-- [ ] Policy 변경이 영향 Eval 없이 활성화되지 않는지 확인한다.
+- [x] Policy 변경이 영향 Eval 없이 활성화되지 않는지 확인한다.
 
 ## 1차 구현 결과
 
@@ -120,6 +121,20 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - 영속화 실패 때문에 Provider를 다시 호출하지 않는다. Provider 응답 뒤 완료 기록이 실패하면 결과를 반환하지 않고 안전하게 실패한다.
 - Migration·Repository·허용·차단·Retry·Rollback·중복 Logical Call과 Secret 비노출을 Unit·Contract·Integration Test로 검증했다.
 - Model Policy 관리 API·Dashboard, 활성화·폐기 흐름과 WBS-15 Eval Gate가 남아 있으므로 WBS-07 상태는 `진행 중`으로 유지한다.
+
+## 4차 구현 결과
+
+- WBS-07.4를 Backend 관리 경계인 WBS-07.4.1과 Dashboard인 WBS-07.4.2로 분리했다. SQLite 활성화 Transaction과 첫 실제 관리 화면의 Routing·상태 처리를 독립적으로 검증하기 위한 조정이며 WBS-07 전체 범위는 바꾸지 않았다.
+- SQLite Migration 6은 모든 신규 Model Invocation에 `requested_profile` 기록을 요구한다. 기존 Row는 연결된 Policy Version으로 안전하게 Backfill하고, Profile·기간 기준 최근 허용/거부 집계 Index를 추가했다.
+- `GET /api/v1/model-policies`는 Policy Version, 상태, 안전한 Egress/Profile Summary, 최근 7일 허용·거부·목적·거부 이유와 Candidate 영향 정보를 Keyset Cursor로 반환한다.
+- Policy Version은 `(policy_id, version)` 복합 식별자다. 평가와 활성화 API를 `/api/v1/model-policies/{policy_id}/versions/{version}/evaluate|activate`로 명확하게 분리했다.
+- `model-policy-impact-v1`은 Active Baseline과 Draft Candidate의 Egress Policy·Profile Reference를 비교한다. 최초 활성화는 Baseline을 억지로 만들지 않고 모든 Candidate Key가 추가된 영향으로 표현한다.
+- Prompt·Skill·Subagent Registry가 아직 없으므로 사용처와 필수 Eval Suite를 빈 결과로 확정하지 않는다. API는 `consumer_resolution=unavailable`을 반환하고 실제 선택·실행·Snapshot 영속화는 WBS-15가 소유한다.
+- `ModelPolicyEvaluationGateway`는 Eval 요청과 승인 확인만 정의한다. 현재 Runtime은 실패 폐쇄 Adapter를 조립하므로 WBS-15가 연결되기 전에는 Eval 요청과 활성화를 `model_policy_eval_unavailable`로 거부한다.
+- 활성화 요청은 Candidate Fingerprint, Impact Fingerprint와 Eval Run ID를 다시 확인한다. 승인된 경우에만 기존 Active 폐기, Candidate 활성화, Eval Run 연결, `model_policy.version_activated` Audit Event와 Idempotency 결과를 하나의 Transaction으로 저장한다.
+- 동일한 `Idempotency-Key`와 요청 Fingerprint는 기존 활성화 결과를 재생하고 다른 요청은 충돌로 거부한다. Audit 저장 실패는 Policy 상태와 Idempotency Record까지 모두 Rollback한다.
+- 관리자 권한, Same-origin·CSRF, Cursor·OpenAPI·Error Envelope와 원문 Prompt·출력·Credential 비노출을 Unit·Integration·Contract Test로 고정했다.
+- Model Policy Dashboard가 남아 있으므로 WBS-07 상태는 `진행 중`으로 유지한다.
 
 ## 완료 조건
 

@@ -20,10 +20,12 @@ from pangi.adapters.outbound.persistence.sqlite.model_routing import (
     SqliteModelPolicyRepository,
 )
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
+from pangi.application.contracts.auth import AuthenticatedPrincipal
 from pangi.application.contracts.model_persistence import (
     ModelInvocationContext,
     ModelPolicySnapshot,
 )
+from pangi.application.contracts.model_policy_management import ModelPolicyStoreQuery
 from pangi.application.contracts.model_routing import (
     GuardedModelRequest,
     ModelCallRequest,
@@ -36,6 +38,13 @@ from pangi.application.contracts.model_routing import (
     StructuredOutputSchema,
 )
 from pangi.application.ports.model_persistence import ModelInvocationPersistenceError
+from pangi.application.ports.model_policy_management import (
+    ModelPolicyIdempotencyConflictError,
+    ModelPolicyPersistenceError,
+)
+from pangi.application.services.model_policy_management import (
+    ModelPolicyManagementService,
+)
 from pangi.application.services.model_routing import (
     GuardedModelExecutionService,
     ModelPolicyService,
@@ -47,8 +56,10 @@ from pangi.application.services.redaction import (
 from pangi.application.services.telemetry_redaction import (
     core_telemetry_redaction_service,
 )
+from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.model_routing import (
     DataClass,
+    ModelPolicyState,
     ModelPurpose,
     ModelRetention,
 )
@@ -213,16 +224,14 @@ def test_policy_drafts_active_reads_and_active_constraints(tmp_path: Path) -> No
             async with database.create() as unit_of_work:
                 with pytest.raises(aiosqlite.IntegrityError):
                     await unit_of_work.connection.execute(
-                        "UPDATE model_policies SET state = 'active' "
-                        "WHERE id = ? AND version = ?",
+                        "UPDATE model_policies SET state = 'active' WHERE id = ? AND version = ?",
                         (second.policy.policy_id, second.policy.policy_version),
                     )
 
             async with database.create() as unit_of_work:
                 with pytest.raises(aiosqlite.IntegrityError, match="immutable"):
                     await unit_of_work.connection.execute(
-                        "UPDATE model_policies SET rules_json = ? "
-                        "WHERE id = ? AND version = ?",
+                        "UPDATE model_policies SET rules_json = ? WHERE id = ? AND version = ?",
                         (
                             second.rules_json,
                             first.policy.policy_id,
@@ -246,8 +255,7 @@ def test_allowed_denied_and_retry_measurements_are_secret_safe(tmp_path: Path) -
             await policies.save_draft(snapshot, at=NOW)
             async with database.create() as unit_of_work:
                 await unit_of_work.connection.execute(
-                    "UPDATE model_policies SET state = 'active' "
-                    "WHERE id = ? AND version = ?",
+                    "UPDATE model_policies SET state = 'active' WHERE id = ? AND version = ?",
                     (snapshot.policy.policy_id, snapshot.policy.policy_version),
                 )
                 await unit_of_work.commit()
@@ -311,8 +319,7 @@ def test_allowed_denied_and_retry_measurements_are_secret_safe(tmp_path: Path) -
                 )
                 events = await fetch_all(
                     unit_of_work.connection,
-                    "SELECT type, visibility, attributes_json FROM run_events "
-                    "ORDER BY event_index",
+                    "SELECT type, visibility, attributes_json FROM run_events ORDER BY event_index",
                 )
                 await unit_of_work.commit()
 
@@ -341,9 +348,7 @@ def test_allowed_denied_and_retry_measurements_are_secret_safe(tmp_path: Path) -
             assert {str(row["visibility"]) for row in events} == {"internal"}
 
             persisted = "\n".join(
-                str(value)
-                for row in (*invocations, *events)
-                for value in tuple(row)
+                str(value) for row in (*invocations, *events) for value in tuple(row)
             )
             assert prompt_secret not in persisted
             assert provider_output not in persisted
@@ -374,8 +379,7 @@ def test_start_event_failure_rolls_back_and_prevents_provider_call(tmp_path: Pat
             await policies.save_draft(snapshot, at=NOW)
             async with database.create() as unit_of_work:
                 await unit_of_work.connection.execute(
-                    "UPDATE model_policies SET state = 'active' "
-                    "WHERE id = ? AND version = ?",
+                    "UPDATE model_policies SET state = 'active' WHERE id = ? AND version = ?",
                     (snapshot.policy.policy_id, snapshot.policy.policy_version),
                 )
                 await unit_of_work.commit()
@@ -415,6 +419,289 @@ def test_start_event_failure_rolls_back_and_prevents_provider_call(tmp_path: Pat
                 await unit_of_work.commit()
             assert invocation is None
             assert event is None
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_policy_management_summary_activation_audit_and_replay(tmp_path: Path) -> None:
+    class ApprovedGateway:
+        def __init__(self) -> None:
+            self.approvals: list[tuple[str, str]] = []
+
+        async def request_evaluation(self, *, actor_id, impact, idempotency_key):
+            del actor_id, idempotency_key
+            from pangi.application.contracts.model_policy_management import (
+                ModelPolicyEvaluation,
+            )
+
+            return ModelPolicyEvaluation("eval-run-identifier-0001", "passed", impact)
+
+        async def require_approved(self, *, eval_run_id, impact) -> None:
+            self.approvals.append((eval_run_id, impact.fingerprint))
+
+    async def scenario() -> None:
+        database = _database(tmp_path)
+        await database.start()
+        try:
+            await _insert_run(database)
+            async with database.create() as unit_of_work:
+                timestamp = NOW.isoformat()
+                await unit_of_work.connection.execute(
+                    "INSERT INTO users "
+                    "(id, display_name, role, status, created_at, updated_at) "
+                    "VALUES (?, ?, 'admin', 'active', ?, ?)",
+                    ("admin-user-000001", "Policy Admin", timestamp, timestamp),
+                )
+                await unit_of_work.commit()
+
+            repository = SqliteModelPolicyRepository(database)
+            baseline = ModelPolicySnapshot(_policy(version="policy-v1"), (_profile(),))
+            candidate = ModelPolicySnapshot(_policy(version="policy-v2"), (_profile(),))
+            await repository.save_draft(baseline, at=NOW)
+            await repository.save_draft(candidate, at=NOW + timedelta(minutes=1))
+            async with database.create() as unit_of_work:
+                await unit_of_work.connection.execute(
+                    "UPDATE model_policies SET state = 'active' WHERE id = ? AND version = ?",
+                    (baseline.policy.policy_id, baseline.policy.policy_version),
+                )
+                await unit_of_work.connection.execute(
+                    "INSERT INTO model_invocations "
+                    "(id, run_id, logical_call_fingerprint, requested_profile, role, "
+                    "provider, model, region, policy_id, policy_version, policy_fingerprint, "
+                    "profile_id, profile_fingerprint, data_classes_json, source_kinds_json, "
+                    "output_fingerprint, provider_requests, duration_ms, state, created_at, "
+                    "finished_at) VALUES (?, ?, ?, ?, 'orchestration', ?, ?, ?, ?, ?, ?, ?, "
+                    "?, '[\"internal\"]', '[\"channel\"]', ?, 1, 25, 'completed', ?, ?)",
+                    (
+                        "model-invocation-allow-001",
+                        RUN_ID,
+                        "a" * 64,
+                        "root-default",
+                        "openai",
+                        "gpt-5.6",
+                        "us-east-1",
+                        baseline.policy.policy_id,
+                        baseline.policy.policy_version,
+                        baseline.policy.fingerprint,
+                        _profile().profile_id,
+                        _profile().fingerprint,
+                        "b" * 64,
+                        NOW.isoformat(),
+                        NOW.isoformat(),
+                    ),
+                )
+                await unit_of_work.connection.execute(
+                    "INSERT INTO model_invocations "
+                    "(id, run_id, logical_call_fingerprint, requested_profile, role, "
+                    "policy_id, policy_version, policy_fingerprint, data_classes_json, "
+                    "source_kinds_json, state, error_code, created_at, finished_at) "
+                    "VALUES (?, ?, ?, ?, 'orchestration', ?, ?, ?, '[\"internal\"]', "
+                    "'[\"channel\"]', 'denied', 'model_policy_denied', ?, ?)",
+                    (
+                        "model-invocation-deny-0001",
+                        RUN_ID,
+                        "c" * 64,
+                        "root-default",
+                        baseline.policy.policy_id,
+                        baseline.policy.policy_version,
+                        baseline.policy.fingerprint,
+                        NOW.isoformat(),
+                        NOW.isoformat(),
+                    ),
+                )
+                await unit_of_work.commit()
+
+            items = await repository.list_management_items(
+                ModelPolicyStoreQuery(
+                    limit=10,
+                    after=None,
+                    summary_started_at=NOW - timedelta(hours=1),
+                    summary_ended_at=NOW + timedelta(hours=1),
+                )
+            )
+            draft_item = next(item for item in items if item.policy.state is ModelPolicyState.DRAFT)
+            assert draft_item.invocation_summary.allowed_count == 1
+            assert draft_item.invocation_summary.denied_count == 1
+            assert draft_item.impact is not None
+            assert draft_item.impact.consumer_resolution == "unavailable"
+
+            gateway = ApprovedGateway()
+            service = ModelPolicyManagementService(
+                repository,
+                gateway,
+                clock=lambda: NOW + timedelta(hours=2),
+            )
+            actor = AuthenticatedPrincipal(
+                "admin-user-000001",
+                "Policy Admin",
+                UserRole.ADMIN,
+                UserStatus.ACTIVE,
+            )
+            evaluation = await service.evaluate_policy(
+                actor=actor,
+                policy_id=candidate.policy.policy_id,
+                version=candidate.policy.policy_version,
+                candidate_fingerprint=candidate.fingerprint,
+                idempotency_key="evaluate-policy-v2",
+            )
+            activated = await service.activate_policy(
+                actor=actor,
+                policy_id=candidate.policy.policy_id,
+                version=candidate.policy.policy_version,
+                candidate_fingerprint=candidate.fingerprint,
+                impact_fingerprint=evaluation.impact.fingerprint,
+                eval_run_id=evaluation.eval_run_id,
+                idempotency_key="activate-policy-v2",
+            )
+            replayed = await service.activate_policy(
+                actor=actor,
+                policy_id=candidate.policy.policy_id,
+                version=candidate.policy.policy_version,
+                candidate_fingerprint=candidate.fingerprint,
+                impact_fingerprint=evaluation.impact.fingerprint,
+                eval_run_id=evaluation.eval_run_id,
+                idempotency_key="activate-policy-v2",
+            )
+            assert activated.policy.state is ModelPolicyState.ACTIVE
+            assert not activated.replayed
+            assert replayed.replayed
+            assert gateway.approvals == [(evaluation.eval_run_id, evaluation.impact.fingerprint)]
+            with pytest.raises(ModelPolicyIdempotencyConflictError):
+                await service.activate_policy(
+                    actor=actor,
+                    policy_id=candidate.policy.policy_id,
+                    version=candidate.policy.policy_version,
+                    candidate_fingerprint=candidate.fingerprint,
+                    impact_fingerprint=evaluation.impact.fingerprint,
+                    eval_run_id="different-eval-run-0001",
+                    idempotency_key="activate-policy-v2",
+                )
+
+            async with database.create() as unit_of_work:
+                policies = await fetch_all(
+                    unit_of_work.connection,
+                    "SELECT version, state, eval_run_id FROM model_policies ORDER BY version",
+                )
+                audit = await fetch_all(
+                    unit_of_work.connection,
+                    "SELECT action, metadata_json FROM audit_events "
+                    "WHERE action = 'model_policy.version_activated'",
+                )
+                idempotency = await fetch_one(
+                    unit_of_work.connection,
+                    "SELECT state FROM api_idempotency_records WHERE route_key = ?",
+                    ("model_policy.activate",),
+                )
+                await unit_of_work.commit()
+            assert [(row["version"], row["state"]) for row in policies] == [
+                ("policy-v1", "retired"),
+                ("policy-v2", "active"),
+            ]
+            assert policies[1]["eval_run_id"] == evaluation.eval_run_id
+            assert len(audit) == 1
+            assert "rules_json" not in str(audit[0]["metadata_json"])
+            assert idempotency is not None and idempotency["state"] == "completed"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_policy_activation_rolls_back_when_audit_write_fails(tmp_path: Path) -> None:
+    class FailingAuditWriter:
+        async def insert(self, connection, draft):
+            del connection, draft
+            raise aiosqlite.OperationalError("forced Audit failure")
+
+    class ApprovedGateway:
+        async def request_evaluation(self, *, actor_id, impact, idempotency_key):
+            del actor_id, idempotency_key
+            from pangi.application.contracts.model_policy_management import (
+                ModelPolicyEvaluation,
+            )
+
+            return ModelPolicyEvaluation("eval-run-identifier-0001", "passed", impact)
+
+        async def require_approved(self, *, eval_run_id, impact) -> None:
+            del eval_run_id, impact
+
+    async def scenario() -> None:
+        database = _database(tmp_path)
+        await database.start()
+        try:
+            async with database.create() as unit_of_work:
+                timestamp = NOW.isoformat()
+                await unit_of_work.connection.execute(
+                    "INSERT INTO users "
+                    "(id, display_name, role, status, created_at, updated_at) "
+                    "VALUES (?, ?, 'admin', 'active', ?, ?)",
+                    ("admin-user-000001", "Policy Admin", timestamp, timestamp),
+                )
+                await unit_of_work.commit()
+            repository = SqliteModelPolicyRepository(database, FailingAuditWriter())
+            baseline = ModelPolicySnapshot(_policy(version="policy-v1"), (_profile(),))
+            candidate = ModelPolicySnapshot(_policy(version="policy-v2"), (_profile(),))
+            await repository.save_draft(baseline, at=NOW)
+            await repository.save_draft(candidate, at=NOW + timedelta(minutes=1))
+            async with database.create() as unit_of_work:
+                await unit_of_work.connection.execute(
+                    "UPDATE model_policies SET state = 'active' WHERE id = ? AND version = ?",
+                    (baseline.policy.policy_id, baseline.policy.policy_version),
+                )
+                await unit_of_work.commit()
+            service = ModelPolicyManagementService(
+                repository,
+                ApprovedGateway(),
+                clock=lambda: NOW + timedelta(hours=2),
+            )
+            actor = AuthenticatedPrincipal(
+                "admin-user-000001",
+                "Policy Admin",
+                UserRole.ADMIN,
+                UserStatus.ACTIVE,
+            )
+            evaluation = await service.evaluate_policy(
+                actor=actor,
+                policy_id=candidate.policy.policy_id,
+                version=candidate.policy.policy_version,
+                candidate_fingerprint=candidate.fingerprint,
+                idempotency_key="evaluate-policy-v2",
+            )
+            with pytest.raises(ModelPolicyPersistenceError):
+                await service.activate_policy(
+                    actor=actor,
+                    policy_id=candidate.policy.policy_id,
+                    version=candidate.policy.policy_version,
+                    candidate_fingerprint=candidate.fingerprint,
+                    impact_fingerprint=evaluation.impact.fingerprint,
+                    eval_run_id=evaluation.eval_run_id,
+                    idempotency_key="activate-policy-v2",
+                )
+            async with database.create() as unit_of_work:
+                policies = await fetch_all(
+                    unit_of_work.connection,
+                    "SELECT version, state, eval_run_id FROM model_policies ORDER BY version",
+                )
+                audit = await fetch_one(
+                    unit_of_work.connection,
+                    "SELECT id FROM audit_events WHERE action = ?",
+                    ("model_policy.version_activated",),
+                )
+                idempotency = await fetch_one(
+                    unit_of_work.connection,
+                    "SELECT state FROM api_idempotency_records WHERE route_key = ?",
+                    ("model_policy.activate",),
+                )
+                await unit_of_work.commit()
+            assert [(row["version"], row["state"]) for row in policies] == [
+                ("policy-v1", "active"),
+                ("policy-v2", "draft"),
+            ]
+            assert all(row["eval_run_id"] is None for row in policies)
+            assert audit is None
+            assert idempotency is None
         finally:
             await database.close()
 

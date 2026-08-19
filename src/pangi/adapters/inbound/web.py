@@ -15,7 +15,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +29,11 @@ from pangi.adapters.inbound.web_contracts import (
     BootstrapAdminResponse,
     ErrorEnvelope,
     LoginRequest,
+    ModelPolicyActivateRequest,
+    ModelPolicyActivationEnvelope,
+    ModelPolicyEvaluateRequest,
+    ModelPolicyEvaluationEnvelope,
+    ModelPolicyListEnvelope,
     RunCancellationEnvelope,
     RunEnvelope,
     RunEventListEnvelope,
@@ -39,6 +44,7 @@ from pangi.adapters.inbound.web_contracts import (
 )
 from pangi.application.contracts.audit import AuditListQuery
 from pangi.application.contracts.auth import AuthenticatedPrincipal, IssuedSession
+from pangi.application.contracts.model_policy_management import ModelPolicyListQuery
 from pangi.application.contracts.run_events import RunEventStreamPolicy
 from pangi.application.contracts.runs import RunListQuery
 from pangi.application.ports.audit import (
@@ -60,6 +66,14 @@ from pangi.application.ports.bootstrap_admin import (
     BootstrapAlreadyConfiguredError,
     BootstrapIdentityConflictError,
     InvalidBootstrapGrantError,
+)
+from pangi.application.ports.model_policy_management import (
+    InvalidModelPolicyCursorError,
+    ModelPolicyEvalUnavailableError,
+    ModelPolicyManagementError,
+    ModelPolicyManagementOperations,
+    ModelPolicyNotFoundError,
+    ModelPolicyPersistenceError,
 )
 from pangi.application.ports.readiness import ReadinessProbe
 from pangi.application.ports.run_events import (
@@ -105,9 +119,7 @@ _CONTENT_SECURITY_POLICY = "; ".join(
         "form-action 'self'",
     )
 )
-_RESERVED_ROUTE_ROOTS = frozenset(
-    {"api", "assets", "docs", "health", "openapi.json", "redoc"}
-)
+_RESERVED_ROUTE_ROOTS = frozenset({"api", "assets", "docs", "health", "openapi.json", "redoc"})
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 _SESSION_COOKIE = "pangi_session"
 _CSRF_COOKIE = "pangi_csrf"
@@ -259,6 +271,7 @@ def create_web_app(
     run_events: RunEventOperations,
     run_queue_metrics: RunQueueMetricOperations,
     static_root: Path,
+    model_policy_operations: ModelPolicyManagementOperations | None = None,
     event_stream_policy: RunEventStreamPolicy = _DEFAULT_EVENT_STREAM_POLICY,
     event_stream_sleeper: Sleeper = asyncio.sleep,
 ) -> FastAPI:
@@ -485,6 +498,46 @@ def create_web_app(
             status_code=409,
             code=error.code,
             message="The Run Queue operation conflicts with its current state",
+        )
+
+    @app.exception_handler(ModelPolicyManagementError)
+    async def model_policy_management_error(
+        request: Request,
+        error: ModelPolicyManagementError,
+    ) -> JSONResponse:
+        if isinstance(error, InvalidModelPolicyCursorError):
+            return error_response(
+                request,
+                status_code=400,
+                code=error.code,
+                message="The Model Policy cursor is invalid",
+            )
+        if isinstance(error, ModelPolicyNotFoundError):
+            return error_response(
+                request,
+                status_code=404,
+                code=error.code,
+                message="The Model Policy version was not found",
+            )
+        if isinstance(error, ModelPolicyEvalUnavailableError):
+            return error_response(
+                request,
+                status_code=503,
+                code=error.code,
+                message="Model Policy Eval is unavailable",
+            )
+        if isinstance(error, ModelPolicyPersistenceError):
+            return error_response(
+                request,
+                status_code=503,
+                code=error.code,
+                message="Model Policy management data is unavailable",
+            )
+        return error_response(
+            request,
+            status_code=409,
+            code=error.code,
+            message="The Model Policy operation conflicts with its current state",
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -790,6 +843,134 @@ def create_web_app(
         page = await audit_operations.list_events(actor=principal, query=query)
         return AuditEventListEnvelope.from_contract(page)
 
+    def model_policy_service() -> ModelPolicyManagementOperations:
+        if model_policy_operations is None:
+            raise ModelPolicyPersistenceError("Model Policy management is not composed")
+        return model_policy_operations
+
+    @app.get(
+        "/api/v1/model-policies",
+        operation_id="listModelPolicies",
+        response_model=ModelPolicyListEnvelope,
+        responses={
+            400: {"model": ErrorEnvelope, "description": "Invalid Policy cursor"},
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "Administrator required"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Policy store unavailable"},
+        },
+    )
+    async def list_model_policies(
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> ModelPolicyListEnvelope:
+        try:
+            query = ModelPolicyListQuery(limit=limit, cursor=cursor)
+        except ValueError as error:
+            raise InvalidModelPolicyCursorError(
+                "The Model Policy cursor or limit is invalid"
+            ) from error
+        page = await model_policy_service().list_policies(
+            actor=principal,
+            query=query,
+        )
+        return ModelPolicyListEnvelope.from_contract(page)
+
+    @app.post(
+        "/api/v1/model-policies/{policy_id}/versions/{version}/evaluate",
+        operation_id="evaluateModelPolicy",
+        response_model=ModelPolicyEvaluationEnvelope,
+        status_code=202,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "CSRF or role rejected"},
+            404: {"model": ErrorEnvelope, "description": "Policy version not found"},
+            409: {"model": ErrorEnvelope, "description": "Policy state conflict"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Eval runtime unavailable"},
+        },
+    )
+    async def evaluate_model_policy(
+        policy_id: str,
+        version: str,
+        payload: ModelPolicyEvaluateRequest,
+        request: Request,
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=255),
+        ],
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+    ) -> ModelPolicyEvaluationEnvelope | JSONResponse:
+        if not _origin_allowed(request, required=True):
+            raise CsrfRejectedError("The request origin is invalid")
+        _csrf_token(request)
+        try:
+            evaluation = await model_policy_service().evaluate_policy(
+                actor=principal,
+                policy_id=policy_id,
+                version=version,
+                candidate_fingerprint=payload.candidate_fingerprint,
+                idempotency_key=idempotency_key,
+            )
+        except ValueError:
+            return error_response(
+                request,
+                status_code=422,
+                code="invalid_request",
+                message="The request could not be validated",
+            )
+        return ModelPolicyEvaluationEnvelope.from_contract(evaluation)
+
+    @app.post(
+        "/api/v1/model-policies/{policy_id}/versions/{version}/activate",
+        operation_id="activateModelPolicy",
+        response_model=ModelPolicyActivationEnvelope,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "CSRF or role rejected"},
+            404: {"model": ErrorEnvelope, "description": "Policy version not found"},
+            409: {"model": ErrorEnvelope, "description": "Eval or Policy conflict"},
+            422: {"model": ErrorEnvelope, "description": "Request validation failed"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Policy or Eval unavailable"},
+        },
+    )
+    async def activate_model_policy(
+        policy_id: str,
+        version: str,
+        payload: ModelPolicyActivateRequest,
+        request: Request,
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=255),
+        ],
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+    ) -> ModelPolicyActivationEnvelope | JSONResponse:
+        if not _origin_allowed(request, required=True):
+            raise CsrfRejectedError("The request origin is invalid")
+        _csrf_token(request)
+        try:
+            activation = await model_policy_service().activate_policy(
+                actor=principal,
+                policy_id=policy_id,
+                version=version,
+                candidate_fingerprint=payload.candidate_fingerprint,
+                impact_fingerprint=payload.impact_fingerprint,
+                eval_run_id=payload.eval_run_id,
+                idempotency_key=idempotency_key,
+            )
+        except ValueError:
+            return error_response(
+                request,
+                status_code=422,
+                code="invalid_request",
+                message="The request could not be validated",
+            )
+        return ModelPolicyActivationEnvelope.from_contract(activation)
+
     @app.get(
         "/api/v1/runs",
         operation_id="listRuns",
@@ -942,9 +1123,7 @@ def create_web_app(
             next_keepalive = loop.time() + event_stream_policy.keepalive_interval_seconds
             while True:
                 try:
-                    session_view = await auth_sessions.current_session(
-                        session_token=session_token
-                    )
+                    session_view = await auth_sessions.current_session(session_token=session_token)
                     page = await run_events.list_events(
                         actor=session_view.principal,
                         run_id=run_id,
@@ -964,9 +1143,7 @@ def create_web_app(
                 await event_stream_sleeper(event_stream_policy.poll_interval_seconds)
                 if loop.time() >= next_keepalive:
                     yield ": keepalive\n\n"
-                    next_keepalive = (
-                        loop.time() + event_stream_policy.keepalive_interval_seconds
-                    )
+                    next_keepalive = loop.time() + event_stream_policy.keepalive_interval_seconds
 
         return StreamingResponse(
             event_stream(),

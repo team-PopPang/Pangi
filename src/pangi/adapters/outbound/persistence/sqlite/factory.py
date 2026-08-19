@@ -1,6 +1,9 @@
 """SQLite adapter composition helpers."""
 
 from pangi.adapters.outbound.login_attempts import InMemoryLoginAttemptLimiter
+from pangi.adapters.outbound.model_policy_eval import (
+    UnavailableModelPolicyEvaluationGateway,
+)
 from pangi.adapters.outbound.passwords import Argon2idPasswordHasher
 from pangi.adapters.outbound.persistence.sqlite.audit import (
     SqliteAuditStore,
@@ -28,6 +31,9 @@ from pangi.application.services.audit import (
 )
 from pangi.application.services.auth import AuthSessionService
 from pangi.application.services.bootstrap_admin import BootstrapAdminService
+from pangi.application.services.model_policy_management import (
+    ModelPolicyManagementService,
+)
 from pangi.application.services.run_events import (
     RunCancellationService,
     RunEventService,
@@ -148,9 +154,7 @@ def build_run_event_service(database: SqliteDatabase) -> RunEventService:
 def build_run_queue_metric_service(database: SqliteDatabase) -> RunQueueMetricService:
     """Build administrator-only Queue metric delivery."""
 
-    return RunQueueMetricService(
-        SqliteRunEventStore(database, _build_run_event_writer())
-    )
+    return RunQueueMetricService(SqliteRunEventStore(database, _build_run_event_writer()))
 
 
 def build_model_policy_repository(
@@ -158,7 +162,18 @@ def build_model_policy_repository(
 ) -> SqliteModelPolicyRepository:
     """Build versioned Model Policy persistence on the shared SQLite runtime."""
 
-    return SqliteModelPolicyRepository(database)
+    return SqliteModelPolicyRepository(database, _build_audit_writer())
+
+
+def build_model_policy_management_service(
+    database: SqliteDatabase,
+) -> ModelPolicyManagementService:
+    """Build fail-closed Model Policy administration until WBS-15 is composed."""
+
+    return ModelPolicyManagementService(
+        build_model_policy_repository(database),
+        UnavailableModelPolicyEvaluationGateway(),
+    )
 
 
 def build_model_invocation_recorder(

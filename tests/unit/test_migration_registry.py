@@ -13,7 +13,7 @@ from pangi.adapters.outbound.persistence.sqlite.registry import (
 def test_packaged_registry_loads_consecutive_checksumed_migrations() -> None:
     migrations = PackageMigrationRegistry().load()
 
-    assert [migration.descriptor.version for migration in migrations] == [1, 2, 3, 4, 5]
+    assert [migration.descriptor.version for migration in migrations] == [1, 2, 3, 4, 5, 6]
     assert migrations[0].descriptor.name == "schema_migrations"
     assert len(migrations[0].descriptor.checksum) == 64
     assert "CREATE TABLE schema_migrations" in migrations[0].sql
@@ -24,6 +24,7 @@ def test_packaged_registry_loads_consecutive_checksumed_migrations() -> None:
     assert migrations[3].descriptor.name == "audit_events"
     assert "CREATE TABLE audit_events" in migrations[3].sql
     assert migrations[4].descriptor.name == "model_routing"
+    assert migrations[5].descriptor.name == "model_policy_management"
     assert "CREATE TABLE model_invocations" in migrations[4].sql
 
 

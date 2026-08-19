@@ -101,6 +101,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/model-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Model Policies */
+        get: operations["listModelPolicies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-policies/{policy_id}/versions/{version}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Model Policy */
+        post: operations["activateModelPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-policies/{policy_id}/versions/{version}/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate Model Policy */
+        post: operations["evaluateModelPolicy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -276,6 +327,12 @@ export interface components {
         BootstrapAdminResponse: {
             admin: components["schemas"]["AdminResponse"];
         };
+        /**
+         * DataClass
+         * @description Sensitivity classes ordered from least to most restrictive.
+         * @enum {string}
+         */
+        DataClass: "public" | "internal" | "confidential" | "personal" | "restricted";
         /** ErrorBody */
         ErrorBody: {
             /** Code */
@@ -304,6 +361,218 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** ModelEgressPolicyResponse */
+        ModelEgressPolicyResponse: {
+            /** Allow Raw Content */
+            allow_raw_content: boolean;
+            /** Allowed Data Classes */
+            allowed_data_classes: components["schemas"]["DataClass"][];
+            /** Allowed Models */
+            allowed_models: string[];
+            /** Allowed Providers */
+            allowed_providers: string[];
+            /** Allowed Purposes */
+            allowed_purposes: components["schemas"]["ModelPurpose"][];
+            /** Allowed Regions */
+            allowed_regions: string[];
+            /** Allowed Source Kinds */
+            allowed_source_kinds: string[];
+            /** Policy Id */
+            policy_id: string;
+            /** Policy Version */
+            policy_version: string;
+            /** Profile */
+            profile: string;
+            /** Require Redaction */
+            require_redaction: boolean;
+            /** Require Zero Retention */
+            require_zero_retention: boolean;
+        };
+        /** ModelInvocationPurposeCountResponse */
+        ModelInvocationPurposeCountResponse: {
+            /** Count */
+            count: number;
+            /** Purpose */
+            purpose: string;
+        };
+        /** ModelInvocationReasonCountResponse */
+        ModelInvocationReasonCountResponse: {
+            /** Count */
+            count: number;
+            /** Reason */
+            reason: string;
+        };
+        /** ModelInvocationSummaryResponse */
+        ModelInvocationSummaryResponse: {
+            /** Allowed Count */
+            allowed_count: number;
+            /** Denial Reasons */
+            denial_reasons: components["schemas"]["ModelInvocationReasonCountResponse"][];
+            /** Denied Count */
+            denied_count: number;
+            /** Purposes */
+            purposes: components["schemas"]["ModelInvocationPurposeCountResponse"][];
+            /**
+             * Window Ended At
+             * Format: date-time
+             */
+            window_ended_at: string;
+            /**
+             * Window Started At
+             * Format: date-time
+             */
+            window_started_at: string;
+        };
+        /** ModelPolicyActivateRequest */
+        ModelPolicyActivateRequest: {
+            /** Candidate Fingerprint */
+            candidate_fingerprint: string;
+            /** Eval Run Id */
+            eval_run_id: string;
+            /** Impact Fingerprint */
+            impact_fingerprint: string;
+        };
+        /** ModelPolicyActivationEnvelope */
+        ModelPolicyActivationEnvelope: {
+            /** Impact Fingerprint */
+            impact_fingerprint: string;
+            policy: components["schemas"]["ModelPolicyVersionResponse"];
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** ModelPolicyEvaluateRequest */
+        ModelPolicyEvaluateRequest: {
+            /** Candidate Fingerprint */
+            candidate_fingerprint: string;
+        };
+        /** ModelPolicyEvaluationEnvelope */
+        ModelPolicyEvaluationEnvelope: {
+            /** Eval Run Id */
+            eval_run_id: string;
+            impact: components["schemas"]["ModelPolicyImpactResponse"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "passed" | "failed";
+        };
+        /** ModelPolicyImpactResponse */
+        ModelPolicyImpactResponse: {
+            /** Added Policy Keys */
+            added_policy_keys: string[];
+            /** Affected Consumers */
+            affected_consumers: string[];
+            /** Affected Policy Keys */
+            affected_policy_keys: string[];
+            /** Baseline Snapshot Fingerprint */
+            baseline_snapshot_fingerprint: string | null;
+            /** Candidate Snapshot Fingerprint */
+            candidate_snapshot_fingerprint: string;
+            /** Changed Policy Keys */
+            changed_policy_keys: string[];
+            /**
+             * Consumer Resolution
+             * @constant
+             */
+            consumer_resolution: "unavailable";
+            /** Impact Fingerprint */
+            impact_fingerprint: string;
+            /** Removed Policy Keys */
+            removed_policy_keys: string[];
+            /** Required Eval Suites */
+            required_eval_suites: string[];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: "model-policy-impact-v1";
+        };
+        /** ModelPolicyListEnvelope */
+        ModelPolicyListEnvelope: {
+            /** Items */
+            items: components["schemas"]["ModelPolicyListItemResponse"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** ModelPolicyListItemResponse */
+        ModelPolicyListItemResponse: {
+            impact: components["schemas"]["ModelPolicyImpactResponse"] | null;
+            invocation_summary: components["schemas"]["ModelInvocationSummaryResponse"];
+            policy: components["schemas"]["ModelPolicyVersionResponse"];
+        };
+        /**
+         * ModelPolicyState
+         * @description Lifecycle states for one immutable Model Policy version.
+         * @enum {string}
+         */
+        ModelPolicyState: "draft" | "active" | "retired";
+        /** ModelPolicyVersionResponse */
+        ModelPolicyVersionResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            egress_policy: components["schemas"]["ModelEgressPolicyResponse"];
+            /** Eval Run Id */
+            eval_run_id: string | null;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Policy Id */
+            policy_id: string;
+            /** Profile */
+            profile: string;
+            /** Profiles */
+            profiles: components["schemas"]["ModelProfileResponse"][];
+            state: components["schemas"]["ModelPolicyState"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: string;
+        };
+        /** ModelProfileResponse */
+        ModelProfileResponse: {
+            /** Active */
+            active: boolean;
+            /** Allow Raw Content */
+            allow_raw_content: boolean;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Model */
+            model: string;
+            /** Profile */
+            profile: string;
+            /** Profile Id */
+            profile_id: string;
+            /** Profile Version */
+            profile_version: string;
+            /** Provider */
+            provider: string;
+            /** Region */
+            region: string | null;
+            retention: components["schemas"]["ModelRetention"];
+            /** Routing Priority */
+            routing_priority: number;
+            /** Supported Data Classes */
+            supported_data_classes: components["schemas"]["DataClass"][];
+            /** Supported Purposes */
+            supported_purposes: components["schemas"]["ModelPurpose"][];
+            /** Supported Source Kinds */
+            supported_source_kinds: string[];
+        };
+        /**
+         * ModelPurpose
+         * @enum {string}
+         */
+        ModelPurpose: "orchestration" | "subagent" | "skill" | "eval" | "red_team";
+        /**
+         * ModelRetention
+         * @enum {string}
+         */
+        ModelRetention: "provider_default" | "zero_retention";
         /**
          * PrincipalChannel
          * @enum {string}
@@ -870,6 +1139,267 @@ export interface operations {
             };
             /** @description Unexpected server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listModelPolicies: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPolicyListEnvelope"];
+                };
+            };
+            /** @description Invalid Policy cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Administrator required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unexpected server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Policy store unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    activateModelPolicy: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                policy_id: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelPolicyActivateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPolicyActivationEnvelope"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF or role rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Policy version not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Eval or Policy conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unexpected server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Policy or Eval unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    evaluateModelPolicy: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                policy_id: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelPolicyEvaluateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPolicyEvaluationEnvelope"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF or role rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Policy version not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Policy state conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unexpected server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Eval runtime unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
