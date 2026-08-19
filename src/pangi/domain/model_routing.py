@@ -98,3 +98,11 @@ class ModelInvocationState(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     DENIED = "denied"
+
+
+class ModelPolicyState(StrEnum):
+    """Lifecycle states for one immutable Model Policy version."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    RETIRED = "retired"

@@ -1971,7 +1971,7 @@ Red Team은 운영 DB와 Credential을 사용하지 않는다. In-memory MCP Stu
 
 WBS-06.6의 `policy-impact-v1`은 Policy Kind·Stable ID·Version·기존 SHA-256 Fingerprint만 `PolicyFingerprintReference`로 받는다. `PolicyImpactSnapshot`은 참조를 Policy Key로 정렬하고 Schema Version과 함께 Canonical SHA-256 영향 Fingerprint를 계산한다. Policy 원문, Rule, Connection 정보, Secret과 외부 Content는 Snapshot에 포함하지 않는다.
 
-Baseline과 Candidate 비교는 추가·삭제·변경된 Policy Key를 결정적으로 반환한다. 이 계약은 변경 식별까지만 소유한다. 영향 Eval Suite 선택·실행·활성화 Gate와 Snapshot 영속화는 WBS-15가 구현한다.
+Baseline과 Candidate 비교는 추가·삭제·변경된 Policy Key를 결정적으로 반환한다. 이 계약은 변경 식별까지만 소유한다. WBS-07.4.1의 Model Policy 관리 API는 이 결과를 WBS-15에 전달하고 승인 여부를 확인하는 실패 폐쇄 Port를 제공한다. 영향 Eval Suite 선택·실행·결과와 Snapshot 영속화는 WBS-15가 구현한다.
 
 Gate:
 
@@ -2718,8 +2718,8 @@ Role 변경, Tool Policy, Skill 활성화·삭제, Holiday Calendar/Cohort 활�
 | GET | `/api/v1/feedback` | 권한 범위 Feedback 검색 |
 | POST | `/api/v1/feedback/:id/promote-to-eval` | Synthetic Eval Case Draft 생성 |
 | GET | `/api/v1/model-policies` | Model Profile과 Egress Policy 조회 |
-| POST | `/api/v1/model-policies/:id/evaluate` | 변경 후보 영향 Eval 실행 |
-| POST | `/api/v1/model-policies/:id/activate` | Gate 통과 Policy 활성화 |
+| POST | `/api/v1/model-policies/:policyId/versions/:version/evaluate` | 복합 식별된 변경 후보의 영향 Eval 실행 요청 |
+| POST | `/api/v1/model-policies/:policyId/versions/:version/activate` | 같은 영향 Fingerprint의 Gate 통과 Policy Version 활성화 |
 | GET | `/api/v1/red-team/case-drafts` | 생성된 Red Team Case Draft 목록 |
 | POST | `/api/v1/red-team/case-drafts/:id/review` | 승인 또는 폐기 |
 

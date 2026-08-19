@@ -15,6 +15,7 @@ from pangi.adapters.outbound.persistence.sqlite.factory import (
     build_bootstrap_admin,
     build_bootstrap_admin_for_cli,
     build_migration_admin,
+    build_model_policy_management_service,
     build_run_cancellation_service,
     build_run_event_service,
     build_run_queue_metric_service,
@@ -59,6 +60,7 @@ def create_asgi_app(paths: RuntimePaths, config: PangiConfig) -> FastAPI:
         run_cancellations=build_run_cancellation_service(database),
         run_events=build_run_event_service(database),
         run_queue_metrics=build_run_queue_metric_service(database),
+        model_policy_operations=build_model_policy_management_service(database),
         static_root=static_root,
     )
 
@@ -71,9 +73,7 @@ def _build_runtime_control(
         app=create_asgi_app(paths, config),
         host=config.server.host,
         port=config.server.port,
-        telemetry_filter=TelemetryRedactionFilter(
-            core_telemetry_redaction_service()
-        ),
+        telemetry_filter=TelemetryRedactionFilter(core_telemetry_redaction_service()),
     )
 
 

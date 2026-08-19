@@ -241,6 +241,18 @@
         "title": "BootstrapAdminResponse",
         "type": "object"
       },
+      "DataClass": {
+        "description": "Sensitivity classes ordered from least to most restrictive.",
+        "enum": [
+          "public",
+          "internal",
+          "confidential",
+          "personal",
+          "restricted"
+        ],
+        "title": "DataClass",
+        "type": "string"
+      },
       "ErrorBody": {
         "additionalProperties": false,
         "properties": {
@@ -311,6 +323,613 @@
         ],
         "title": "LoginRequest",
         "type": "object"
+      },
+      "ModelEgressPolicyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_raw_content": {
+            "title": "Allow Raw Content",
+            "type": "boolean"
+          },
+          "allowed_data_classes": {
+            "items": {
+              "$ref": "#/components/schemas/DataClass"
+            },
+            "title": "Allowed Data Classes",
+            "type": "array"
+          },
+          "allowed_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Models",
+            "type": "array"
+          },
+          "allowed_providers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Providers",
+            "type": "array"
+          },
+          "allowed_purposes": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPurpose"
+            },
+            "title": "Allowed Purposes",
+            "type": "array"
+          },
+          "allowed_regions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Regions",
+            "type": "array"
+          },
+          "allowed_source_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Source Kinds",
+            "type": "array"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "policy_version": {
+            "title": "Policy Version",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "require_redaction": {
+            "title": "Require Redaction",
+            "type": "boolean"
+          },
+          "require_zero_retention": {
+            "title": "Require Zero Retention",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "policy_id",
+          "policy_version",
+          "profile",
+          "allowed_providers",
+          "allowed_models",
+          "allowed_regions",
+          "allowed_data_classes",
+          "allowed_source_kinds",
+          "allowed_purposes",
+          "require_redaction",
+          "require_zero_retention",
+          "allow_raw_content"
+        ],
+        "title": "ModelEgressPolicyResponse",
+        "type": "object"
+      },
+      "ModelInvocationPurposeCountResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "count"
+        ],
+        "title": "ModelInvocationPurposeCountResponse",
+        "type": "object"
+      },
+      "ModelInvocationReasonCountResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "count"
+        ],
+        "title": "ModelInvocationReasonCountResponse",
+        "type": "object"
+      },
+      "ModelInvocationSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_count": {
+            "title": "Allowed Count",
+            "type": "integer"
+          },
+          "denial_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ModelInvocationReasonCountResponse"
+            },
+            "title": "Denial Reasons",
+            "type": "array"
+          },
+          "denied_count": {
+            "title": "Denied Count",
+            "type": "integer"
+          },
+          "purposes": {
+            "items": {
+              "$ref": "#/components/schemas/ModelInvocationPurposeCountResponse"
+            },
+            "title": "Purposes",
+            "type": "array"
+          },
+          "window_ended_at": {
+            "format": "date-time",
+            "title": "Window Ended At",
+            "type": "string"
+          },
+          "window_started_at": {
+            "format": "date-time",
+            "title": "Window Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window_started_at",
+          "window_ended_at",
+          "allowed_count",
+          "denied_count",
+          "purposes",
+          "denial_reasons"
+        ],
+        "title": "ModelInvocationSummaryResponse",
+        "type": "object"
+      },
+      "ModelPolicyActivateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Candidate Fingerprint",
+            "type": "string"
+          },
+          "eval_run_id": {
+            "maxLength": 64,
+            "minLength": 16,
+            "title": "Eval Run Id",
+            "type": "string"
+          },
+          "impact_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Impact Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_fingerprint",
+          "impact_fingerprint",
+          "eval_run_id"
+        ],
+        "title": "ModelPolicyActivateRequest",
+        "type": "object"
+      },
+      "ModelPolicyActivationEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "impact_fingerprint": {
+            "title": "Impact Fingerprint",
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ModelPolicyVersionResponse"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "policy",
+          "impact_fingerprint",
+          "replayed"
+        ],
+        "title": "ModelPolicyActivationEnvelope",
+        "type": "object"
+      },
+      "ModelPolicyEvaluateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Candidate Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_fingerprint"
+        ],
+        "title": "ModelPolicyEvaluateRequest",
+        "type": "object"
+      },
+      "ModelPolicyEvaluationEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "eval_run_id": {
+            "title": "Eval Run Id",
+            "type": "string"
+          },
+          "impact": {
+            "$ref": "#/components/schemas/ModelPolicyImpactResponse"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "passed",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "eval_run_id",
+          "state",
+          "impact"
+        ],
+        "title": "ModelPolicyEvaluationEnvelope",
+        "type": "object"
+      },
+      "ModelPolicyImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "added_policy_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added Policy Keys",
+            "type": "array"
+          },
+          "affected_consumers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Consumers",
+            "type": "array"
+          },
+          "affected_policy_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Policy Keys",
+            "type": "array"
+          },
+          "baseline_snapshot_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Snapshot Fingerprint"
+          },
+          "candidate_snapshot_fingerprint": {
+            "title": "Candidate Snapshot Fingerprint",
+            "type": "string"
+          },
+          "changed_policy_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed Policy Keys",
+            "type": "array"
+          },
+          "consumer_resolution": {
+            "const": "unavailable",
+            "title": "Consumer Resolution",
+            "type": "string"
+          },
+          "impact_fingerprint": {
+            "title": "Impact Fingerprint",
+            "type": "string"
+          },
+          "removed_policy_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed Policy Keys",
+            "type": "array"
+          },
+          "required_eval_suites": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Eval Suites",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "model-policy-impact-v1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "impact_fingerprint",
+          "candidate_snapshot_fingerprint",
+          "baseline_snapshot_fingerprint",
+          "added_policy_keys",
+          "removed_policy_keys",
+          "changed_policy_keys",
+          "affected_policy_keys",
+          "consumer_resolution",
+          "affected_consumers",
+          "required_eval_suites"
+        ],
+        "title": "ModelPolicyImpactResponse",
+        "type": "object"
+      },
+      "ModelPolicyListEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPolicyListItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ModelPolicyListEnvelope",
+        "type": "object"
+      },
+      "ModelPolicyListItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelPolicyImpactResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invocation_summary": {
+            "$ref": "#/components/schemas/ModelInvocationSummaryResponse"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/ModelPolicyVersionResponse"
+          }
+        },
+        "required": [
+          "policy",
+          "invocation_summary",
+          "impact"
+        ],
+        "title": "ModelPolicyListItemResponse",
+        "type": "object"
+      },
+      "ModelPolicyState": {
+        "description": "Lifecycle states for one immutable Model Policy version.",
+        "enum": [
+          "draft",
+          "active",
+          "retired"
+        ],
+        "title": "ModelPolicyState",
+        "type": "string"
+      },
+      "ModelPolicyVersionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "egress_policy": {
+            "$ref": "#/components/schemas/ModelEgressPolicyResponse"
+          },
+          "eval_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eval Run Id"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ModelProfileResponse"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ModelPolicyState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_id",
+          "version",
+          "profile",
+          "fingerprint",
+          "state",
+          "eval_run_id",
+          "egress_policy",
+          "profiles",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ModelPolicyVersionResponse",
+        "type": "object"
+      },
+      "ModelProfileResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "allow_raw_content": {
+            "title": "Allow Raw Content",
+            "type": "boolean"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "string"
+          },
+          "profile_version": {
+            "title": "Profile Version",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "retention": {
+            "$ref": "#/components/schemas/ModelRetention"
+          },
+          "routing_priority": {
+            "title": "Routing Priority",
+            "type": "integer"
+          },
+          "supported_data_classes": {
+            "items": {
+              "$ref": "#/components/schemas/DataClass"
+            },
+            "title": "Supported Data Classes",
+            "type": "array"
+          },
+          "supported_purposes": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPurpose"
+            },
+            "title": "Supported Purposes",
+            "type": "array"
+          },
+          "supported_source_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Source Kinds",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile_id",
+          "profile_version",
+          "profile",
+          "provider",
+          "model",
+          "region",
+          "supported_data_classes",
+          "supported_source_kinds",
+          "supported_purposes",
+          "retention",
+          "allow_raw_content",
+          "routing_priority",
+          "active",
+          "fingerprint"
+        ],
+        "title": "ModelProfileResponse",
+        "type": "object"
+      },
+      "ModelPurpose": {
+        "enum": [
+          "orchestration",
+          "subagent",
+          "skill",
+          "eval",
+          "red_team"
+        ],
+        "title": "ModelPurpose",
+        "type": "string"
+      },
+      "ModelRetention": {
+        "enum": [
+          "provider_default",
+          "zero_retention"
+        ],
+        "title": "ModelRetention",
+        "type": "string"
       },
       "PrincipalChannel": {
         "enum": [
@@ -1478,6 +2097,370 @@
           }
         },
         "summary": "Create Bootstrap Admin"
+      }
+    },
+    "/api/v1/model-policies": {
+      "get": {
+        "operationId": "listModelPolicies",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPolicyListEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid Policy cursor"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Administrator required"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Policy store unavailable"
+          }
+        },
+        "summary": "List Model Policies"
+      }
+    },
+    "/api/v1/model-policies/{policy_id}/versions/{version}/activate": {
+      "post": {
+        "operationId": "activateModelPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelPolicyActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPolicyActivationEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF or role rejected"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Policy version not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Eval or Policy conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Policy or Eval unavailable"
+          }
+        },
+        "summary": "Activate Model Policy"
+      }
+    },
+    "/api/v1/model-policies/{policy_id}/versions/{version}/evaluate": {
+      "post": {
+        "operationId": "evaluateModelPolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelPolicyEvaluateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPolicyEvaluationEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF or role rejected"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Policy version not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Policy state conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unexpected server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Eval runtime unavailable"
+          }
+        },
+        "summary": "Evaluate Model Policy"
       }
     },
     "/api/v1/runs": {
