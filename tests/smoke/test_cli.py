@@ -26,7 +26,9 @@ for module in ('boto3', 'fastapi', 'jsonschema', 'mcp', 'openai', 'slack_sdk', '
     assert module not in sys.modules, module
 assert 'pangi.plugins' not in sys.modules
 assert pangi.__all__ == (
+    'AgentResult',
     'AttachmentRef',
+    'Evidence',
     'PangiConfig',
     'PangiRuntime',
     'Principal',
