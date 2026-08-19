@@ -232,6 +232,58 @@ def test_step_and_event_schema_enforces_attempt_order_and_same_run_reference(
             )
 
 
+def test_orchestration_plan_and_step_payloads_are_bounded_and_immutable(
+    tmp_path: Path,
+) -> None:
+    paths, _config = _initialized_runtime(tmp_path)
+    timestamp = NOW.isoformat()
+    with sqlite3.connect(paths.database_file) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        _insert_user(connection, "member-user-00001")
+        _insert_run(
+            connection,
+            run_id="run-identifier-0001",
+            request_id="request-identifier-1",
+            principal_id="member-user-00001",
+            idempotency_key="execution-plan",
+        )
+        connection.execute(
+            "INSERT INTO run_execution_plans "
+            "(run_id, mode, schema_version, plan_json, plan_fingerprint, created_at) "
+            "VALUES (?, 'direct', 'orchestration-execution-v1', ?, ?, ?)",
+            (
+                "run-identifier-0001",
+                '{"mode":"direct"}',
+                "a" * 64,
+                timestamp,
+            ),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE run_execution_plans SET plan_json = ? WHERE run_id = ?",
+                ('{"mode":"delegate"}', "run-identifier-0001"),
+            )
+
+        connection.execute(
+            "INSERT INTO run_steps "
+            "(id, run_id, node_id, type, state, requirement, idempotent, attempt, "
+            "depends_on_json, task_json, created_at, updated_at) "
+            "VALUES ('step-identifier-001', 'run-identifier-0001', 'collect', "
+            "'subagent', 'queued', 'required', 0, 1, '[]', '{}', ?, ?)",
+            (timestamp, timestamp),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE run_steps SET task_json = ? WHERE id = ?",
+                ('{"changed":true}', "step-identifier-001"),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE run_steps SET result_json = '{}' WHERE id = ?",
+                ("step-identifier-001",),
+            )
+
+
 def test_idempotency_schema_scopes_keys_by_principal_and_route(tmp_path: Path) -> None:
     paths, _config = _initialized_runtime(tmp_path)
     created_at = NOW.isoformat()

@@ -58,6 +58,10 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Delegate Task는 운영 기본 3개, 절대 최대 5개로 제한한다. Task Timeout은 최대 180초, Run Timeout은 최대 600초이며 실제 Plan은 주입된 운영 제한도 함께 지킨다.
 - Run Budget은 DAG의 Task Timeout을 단순 합산하지 않고 가장 긴 Dependency 경로의 합으로 검증한다.
 - 같은 시점에 실행 가능한 Task가 여러 개면 최초 Decision의 Task 순서를 Tie-breaker로 사용해 위상 정렬 결과를 결정적으로 만든다.
+- Root가 만든 Delegate Task는 서버가 기본 `required`, `non-idempotent` Step으로 Materialize한다. 모델 출력은 Optional 여부나 재실행 안전성을 부여하지 못하며 후속 Registry·Skill Compiler만 신뢰된 Metadata를 확장한다.
+- 검증된 Plan, Canonical Task 정의와 Redaction 완료 `AgentResult`를 SQLite에 저장한다. Provider Prompt, Tool Result 원문과 비공개 추론은 실행 저장소에 넣지 않는다.
+- Step 쓰기는 Run의 `running` 상태, Worker ID와 유효 Lease를 함께 검사한다. 취소·복구와 경합한 오래된 Worker는 Result와 Run 상태를 갱신하지 못한다.
+- Dependency가 모두 완료된 Step만 최초 Plan 순서로 준비하고 주입된 1~5개 동시 실행 상한 안에서 실행한다. Task Timeout과 Executor 오류는 Semantic Retry 없이 안정적인 실패 Result로 변환한다.
 - `synthesis_subagent`는 최초 DAG에 포함된 단일 `synthesis` Task가 둘 이상의 선행 Task에 의존하고 다른 Task의 선행 조건이 되지 않을 때만 허용한다.
 - Root 결과를 받은 뒤 의미를 바꾸기 위한 재호출이나 Semantic Retry를 금지한다.
 - Reducer는 Dependency 순서, Evidence URI Dedup, Warning/실패 Source와 Citation을 결정적으로 구성한다.
@@ -70,8 +74,8 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Root Prompt/Context Builder와 사용자 입력 Data Envelope를 구현한다.
 - [x] Trigger별 Root logical call Budget을 구현한다.
 - [x] Mode별 XOR, DAG, Registry, Task/Timeout/Composition Validator를 구현한다.
-- [ ] Direct Result 경로와 Delegate 실행 Plan을 구현한다.
-- [ ] Dependency 기반 Execution Engine과 Required/Optional 실패 처리를 구현한다.
+- [x] Direct Result 경로와 Delegate 실행 Plan을 구현한다.
+- [x] Dependency 기반 Execution Engine과 Required/Optional 실패 처리를 구현한다.
 - [ ] Deterministic Reducer와 Synthesis Task 연결을 구현한다.
 - [ ] Decision, Logical Call, Provider Request와 Validation 실패 Event를 기록한다.
 - [ ] API의 Run 생성 경로를 Orchestrator Use Case에 연결한다.
@@ -82,7 +86,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] 잘못된 Mode XOR, Cycle, Unknown Subagent와 초과 Task를 거부한다.
 - [ ] Decision 실패 뒤 Tool/Subagent 호출이 0건인지 확인한다.
 - [x] Provider Transport Retry가 Logical Call을 늘리지 않는지 확인한다.
-- [ ] Optional 실패와 Required 실패의 Run 상태/출력이 다른지 확인한다.
+- [x] Optional 실패와 Required 실패의 Run 상태/출력이 다른지 확인한다.
 - [ ] 동일 AgentResult 입력이 동일 Reducer 출력을 만드는지 Property Test를 실행한다.
 - [ ] Root 재계획과 Delegation Depth 증가를 불변식 테스트로 차단한다.
 
@@ -112,6 +116,16 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - `RootOrchestratorService`는 Catalog를 요청당 한 번 읽는다. 명시 Skill은 Model 호출 0회로 검증하고, 일반·Scheduler 자연어는 결정적인 `root-orchestration:<run_id>` Logical Call을 기존 Egress·Redaction·Invocation 경계로 정확히 한 번 보낸다.
 - Provider Transport Retry는 하나의 Root Model Executor 호출 결과로 계측한다. Model·Parser·Plan 실패 뒤 Semantic Retry는 수행하지 않는다.
 - 실제 Registry Adapter와 Provider Runtime 조립, Run 상태 전이·Queue Handler·실행 Engine은 후속 단계로 유지한다.
+
+## 3차 구현 결과
+
+- Framework-free `ExecutionPolicy`, `PreparedExecutionPlan`, `PreparedExecutionStep`, Snapshot·Request·Outcome 계약을 추가했다. 검증된 Root Plan은 Direct 또는 Dependency 순서가 고정된 Delegate 실행 Plan으로만 변환하며 Skill 실행은 후속 Skill Runtime에 남긴다.
+- `0007_orchestration_execution.sql`이 불변 `run_execution_plans`와 Canonical Task·Result 저장 Column을 추가한다. 기존 Migration은 수정하지 않으며 같은 원문 Plan Fingerprint Replay만 허용하고 다른 Plan 덮어쓰기를 거부한다.
+- Plan, 최초 Step, Queue 전이와 Event를 같은 Transaction에 저장한다. Plan과 `AgentResult`는 기존 중앙 Secret Redaction을 통과한 Canonical JSON만 저장하고 Provider Prompt와 Tool 원문은 저장하지 않는다.
+- `DependencyExecutionEngine`은 완료된 Dependency만 원래 Plan 순서로 준비하고 주입된 최대 동시 Step 수로 실행한다. Dependency Result는 선언된 순서로 Executor Port에 전달하며 Timeout·예외·잘못된 Result는 안정적인 실패 Result로 바꾼다.
+- Direct는 Subagent Executor 호출 없이 `composing`으로 이동한다. Required 실패는 대기 Step을 취소하고 Run을 `failed`로 종료하며 Optional 실패만 있으면 Warning과 함께 `composing`으로 이동한다.
+- 모든 Step·Run 쓰기는 현재 Worker와 유효 Lease를 확인한다. 완료 Result는 복구 뒤 재사용하고 중단된 Idempotent Step만 다음 Attempt를 만들며 취소된 Run의 대기·실행 Step도 같은 Transaction에서 종료한다.
+- 실제 Subagent·MCP Tool Loop, Reducer·Output Guardrail, Skill 실행과 Root→Queue Runtime 최종 조립은 WBS-08.4~08.5와 WBS-09~11에 남긴다.
 
 ## 미결정 사항
 

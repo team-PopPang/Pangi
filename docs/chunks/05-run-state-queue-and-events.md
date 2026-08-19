@@ -48,7 +48,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 ## 기술 설계
 
 - `runs.state=queued`를 Queue로 사용하고 요청 저장 Transaction이 첫 Event를 함께 기록한다.
-- WBS-03 Unit of Work 위에서 `runs`, `run_steps`, `run_events`의 Migration, 제약과 Repository를 이 WBS가 소유한다.
+- WBS-03 Unit of Work 위에서 `runs`, `run_steps`, `run_events`의 기본 Migration, 제약과 Repository를 이 WBS가 소유한다. 기능별 실행 Payload와 결과처럼 후속 WBS가 추가하는 Column·Table은 기존 상태·소유권 제약을 유지하는 Additive Migration으로 확장한다.
 - `api_idempotency_records`를 같은 Unit of Work에 두고 `principal_id + route_key + idempotency_key`로 Run 생성 Replay를 판별한다. 인증·Bootstrap Lifecycle API에는 적용하지 않는다.
 - `runs.idempotency_key`는 추적용 값이며 전역 Unique로 만들지 않는다. Replay 유일성은 `api_idempotency_records`의 복합 Key만 소유한다.
 - `route_key`는 요청 본문이 아니라 신뢰할 수 있는 Inbound Adapter가 전달한다. Request Fingerprint는 Channel, Text, Thread, Explicit Skill, Schedule과 순서가 보존된 Attachment Metadata를 포함하고, 재시도마다 달라지는 Request ID·생성 시각·Idempotency Key는 제외한다.
@@ -127,7 +127,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - `runs.state=queued`와 기존 Queue Index를 사용하고 `BEGIN IMMEDIATE` Transaction 안에서 `queued_at`, `created_at`, `id` 순서의 Run을 하나만 Claim한다.
 - Claim은 Run을 `running`으로 전환하면서 Worker ID, Lease와 Heartbeat를 원자적으로 저장한다. 상태 변경은 Revision CAS를 사용하고 Heartbeat는 유효한 Lease의 현재 Worker만 갱신한다.
 - `asyncio.Event` 기반 Wake-up과 `max_concurrent_runs` Semaphore, 활성 Task Registry를 가진 Process-local Queue Runtime을 추가했다.
-- 대기·실행 Run을 원자적으로 취소하고 이미 취소된 Run의 재요청은 같은 결과를 반환한다. 취소 뒤 오래된 Worker의 Heartbeat와 상태 쓰기는 거부한다.
+- 대기·실행 Run을 원자적으로 취소하고 이미 취소된 Run의 재요청은 같은 결과를 반환한다. 실행 Plan이 Materialize된 뒤에는 같은 Transaction에서 대기·실행 Step도 `cancelled`로 종료하며, 취소 뒤 오래된 Worker의 Heartbeat와 상태 쓰기는 거부한다.
 - Startup과 Worker 종료에서 중단된 Run을 복구한다. 실행 중이던 Step이 없거나 모두 Idempotent면 재대기하고, Non-idempotent Step이 있으면 `non_idempotent_recovery`로 Run과 중단 Step을 실패시킨다.
 - Queue 상태 변경과 `run.queued`, `run.running`, `run.interrupted`, `run.cancelled`, `run.failed` Event를 같은 Transaction에 저장한다.
 - Lease Duration과 Heartbeat Interval은 `RunQueuePolicy`로 주입한다. 운영 Baseline 없이 공개 설정 기본값을 고정하지 않았고 Test는 명시적인 시간 정책을 사용한다.
@@ -149,6 +149,13 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - WBS-05가 소유한 세 Event 쓰기 경로를 WBS-06의 단일 최종 Writer로 통합했다. Event Index, Visibility와 Transaction 소유권은 WBS-05에 그대로 둔다.
 - Message와 Attribute는 저장 직전에 CRLF/NFC 정규화와 중앙 Secret Redaction을 통과한다. 금지 Field와 크기·재귀 제한을 위반하면 안전한 오류로 거부한다.
 - SQLite 원문, Owner/Admin JSON 응답과 SSE Frame에 Secret이 남지 않는지 Integration Test로 고정했다. DB Schema와 HTTP/OpenAPI 계약은 바꾸지 않았다.
+
+## WBS-08.3 연계 결과
+
+- `0007_orchestration_execution.sql`은 WBS-05의 상태·Lease·Attempt 계약을 바꾸지 않고 불변 `run_execution_plans`와 `run_steps.task_json`, Redaction 완료 Result Column을 추가한다.
+- 검증된 Plan과 최초 Step은 `received|planning → queued` 전이 및 `run.queued`, `step.queued` Event와 같은 Transaction에서 저장된다.
+- Step 시작·완료·실패와 Run의 `running → composing|failed` 전이는 현재 Worker와 만료되지 않은 Lease를 함께 검사한다. 취소되거나 소유권을 잃은 Worker의 늦은 쓰기는 거부한다.
+- 완료된 Idempotent Step Result는 복구 뒤 재사용하고 `interrupted` Step만 Attempt를 증가시킨다. Non-idempotent 중단 실패 규칙은 WBS-05의 기존 Queue Recovery를 유지한다.
 
 ## 완료 조건
 
