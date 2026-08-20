@@ -199,12 +199,15 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 - Reducer는 Result 입력 순서와 관계없이 Plan 순서로 Summary, Warning과 Evidence를 구성해요. Evidence URI 중복은 첫 항목만 유지해요.
 - Synthesis Mode는 최초 DAG의 Terminal Synthesis Result만 본문으로 사용하며 합성 중 Model이나 Subagent를 다시 호출하지 않아요.
 - Direct Answer와 Delegate 결과는 같은 Output Guardrail을 통과해요. 이후 경계에는 Secret·내부 경로·위험 Link·Mention을 처리한 `SafeOutput`만 제공해요.
+- Guardrail을 통과해 생성된 Run은 `planning`에서 Root Decision을 한 번 수행하고, 성공한 Direct·Delegate Plan만 영속 Queue로 넘겨요. Decision과 Validation 실패는 외부 실행 전에 `failed`로 종료해요.
+- Queue Handler는 실행 결과를 결정적으로 합성하고 `SafeOutput` 저장, Output Event와 `composing → completed|failed` 전이를 하나의 SQLite Transaction으로 처리해요.
+- `composing` 중에도 Worker Lease와 Heartbeat를 유지해요. Handler 종료나 Lease 만료가 발생하면 Output이나 Root Decision을 다시 실행하지 않고 `composition_interrupted`로 실패시켜요.
 
-이 기반은 아직 보호된 Run 생성 API, Queue Handler와 실제 Model Provider·Subagent Runtime에 조립되지 않았어요. Run의 `composing → completed|failed` 저장과 Decision·Validation Event도 다음 WBS-08 단계에 남아 있어요.
+이 기반은 아직 보호된 Run 생성 API와 ASGI Queue Runtime, 실제 Model Provider·Root Catalog·Subagent Runtime에 조립되지 않았어요. 현재 Application Service와 Handler는 주입된 Port를 사용하는 상태예요.
 
 ## 아직 구현되지 않은 기능
 
-- Root Orchestrator와 실제 실행 Engine·Handler의 Queue Runtime 연결, Lease·Heartbeat 운영 기본값
+- Root Orchestrator와 실행 Handler의 실제 Model Provider·Queue Runtime·ASGI 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
 - Model Provider Credential·Runtime 조립, 사용처 Registry와 WBS-15 Eval 실행기 연결
@@ -329,7 +332,7 @@ uv run pytest \
 
 ### Root Orchestrator와 실행 Engine만 검증
 
-WBS-08.1~08.4에서 구현한 Decision·Plan 검증, Root 단일 호출, Plan·Result 영속화, Dependency 실행과 결정적 Reducer·Output Guardrail 연결을 확인하세요.
+WBS-08.1~08.5.1에서 구현한 Decision·Plan 검증, Root 단일 호출, Plan·Result 영속화, Dependency 실행, 결정적 Reducer와 `SafeOutput` 완료 영속화를 확인하세요.
 
 ```bash
 uv run pytest \
@@ -338,9 +341,11 @@ uv run pytest \
   tests/unit/test_root_context.py \
   tests/unit/test_root_orchestrator.py \
   tests/unit/test_orchestration_execution_contracts.py \
+  tests/unit/test_orchestration_lifecycle.py \
   tests/unit/test_result_reducer.py \
   tests/contract/test_root_orchestration_model_contract.py \
   tests/integration/test_orchestration_execution.py \
+  tests/integration/test_orchestration_lifecycle_persistence.py \
   tests/architecture/test_dependency_rules.py
 ```
 

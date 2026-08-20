@@ -623,7 +623,7 @@ class SqliteRunQueueStore(SqliteRunStore):
             async with self._runtime(), self._database.create() as unit_of_work:
                 cursor = await unit_of_work.connection.execute(
                     "UPDATE runs SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ? "
-                    "WHERE id = ? AND state = 'running' AND worker_id = ? "
+                    "WHERE id = ? AND state IN ('running', 'composing') AND worker_id = ? "
                     "AND julianday(lease_expires_at) > julianday(?)",
                     (
                         timestamp.isoformat(),
@@ -700,17 +700,27 @@ class SqliteRunQueueStore(SqliteRunStore):
                     unit_of_work.connection,
                     f"SELECT {_RUN_COLUMNS} FROM runs r "
                     "JOIN users u ON u.id = r.principal_id "
-                    "WHERE r.state = 'running' "
+                    "WHERE r.state IN ('running', 'composing') "
                     "AND julianday(r.lease_expires_at) <= julianday(?) "
                     "ORDER BY r.lease_expires_at, r.id",
                     (timestamp.isoformat(),),
                 )
                 for row in rows:
-                    recovered = await self._recover_one(
-                        unit_of_work.connection,
-                        current=_run_from_row(row),
-                        at=timestamp,
-                        reason="lease_expired",
+                    current = _run_from_row(row)
+                    recovered = (
+                        await self._fail_composing(
+                            unit_of_work.connection,
+                            current=current,
+                            at=timestamp,
+                            reason="lease_expired",
+                        )
+                        if current.state is RunState.COMPOSING
+                        else await self._recover_one(
+                            unit_of_work.connection,
+                            current=current,
+                            at=timestamp,
+                            reason="lease_expired",
+                        )
                     )
                     if recovered.state is RunState.QUEUED:
                         requeued.append(recovered.id)
@@ -741,14 +751,26 @@ class SqliteRunQueueStore(SqliteRunStore):
                     await unit_of_work.commit()
                     return RunRecoveryResult()
                 current = _run_from_row(row)
-                if current.state is not RunState.RUNNING or current.worker_id != worker_id:
+                if current.state not in {
+                    RunState.RUNNING,
+                    RunState.COMPOSING,
+                } or current.worker_id != worker_id:
                     await unit_of_work.commit()
                     return RunRecoveryResult()
-                recovered = await self._recover_one(
-                    unit_of_work.connection,
-                    current=current,
-                    at=timestamp,
-                    reason=reason,
+                recovered = (
+                    await self._fail_composing(
+                        unit_of_work.connection,
+                        current=current,
+                        at=timestamp,
+                        reason=reason,
+                    )
+                    if current.state is RunState.COMPOSING
+                    else await self._recover_one(
+                        unit_of_work.connection,
+                        current=current,
+                        at=timestamp,
+                        reason=reason,
+                    )
                 )
                 await unit_of_work.commit()
         except aiosqlite.Error as error:
@@ -910,3 +932,42 @@ class SqliteRunQueueStore(SqliteRunStore):
             },
         )
         return recovered
+
+    async def _fail_composing(
+        self,
+        connection: aiosqlite.Connection,
+        *,
+        current: Run,
+        at: datetime,
+        reason: str,
+    ) -> Run:
+        failed = replace(
+            transition_run(current, RunState.FAILED, at=at),
+            worker_id=None,
+            lease_expires_at=None,
+            heartbeat_at=None,
+            error_code=RunErrorCode.COMPOSITION_INTERRUPTED.value,
+        )
+        await self._persist_transition(connection, current=current, changed=failed)
+        await self._append_event(
+            connection,
+            failed,
+            event_type="output.failed",
+            visibility=EventVisibility.INTERNAL,
+            at=at,
+            message="Output composition interrupted",
+            attributes={
+                "error_code": RunErrorCode.COMPOSITION_INTERRUPTED.value,
+                "reason": reason,
+            },
+        )
+        await self._append_event(
+            connection,
+            failed,
+            event_type="run.failed",
+            visibility=EventVisibility.PUBLIC,
+            at=at,
+            message="Run Output interrupted",
+            attributes={"error_code": RunErrorCode.COMPOSITION_INTERRUPTED.value},
+        )
+        return failed

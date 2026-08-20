@@ -29,7 +29,9 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 2. **Root Context Builder와 단일 Decision 호출(WBS-08.2)**: 최소 Catalog, Decision Schema와 사용자 Data Envelope를 구성하고 주입된 Model 실행 경계로 Root logical call을 한 번만 수행한다.
 3. **Run Step 영속화와 Dependency Execution Engine(WBS-08.3)**: 검증된 Plan을 Run Step으로 저장하고 의존성·동시 실행 제한·Required/Optional 실패 규칙에 따라 실행한다.
 4. **Deterministic Reducer와 안전한 합성(WBS-08.4)**: 결과·Evidence를 결정적으로 정렬·중복 제거하고 사전 계획 Synthesis와 Output Guardrail을 연결한다.
-5. **Run 생성과 Queue Runtime 통합(WBS-08.5)**: Guarded Run 생성 API, Queue Handler, Model Provider Runtime, Decision·Validation Event를 하나의 실행 경로로 조립한다.
+5. **Orchestration Run 생명주기와 SafeOutput 영속화(WBS-08.5.1)**: `received → planning → queued → running → composing → completed|failed` 전이, Decision Event, Queue Handler와 최종 Output 저장을 구현한다.
+6. **Model Provider와 Root Catalog Runtime 조립(WBS-08.5.2)**: 활성 Model Policy, 선택 Provider와 Principal 범위 Catalog를 실제 Root 실행 경계에 조립한다.
+7. **Guarded Run API와 Queue Runtime 통합(WBS-08.5.3)**: 보호된 Run 생성 API, 신뢰된 Data Class 분류, Queue Wake-up과 ASGI 생명주기를 하나의 실행 경로로 연결한다.
 
 ## 범위
 
@@ -81,18 +83,19 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Direct Result 경로와 Delegate 실행 Plan을 구현한다.
 - [x] Dependency 기반 Execution Engine과 Required/Optional 실패 처리를 구현한다.
 - [x] Deterministic Reducer와 Synthesis Task 연결을 구현한다.
-- [ ] Decision, Logical Call, Provider Request와 Validation 실패 Event를 기록한다.
+- [x] Decision, Logical Call, Provider Request와 Validation 실패 Event를 기록한다.
+- [x] `SafeOutput` 저장과 `composing → completed|failed` 전이를 원자적으로 처리한다.
 - [ ] API의 Run 생성 경로를 Orchestrator Use Case에 연결한다.
 
 ## 검증 체크리스트
 
 - [x] 일반 자연어, Guardrail 차단, 명시 Skill별 Root 호출 수를 검증한다.
 - [x] 잘못된 Mode XOR, Cycle, Unknown Subagent와 초과 Task를 거부한다.
-- [ ] Decision 실패 뒤 Tool/Subagent 호출이 0건인지 확인한다.
+- [x] Decision 실패 뒤 Tool/Subagent 호출이 0건인지 확인한다.
 - [x] Provider Transport Retry가 Logical Call을 늘리지 않는지 확인한다.
 - [x] Optional 실패와 Required 실패의 Run 상태/출력이 다른지 확인한다.
 - [x] 동일 AgentResult 입력이 동일 Reducer 출력을 만드는지 Property Test를 실행한다.
-- [ ] Root 재계획과 Delegation Depth 증가를 불변식 테스트로 차단한다.
+- [x] Root 재계획과 Delegation Depth 증가를 불변식 테스트로 차단한다.
 
 ## 완료 조건
 
@@ -139,7 +142,18 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - `synthesis_subagent`는 검증된 DAG의 Terminal Synthesis Result 하나만 최종 본문으로 사용한다. 선행 Summary를 다시 이어 붙이거나 Reducer에서 Model·Subagent를 추가 호출하지 않으며 전체 Plan의 Evidence와 Warning은 보존한다.
 - `OrchestrationOutputComposer`가 Direct Answer와 Delegate Reducer 결과를 같은 `OutputCandidate`로 만든 뒤 기존 WBS-06.4.1 Output Guardrail에 전달한다. 호출자에게는 허용된 `SafeOutput`만 반환하고 차단·실패 오류에는 Candidate 원문을 넣지 않는다.
 - 최대 Task 수 안에서 Result 순열을 전부 바꾸는 Test로 Markdown, Evidence 순서와 `SafeOutput` Content Fingerprint의 결정성을 고정했다. 영속 Execution Engine과 Synthesis를 함께 실행하는 Test는 계획된 세 Task만 호출되고 합성 시 추가 Executor 호출이 없음을 확인한다.
-- `composing → completed|failed` 영속화, Output Event, Run 생성 API와 Queue Handler·Provider Runtime 최종 조립은 WBS-08.5에 남긴다.
+- `composing → completed|failed` 영속화, Output Event, Run 생성 API와 Queue Handler·Provider Runtime 최종 조립은 WBS-08.5.1~08.5.3에 남긴다.
+
+## 5차 구현 결과
+
+- 승인된 WBS 변경에 따라 기존 WBS-08.5를 WBS-08.5.1~08.5.3으로 분리했다. 이번 단계는 Orchestration Application 생명주기와 안전한 완료 영속화만 소유하며 실제 Provider·Catalog와 HTTP·ASGI 조립은 후속 단계로 유지한다.
+- `OrchestrationSubmissionService`는 Guardrail을 통과해 생성된 Run을 `planning`으로 옮긴 뒤 Root Decision을 한 번 수행한다. 성공한 Direct·Delegate Plan만 영속 Queue에 전달하고 Decision·Validation 실패는 외부 실행 전에 `failed`로 종료한다.
+- 명시 Skill Decision은 Logical Call 0회를 Event로 기록하고 WBS-11 Skill Runtime이 아직 없으므로 `skill_runtime_unavailable`로 실패 폐쇄한다. 이미 `planning`인 Idempotency Replay는 Root를 다시 호출하지 않고 `orchestration_planning_interrupted`로 종료한다.
+- Migration 8은 Run당 하나의 불변 `run_outputs`를 추가한다. Output Guardrail을 통과한 Markdown, Evidence Link, Content Fingerprint와 Guardrail Metadata만 저장하며 Candidate 원문과 Provider Prompt는 저장하지 않는다.
+- `OrchestrationRunHandler`는 영속 Plan 실행 결과가 `composing`일 때만 Reducer와 Output Guardrail을 호출한다. `SafeOutput` 저장, `output.completed`, 선택적인 `output.redacted`, `run.completed` Event와 Run 완료 전이는 하나의 Transaction에서 처리한다.
+- 실행 Engine이 `composing`으로 전이한 뒤에도 현재 Worker Lease를 유지한다. Heartbeat는 합성이 끝날 때까지 Lease를 갱신하고 Handler 종료나 Lease 만료가 발생하면 Output을 재합성하거나 Root를 재호출하지 않고 `composition_interrupted`로 실패시킨다.
+- Direct·Delegate 완료, Decision 실패 뒤 실행 0회, 명시 Skill 0회 호출, 중단된 Planning Replay, Secret 제거, Output Event 순서와 Composing Lease 복구를 Unit·Integration Test로 고정했다.
+- 실제 Model Provider 선택과 Root Catalog Adapter는 WBS-08.5.2에 남긴다. `POST /api/v1/runs`, 서버 측 Data Class 분류, Queue Wake-up과 ASGI 생명주기는 WBS-08.5.3에 남긴다.
 
 ## 미결정 사항
 

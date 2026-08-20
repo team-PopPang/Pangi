@@ -438,13 +438,20 @@ class SqliteOrchestrationExecutionStore:
             async with self._runtime(), self._database.create() as unit_of_work:
                 await self._require_owner(unit_of_work.connection, claim=claim, at=timestamp)
                 cursor = await unit_of_work.connection.execute(
-                    "UPDATE runs SET state = ?, revision = revision + 1, worker_id = NULL, "
-                    "lease_expires_at = NULL, heartbeat_at = NULL, warnings_json = ?, "
+                    "UPDATE runs SET state = ?, revision = revision + 1, "
+                    "worker_id = CASE WHEN ? = 'composing' THEN worker_id ELSE NULL END, "
+                    "lease_expires_at = CASE WHEN ? = 'composing' "
+                    "THEN lease_expires_at ELSE NULL END, "
+                    "heartbeat_at = CASE WHEN ? = 'composing' THEN heartbeat_at ELSE NULL END, "
+                    "warnings_json = ?, "
                     "error_code = ?, updated_at = ?, "
                     "finished_at = CASE WHEN ? = 'failed' THEN ? ELSE NULL END "
                     "WHERE id = ? AND state = 'running' AND worker_id = ? "
                     "AND julianday(lease_expires_at) > julianday(?)",
                     (
+                        state.value,
+                        state.value,
+                        state.value,
                         state.value,
                         canonical_execution_json(list(warnings)),
                         error_code.value if error_code is not None else None,

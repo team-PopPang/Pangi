@@ -68,7 +68,7 @@ class RunQueueStore(Protocol):
         at: datetime,
         lease_expires_at: datetime,
     ) -> bool:
-        """Extend a live lease only for its current owner."""
+        """Extend a live running or composing lease only for its current owner."""
 
         ...
 
@@ -90,7 +90,7 @@ class RunQueueStore(Protocol):
         at: datetime,
         reason: str,
     ) -> RunRecoveryResult:
-        """Release one owned claim after local shutdown or handler failure."""
+        """Recover execution or fail composition after the owning handler stops."""
 
         ...
 
