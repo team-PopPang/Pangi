@@ -71,6 +71,7 @@ class RunErrorCode(StrEnum):
     REQUIRED_STEP_FAILED = "required_step_failed"
     OPTIONAL_STEP_FAILED = "optional_step_failed"
     NON_IDEMPOTENT_RECOVERY = "non_idempotent_recovery"
+    COMPOSITION_INTERRUPTED = "composition_interrupted"
 
 
 class RunContractError(ValueError):

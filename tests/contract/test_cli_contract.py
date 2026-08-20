@@ -210,11 +210,11 @@ def test_migrate_plan_apply_and_repeat_have_stable_json(tmp_path: Path) -> None:
 
     assert plan.exit_code == 0
     assert json.loads(plan.output)["status"] == "up_to_date"
-    assert json.loads(plan.output)["current_version"] == 7
-    assert json.loads(plan.output)["target_version"] == 7
+    assert json.loads(plan.output)["current_version"] == 8
+    assert json.loads(plan.output)["target_version"] == 8
     assert first.exit_code == 0
     assert json.loads(first.output)["status"] == "up_to_date"
-    assert json.loads(first.output)["current_version"] == 7
+    assert json.loads(first.output)["current_version"] == 8
     assert second.exit_code == 0
     assert json.loads(second.output)["status"] == "up_to_date"
     assert json.loads(second.output)["applied"] == []

@@ -21,6 +21,7 @@ def test_packaged_registry_loads_consecutive_checksumed_migrations() -> None:
         5,
         6,
         7,
+        8,
     ]
     assert migrations[0].descriptor.name == "schema_migrations"
     assert len(migrations[0].descriptor.checksum) == 64
@@ -34,6 +35,9 @@ def test_packaged_registry_loads_consecutive_checksumed_migrations() -> None:
     assert migrations[4].descriptor.name == "model_routing"
     assert migrations[5].descriptor.name == "model_policy_management"
     assert "CREATE TABLE model_invocations" in migrations[4].sql
+    assert migrations[6].descriptor.name == "orchestration_execution"
+    assert migrations[7].descriptor.name == "orchestration_lifecycle"
+    assert "CREATE TABLE run_outputs" in migrations[7].sql
 
 
 def test_static_registry_rejects_version_gaps() -> None:
