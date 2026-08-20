@@ -24,7 +24,10 @@ from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.application.contracts.orchestration import (
     AgentResult,
     AgentResultStatus,
+    CompositionMode,
     DelegatedTask,
+    Evidence,
+    EvidenceSourceType,
 )
 from pangi.application.contracts.orchestration_execution import (
     ExecutionPolicy,
@@ -32,16 +35,22 @@ from pangi.application.contracts.orchestration_execution import (
     PreparedExecutionStep,
     StepExecutionRequest,
 )
+from pangi.application.contracts.output_guardrails import OutputGuardrailPolicy
 from pangi.application.contracts.run_queue import RunClaim, RunQueuePolicy
 from pangi.application.ports.orchestration_execution import (
     ExecutionOwnershipLostError,
     ExecutionPlanConflictError,
 )
 from pangi.application.services.execution_engine import DependencyExecutionEngine
+from pangi.application.services.output_guardrails import (
+    OutputGuardrailService,
+    core_output_internal_detail_rules,
+)
 from pangi.application.services.redaction import (
     RedactionService,
     core_secret_redaction_policy,
 )
+from pangi.application.services.result_reducer import OrchestrationOutputComposer
 from pangi.application.services.run_queue import RunQueueService
 from pangi.application.services.runs import RunService
 from pangi.application.services.telemetry_redaction import (
@@ -190,12 +199,13 @@ async def _claim(queue: RunQueueService, worker: str) -> RunClaim:
 def _task(
     task_id: str,
     *,
+    subagent: str = "test-subagent",
     depends_on: tuple[str, ...] = (),
     timeout_seconds: int = 60,
 ) -> DelegatedTask:
     return DelegatedTask(
         id=task_id,
-        subagent="test-subagent",
+        subagent=subagent,
         objective=f"Execute {task_id}.",
         depends_on=depends_on,
         timeout_seconds=timeout_seconds,
@@ -573,6 +583,123 @@ def test_task_timeout_fails_required_run_without_retry(tmp_path: Path) -> None:
             assert outcome.state is RunState.FAILED
             assert executor.calls == 1
             assert outcome.results[0].error_code == "step_timeout"
+        finally:
+            await database.close()
+
+    asyncio.run(scenario())
+
+
+def test_synthesis_execution_is_reduced_without_an_additional_executor_call(
+    tmp_path: Path,
+) -> None:
+    class SynthesisExecutor:
+        def __init__(self) -> None:
+            self.calls: list[StepExecutionRequest] = []
+
+        async def execute(self, request: StepExecutionRequest) -> AgentResult:
+            self.calls.append(request)
+            if request.task.id == "compose":
+                assert tuple(result.task_id for result in request.dependency_results) == (
+                    "github",
+                    "notion",
+                )
+                return AgentResult(
+                    task_id="compose",
+                    status=AgentResultStatus.SUCCEEDED,
+                    summary_markdown="Final synthesized answer.",
+                    evidence=(
+                        Evidence(
+                            source_type=EvidenceSourceType.COMPUTED,
+                            source_name="synthesis",
+                            title="Synthesis result",
+                        ),
+                    ),
+                )
+            return AgentResult(
+                task_id=request.task.id,
+                status=AgentResultStatus.SUCCEEDED,
+                summary_markdown=f"Intermediate {request.task.id} result.",
+                evidence=(
+                    Evidence(
+                        source_type=EvidenceSourceType.MCP,
+                        source_name=request.task.id,
+                        title=f"{request.task.id} source",
+                        uri=f"https://example.com/{request.task.id}",
+                    ),
+                ),
+            )
+
+    async def scenario() -> None:
+        database = _database(tmp_path)
+        await database.start()
+        try:
+            await _insert_user(database)
+            run = await _create_run(database)
+            plan = PreparedExecutionPlan(
+                mode=RunMode.DELEGATE,
+                steps=(
+                    PreparedExecutionStep(_task("github")),
+                    PreparedExecutionStep(_task("notion")),
+                    PreparedExecutionStep(
+                        _task(
+                            "compose",
+                            subagent="synthesis",
+                            depends_on=("github", "notion"),
+                        )
+                    ),
+                ),
+                composition=CompositionMode.SYNTHESIS_SUBAGENT,
+            )
+            clock = MutableClock(NOW + timedelta(seconds=1))
+            executor = SynthesisExecutor()
+            engine = DependencyExecutionEngine(
+                _store(database),
+                executor,
+                ExecutionPolicy(2),
+                clock=clock,
+            )
+            await engine.materialize_and_enqueue(
+                run_id=run.id,
+                expected_revision=run.revision,
+                plan=plan,
+            )
+            clock.current += timedelta(seconds=1)
+            outcome = await engine.execute(
+                await _claim(_queue(database, clock), "worker-execution-0001")
+            )
+            call_count_after_execution = len(executor.calls)
+            guardrail = OutputGuardrailService(
+                OutputGuardrailPolicy(
+                    policy_version="orchestration-output-v1",
+                    max_input_bytes=100_000,
+                    max_output_bytes=50_000,
+                    max_mentions=2,
+                    max_evidence_links=20,
+                    max_evidence_link_bytes=2_048,
+                    allowed_link_schemes=frozenset({"https"}),
+                    allow_relative_links=False,
+                    broadcast_mentions=frozenset({"@channel", "@everyone", "@here"}),
+                    internal_detail_rules=core_output_internal_detail_rules(),
+                    truncation_marker="\n\n[OUTPUT TRUNCATED]",
+                ),
+                redactor=RedactionService(core_secret_redaction_policy()),
+            )
+
+            safe = OrchestrationOutputComposer(guardrail).compose(plan, outcome)
+
+            assert [request.task.id for request in executor.calls] == [
+                "github",
+                "notion",
+                "compose",
+            ]
+            assert len(executor.calls) == call_count_after_execution
+            assert "Final synthesized answer." in safe.markdown
+            assert "Intermediate github result." not in safe.markdown
+            assert "Intermediate notion result." not in safe.markdown
+            assert safe.evidence_links == (
+                "https://example.com/github",
+                "https://example.com/notion",
+            )
         finally:
             await database.close()
 

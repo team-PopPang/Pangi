@@ -665,6 +665,10 @@ sequenceDiagram
     C-->>U: Slack/API response
 ```
 
+Reducer는 `ExecutionOutcome.results`의 전달 순서를 신뢰하지 않고 검증된 Plan의 Task ID 순서로 다시 배치한다. Deterministic Mode는 성공·Partial Summary와 Task Source가 붙은 Warning을 안정된 Markdown으로 구성한다. Evidence는 Plan·Result 내부 순서를 유지하고 CRLF·NFC·Padding을 정규화한 URI의 첫 항목만 남긴다. URI가 없는 Evidence는 독립 Source로 유지하며 Fact와 Excerpt를 새로운 본문 사실로 확장하지 않는다.
+
+`synthesis_subagent` Mode는 최초 DAG에서 이미 실행된 Terminal Synthesis Result만 최종 본문으로 사용한다. Reducer가 선행 Summary를 다시 합치거나 Model·Subagent를 추가 호출하지 않는다. Direct Answer와 Delegate 결과는 모두 내부 `OutputCandidate`로 변환한 뒤 WBS-06.4.1 Output Guardrail을 통과하며, 이후 경계에는 허용된 `SafeOutput`만 전달한다.
+
 ### 7.4 Run State
 
 ```mermaid
