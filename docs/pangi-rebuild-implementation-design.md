@@ -2103,8 +2103,8 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 | `auth_sessions` | id, user_id, token_hash, csrf_hash, expires_at, rotated_at, state | 원문 Token 미저장, 만료 필수 | 04 |
 | `bootstrap_grants` | id, token_hash, expires_at, consumed_at, consumed_by_user_id, revoked_at, created_at | Active Grant 최대 1개, 일회용 | 04 |
 | `api_idempotency_records` | principal_id, route_key, idempotency_key, request_fingerprint, response_json, state, run_id, expires_at, timestamps | principal+route+key Unique | 05 |
-| `connections` | id, kind, display_name, display_qualifier, scope, owner_user_id, transport, state, config_json, secret_ref | User Scope면 owner 필수 | 09 |
-| `connection_tools` | connection_id, stable_tool_id, remote_name, schema_json, fingerprint, state | connection+stable ID Unique | 09 |
+| `connections` | id, kind, display_name, display_qualifier, scope, owner_user_id, transport, auth_type, state, config_json, secret_ref, revision, timestamps | User Scope면 owner 필수, Instance Scope면 owner 금지, revision 1씩 증가 | 09 |
+| `connection_tools` | stable_tool_id, connection_id, remote_name, permission, schema_json, schema_fingerprint, state, discovered_at | stable_tool_id 전역 Unique, Discovery 시간 단조 증가 | 09 |
 | `tool_policies` | connection_id, stable_tool_id, effect, permission, approval, limits_json | Tool당 Active 1개 | 09 |
 | `skills` | id, namespace, name, active_version_id, state, deleted_at | namespace+name Unique, Soft Delete | 11 |
 | `skill_versions` | id, skill_id, semver, manifest_json, compiled_json, fingerprint, state, eval_run_id | skill+semver Unique | 11 |

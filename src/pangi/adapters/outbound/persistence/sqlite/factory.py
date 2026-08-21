@@ -10,6 +10,7 @@ from pangi.adapters.outbound.persistence.sqlite.audit import (
     SqliteAuditWriter,
 )
 from pangi.adapters.outbound.persistence.sqlite.auth import SqliteBootstrapStore
+from pangi.adapters.outbound.persistence.sqlite.connections import SqliteConnectionRegistry
 from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.engine import SqliteMigrationAdmin
 from pangi.adapters.outbound.persistence.sqlite.event_writer import SqliteRunEventWriter
@@ -186,6 +187,12 @@ def build_model_invocation_recorder(
     """Build mandatory Model Invocation and internal Event persistence."""
 
     return SqliteModelInvocationRecorder(database, _build_run_event_writer())
+
+
+def build_connection_registry(database: SqliteDatabase) -> SqliteConnectionRegistry:
+    """Build persistent Connection metadata and Stable Tool resolution."""
+
+    return SqliteConnectionRegistry(database)
 
 
 def build_bootstrap_admin_for_cli(
