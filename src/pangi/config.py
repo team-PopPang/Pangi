@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import tomllib
 from ipaddress import ip_address
@@ -10,7 +11,14 @@ from pathlib import Path
 from typing import Literal, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 class PangiConfigError(ValueError):
@@ -68,6 +76,39 @@ class RuntimeConfig(_StrictModel):
     run_timeout_seconds: int = Field(default=180, ge=1, le=3600)
 
 
+class ModelRuntimeConfig(_StrictModel):
+    """Secret-free Root Model selection and Transport Retry limits."""
+
+    root_profile: str = Field(
+        default="root-default",
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$",
+    )
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    attempt_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
+    total_timeout_seconds: float = Field(default=90.0, gt=0, le=600)
+    retry_backoff_seconds: tuple[float, ...] = (0.5, 1.0)
+
+    @field_validator("retry_backoff_seconds", mode="before")
+    @classmethod
+    def normalize_retry_backoff(cls, value: object) -> object:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_retry_policy(self) -> ModelRuntimeConfig:
+        if self.total_timeout_seconds < self.attempt_timeout_seconds:
+            raise ValueError("total_timeout_seconds cannot be shorter than one attempt")
+        if len(self.retry_backoff_seconds) != self.max_attempts - 1:
+            raise ValueError("retry_backoff_seconds must define every retry delay")
+        if any(
+            not math.isfinite(value) or not 0 <= value <= 60
+            for value in self.retry_backoff_seconds
+        ):
+            raise ValueError("retry backoff values must be finite and between 0 and 60")
+        return self
+
+
 class StorageConfig(_StrictModel):
     """Local SQLite profile supported by the 1.0 runtime."""
 
@@ -93,6 +134,7 @@ class PangiConfig(_StrictModel):
     instance: InstanceConfig = Field(default_factory=InstanceConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    model: ModelRuntimeConfig = Field(default_factory=ModelRuntimeConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
 
@@ -140,6 +182,15 @@ class PangiConfig(_StrictModel):
                 f"max_concurrent_runs = {self.runtime.max_concurrent_runs}",
                 f"max_subagents_per_run = {self.runtime.max_subagents_per_run}",
                 f"run_timeout_seconds = {self.runtime.run_timeout_seconds}",
+                "",
+                "[model]",
+                f"root_profile = {quote(self.model.root_profile)}",
+                f"max_attempts = {self.model.max_attempts}",
+                f"attempt_timeout_seconds = {self.model.attempt_timeout_seconds}",
+                f"total_timeout_seconds = {self.model.total_timeout_seconds}",
+                "retry_backoff_seconds = ["
+                + ", ".join(str(value) for value in self.model.retry_backoff_seconds)
+                + "]",
                 "",
                 "[storage]",
                 f"url = {quote(self.storage.url)}",
