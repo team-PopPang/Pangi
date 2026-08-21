@@ -103,7 +103,7 @@ Run 조회·생성·취소·Event·Metric Service와 실제 실행 Handler는 AS
 
 ### Tool Permission·Approval·Budget 기반
 
-- Stable Tool ID를 현재 Connection과 Schema Snapshot으로 해석하는 Port를 제공해요. Stable ID의 실제 저장 형식과 MCP Tool Name Mapping은 아직 구현하지 않았어요.
+- Stable Tool ID를 현재 Connection과 Schema Snapshot으로 해석하는 Port를 제공해요. Connection과 Tool Snapshot은 SQLite에 저장하고 Stable Tool ID는 Registry 전체에서 유일하게 관리해요. 실제 MCP Tool Discovery와 원격 이름 Mapping은 아직 연결하지 않았어요.
 - 먼저 활성 Principal과 Run 요청자의 사용자 ID를 비교하고 User Connection Owner를 다시 검사해요. 다른 사용자의 Run이나 Connection을 실행하지 않으며 Instance Connection에는 사용자 Owner를 허용하지 않아요.
 - 명시적인 Tool Policy가 없으면 기본으로 Deny해요. Policy는 Connection, Schema Fingerprint, `read`·`write`·`destructive` Permission과 `none`·`user`·`admin` Approval에 정확히 묶여요.
 - Argument를 Canonical JSON으로 고정하고 UTF-8 Byte Limit과 주입된 JSON Schema Validator를 통과시켜요. 호출 뒤 원본 Mapping이 바뀌어도 실행 Argument는 변하지 않아요.
@@ -112,7 +112,7 @@ Run 조회·생성·취소·Event·Metric Service와 실제 실행 Handler는 AS
 - 모든 검사를 통과한 `GuardedToolCall`만 Executor에 전달해요. 차단된 호출은 Executor로 보내지 않으며, Timeout과 Result Byte Limit은 허용된 호출에 반드시 전달해요.
 - 판정과 오류에는 정책 Fingerprint와 안전한 수치만 남겨요. Argument, Approval Reference, Connection ID·Owner와 실제 Tool Name은 표현하지 않아요.
 
-실제 MCP Registry·Transport, JSON Schema Adapter, Policy·Approval·Invocation 저장소와 Result 정규화는 WBS-09에서 연결해요. 현재 구현은 Tool 호출 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안 경계예요.
+Connection·Tool Registry의 SQLite Schema와 Repository, Revision Compare-and-Swap, 오래된 Discovery 거부와 Stable Resolver는 WBS-09.2.1에서 연결했어요. Tool이 `active`이고 Connection이 `connected`일 때만 Resolver가 실행 가능 상태로 반환해요. 실제 MCP Transport·Discovery, JSON Schema Adapter, Policy·Approval·Budget·Invocation 저장소와 Result 정규화는 후속 WBS에서 연결해요. 현재 구현은 아직 Tool 호출 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안 경계예요.
 
 ### 최종 Output Guardrail 기반
 
