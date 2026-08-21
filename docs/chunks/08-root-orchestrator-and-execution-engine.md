@@ -86,7 +86,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Decision, Logical Call, Provider Request와 Validation 실패 Event를 기록한다.
 - [x] `SafeOutput` 저장과 `composing → completed|failed` 전이를 원자적으로 처리한다.
 - [x] 활성 Model Policy가 선택한 Provider와 실패 폐쇄 Root Catalog를 실제 Root 실행 경계에 조립한다.
-- [ ] API의 Run 생성 경로를 Orchestrator Use Case에 연결한다.
+- [x] API의 Run 생성 경로를 Orchestrator Use Case에 연결한다.
 
 ## 검증 체크리스트
 
@@ -97,6 +97,8 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Optional 실패와 Required 실패의 Run 상태/출력이 다른지 확인한다.
 - [x] 동일 AgentResult 입력이 동일 Reducer 출력을 만드는지 Property Test를 실행한다.
 - [x] Root 재계획과 Delegation Depth 증가를 불변식 테스트로 차단한다.
+- [x] 보호된 Run API에서 클라이언트의 Principal·Data Class 조작과 Guardrail 우회를 차단한다.
+- [x] Queue Commit 뒤 Wake-up, Startup Recovery, ASGI 종료 순서와 Dispatcher Readiness를 검증한다.
 
 ## 완료 조건
 
@@ -165,6 +167,19 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - Root Composition Factory는 SQLite 활성 Model Policy·Invocation 저장소, 중앙 Redaction, JSON Schema Validator, 선택 Provider와 빈 Catalog를 `RootOrchestratorService`에 연결한다. Queue와 ASGI 생명주기는 시작하지 않아 WBS-08.5.3이 같은 Factory를 사용한다.
 - 활성 OpenAI Policy의 실제 Root Direct 경로, Policy 누락 시 Provider 생성 0회, Bedrock Region 전달, 선택 의존성·미지원 Provider 실패, Fallback 금지, Config 호환성과 빈 Catalog를 Unit·Integration·Smoke Test로 고정했다.
 - Model Policy 생성·초기 활성화 운영 경로는 자동화하지 않는다. 활성 Policy가 없으면 기존 Egress Policy 규칙대로 실패 폐쇄하며 Eval 실행과 활성화 운영 경로는 WBS-15 이후 범위로 유지한다.
+
+## 7차 구현 결과
+
+- 로그인 Session, Same-origin, CSRF와 `Idempotency-Key`를 요구하는 `POST /api/v1/runs`를 추가했다. 초기 요청 계약은 Text, Thread와 선택적인 Explicit Skill만 허용하고 Principal·Request ID·생성 시각·Schedule·Attachment·Data Class는 받지 않는다.
+- `LocalRunSubmissionService`가 Session Principal을 Dashboard Channel에 묶고 서버가 만든 Request ID·시각과 고정 Route Key로 `RunRequest`를 구성한다. 기존 Input Guardrail과 Idempotency 경계를 통과한 Run만 Root Orchestrator에 전달한다.
+- 신뢰된 `runtime.run_data_classes` 설정을 추가하고 기존 Schema Version 1 설정에는 보수적인 `restricted` 기본값을 적용했다. 클라이언트 입력으로 분류를 낮출 수 없으며 비어 있거나 중복된 집합은 설정 검증에서 거부한다.
+- Local Dashboard Input Baseline은 UTF-8 100KB Text, Attachment 0개, 사용자·Channel별 분당 60건과 Versioned Bidi·Hidden Unicode 차단 집합을 적용한다. Skill Registry 전에는 Explicit Skill Authorizer가 실패 폐쇄한다.
+- Plan·Queue 전이가 Commit된 뒤 `RunQueueRuntime.wake()`로 Process-local Dispatcher를 깨운다. 정확한 Idempotency Replay가 이미 완료된 Run이면 Root와 Queue를 다시 실행하지 않는다.
+- SQLite Execution·Lifecycle Store, Dependency Engine, Output Composer, Handler와 Queue Runtime을 실제 Composition Root에 조립했다. 빈 Catalog 기간에는 Direct만 완료하며 Subagent Executor는 WBS-10 전까지 실패 폐쇄한다.
+- `CompositeRuntimeBackend`이 SQLite 다음 Queue Recovery·Dispatcher를 시작하고 Queue 다음 SQLite를 닫는다. 시작 중 실패하면 이미 열린 Resource를 역순 정리한다.
+- Queue Dispatcher가 비정상 종료되면 Runtime을 준비되지 않은 상태로 표시하고 `/health/ready`에 `run-queue.runtime` 검사를 추가했다. 취소는 DB 상태를 먼저 Commit한 뒤 같은 Process의 활성 Task를 즉시 취소한다.
+- Guardrail·Idempotency·Queue 오류를 안전한 HTTP 상태와 코드로 변환하고 `createRun` OpenAPI 계약을 추가했다. 응답은 Idempotency Key, Data Class, Worker와 Lease 정보를 노출하지 않는다.
+- 보호된 HTTP 계약, 신뢰 Metadata 구성, Queue·ASGI 생명주기, Direct End-to-End 완료, Replay Root 호출 0회, 활성 Policy 부재 실패 폐쇄와 OpenAPI Drift를 Unit·Contract·Integration Test로 고정했다.
 
 ## 미결정 사항
 
