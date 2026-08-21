@@ -53,11 +53,11 @@ def test_plan_is_read_only_and_apply_is_idempotent(tmp_path: Path) -> None:
     second = asyncio.run(admin.apply())
 
     assert not plan.database_exists
-    assert [migration.version for migration in plan.pending] == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert [migration.version for migration in plan.pending] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
     assert paths.database_file.exists()
-    assert first.current_version == 8
-    assert [migration.version for migration in first.applied] == [1, 2, 3, 4, 5, 6, 7, 8]
-    assert second.current_version == 8
+    assert first.current_version == 9
+    assert [migration.version for migration in first.applied] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert second.current_version == 9
     assert second.applied == ()
     assert second.backup_file is None
 
@@ -86,7 +86,7 @@ def test_sqlite_connection_profile_is_enforced(tmp_path: Path) -> None:
         finally:
             await connection.close()
 
-    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 8)
+    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 9)
 
 
 def test_applied_migration_checksum_change_is_rejected(tmp_path: Path) -> None:
@@ -233,6 +233,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         model_policy_management,
         orchestration_execution,
         orchestration_lifecycle,
+        connection_registry,
     ) = packaged
     asyncio.run(
         SqliteMigrationAdmin(
@@ -244,7 +245,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
 
     result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
 
-    assert result.current_version == 8
+    assert result.current_version == 9
     assert [migration.name for migration in result.applied] == [
         run_core.descriptor.name,
         audit.descriptor.name,
@@ -252,12 +253,13 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         model_policy_management.descriptor.name,
         orchestration_execution.descriptor.name,
         orchestration_lifecycle.descriptor.name,
+        connection_registry.descriptor.name,
     ]
     assert result.backup_file is not None
     manifest_file = result.backup_file.with_name(f"{result.backup_file.name}.manifest.json")
     verification = asyncio.run(SqliteSnapshotStore(paths).verify(manifest_file))
     assert verification.package_compatible
-    assert verification.artifact.manifest.migration_target_version == 8
+    assert verification.artifact.manifest.migration_target_version == 9
     with sqlite3.connect(paths.database_file) as connection:
         tables = {
             row[0]
@@ -265,7 +267,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-        assert connection.execute("PRAGMA user_version").fetchone() == (8,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (9,)
     assert {
         "runs",
         "run_steps",
@@ -276,11 +278,51 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         "model_invocations",
         "run_execution_plans",
         "run_outputs",
+        "connections",
+        "connection_tools",
     } <= tables
     with sqlite3.connect(result.backup_file) as backup:
         assert backup.execute("PRAGMA user_version").fetchone() == (2,)
         assert (
             backup.execute("SELECT name FROM sqlite_master WHERE name = 'runs'").fetchone() is None
+        )
+
+
+def test_packaged_connection_registry_migration_upgrades_v8_with_verified_backup(
+    tmp_path: Path,
+) -> None:
+    paths, config = _initialized_runtime(tmp_path)
+    packaged = PackageMigrationRegistry().load()
+    previous = StaticMigrationRegistry(*packaged[:8])
+    asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=previous,
+        ).apply()
+    )
+
+    result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+
+    assert result.current_version == 9
+    assert [migration.name for migration in result.applied] == ["connection_registry"]
+    assert result.backup_file is not None
+    with sqlite3.connect(paths.database_file) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        assert connection.execute("PRAGMA user_version").fetchone() == (9,)
+    assert {"connections", "connection_tools"} <= tables
+    with sqlite3.connect(result.backup_file) as backup:
+        assert backup.execute("PRAGMA user_version").fetchone() == (8,)
+        assert (
+            backup.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'connections'"
+            ).fetchone()
+            is None
         )
 
 
