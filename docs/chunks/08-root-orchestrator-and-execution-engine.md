@@ -85,6 +85,7 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - [x] Deterministic Reducer와 Synthesis Task 연결을 구현한다.
 - [x] Decision, Logical Call, Provider Request와 Validation 실패 Event를 기록한다.
 - [x] `SafeOutput` 저장과 `composing → completed|failed` 전이를 원자적으로 처리한다.
+- [x] 활성 Model Policy가 선택한 Provider와 실패 폐쇄 Root Catalog를 실제 Root 실행 경계에 조립한다.
 - [ ] API의 Run 생성 경로를 Orchestrator Use Case에 연결한다.
 
 ## 검증 체크리스트
@@ -153,7 +154,17 @@ WBS 번호와 문서는 유지하고 아래 실행 단위를 독립 PR로 구현
 - `OrchestrationRunHandler`는 영속 Plan 실행 결과가 `composing`일 때만 Reducer와 Output Guardrail을 호출한다. `SafeOutput` 저장, `output.completed`, 선택적인 `output.redacted`, `run.completed` Event와 Run 완료 전이는 하나의 Transaction에서 처리한다.
 - 실행 Engine이 `composing`으로 전이한 뒤에도 현재 Worker Lease를 유지한다. Heartbeat는 합성이 끝날 때까지 Lease를 갱신하고 Handler 종료나 Lease 만료가 발생하면 Output을 재합성하거나 Root를 재호출하지 않고 `composition_interrupted`로 실패시킨다.
 - Direct·Delegate 완료, Decision 실패 뒤 실행 0회, 명시 Skill 0회 호출, 중단된 Planning Replay, Secret 제거, Output Event 순서와 Composing Lease 복구를 Unit·Integration Test로 고정했다.
-- 실제 Model Provider 선택과 Root Catalog Adapter는 WBS-08.5.2에 남긴다. `POST /api/v1/runs`, 서버 측 Data Class 분류, Queue Wake-up과 ASGI 생명주기는 WBS-08.5.3에 남긴다.
+- 실제 Model Provider 선택과 Root Catalog Adapter는 WBS-08.5.2에서 구현한다. `POST /api/v1/runs`, 서버 측 Data Class 분류, Queue Wake-up과 ASGI 생명주기는 WBS-08.5.3에 남긴다.
+
+## 6차 구현 결과
+
+- 비밀값이 없는 `[model]` 설정에 Root Profile, Provider 최대 요청 횟수, 요청·전체 Timeout과 Retry Backoff를 추가했다. 기존 Schema Version 1 설정은 새 Section이 없어도 기본값으로 읽으며 생성되는 TOML에는 Credential을 넣지 않는다.
+- `PolicySelectedModelProvider`는 Model Policy가 승인한 `openai` 또는 `bedrock` Adapter만 지연 생성하고 Provider·Region별로 재사용한다. 선택 의존성 누락, 미지원 Provider와 Bedrock Region 누락은 원문 없는 안정적인 실패로 변환하며 다른 Provider로 Fallback하지 않는다.
+- OpenAI Credential은 SDK의 `OPENAI_API_KEY`, Bedrock Credential은 AWS Credential Chain에서 읽는다. 활성 Profile이 선택한 Model과 Region은 기존 Guarded Request를 그대로 사용하며 Credential을 Config, Invocation과 Event에 저장하지 않는다.
+- `EmptyRootCatalogProvider`는 Principal 계약을 확인한 뒤 Version이 고정된 빈 불변 Snapshot을 반환한다. WBS-09~11의 Registry가 구현되기 전까지 Direct Decision만 허용하고 존재하지 않는 Subagent·Skill·Connection을 만들지 않는다.
+- Root Composition Factory는 SQLite 활성 Model Policy·Invocation 저장소, 중앙 Redaction, JSON Schema Validator, 선택 Provider와 빈 Catalog를 `RootOrchestratorService`에 연결한다. Queue와 ASGI 생명주기는 시작하지 않아 WBS-08.5.3이 같은 Factory를 사용한다.
+- 활성 OpenAI Policy의 실제 Root Direct 경로, Policy 누락 시 Provider 생성 0회, Bedrock Region 전달, 선택 의존성·미지원 Provider 실패, Fallback 금지, Config 호환성과 빈 Catalog를 Unit·Integration·Smoke Test로 고정했다.
+- Model Policy 생성·초기 활성화 운영 경로는 자동화하지 않는다. 활성 Policy가 없으면 기존 Egress Policy 규칙대로 실패 폐쇄하며 Eval 실행과 활성화 운영 경로는 WBS-15 이후 범위로 유지한다.
 
 ## 미결정 사항
 
