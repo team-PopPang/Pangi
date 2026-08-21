@@ -43,10 +43,11 @@ assert pangi.__all__ == (
 def test_provider_adapter_modules_do_not_eagerly_load_optional_sdks() -> None:
     code = """
 import sys
-from pangi.adapters.outbound.model_providers import bedrock, openai
+from pangi.adapters.outbound.model_providers import bedrock, openai, router
 
 assert bedrock is not None
 assert openai is not None
+assert router is not None
 for module in ('boto3', 'botocore', 'jsonschema', 'openai'):
     assert module not in sys.modules, module
 """

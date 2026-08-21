@@ -187,8 +187,11 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 - 최근 7일 허용·거부 횟수, Purpose, 거부 사유와 Draft 변경 영향을 읽기 전용으로 확인할 수 있어요.
 - Consumer와 필수 Eval Suite가 아직 연결되지 않은 상태를 실제 빈 목록과 구분해 안내해요.
 - Model Policy 목록은 Cursor로 다음 페이지를 이어서 조회해요. 로딩, 빈 목록, 오류, 권한 없음과 모바일 화면 상태를 각각 처리해요.
+- 활성 Model Policy가 선택한 `openai` 또는 `bedrock` Adapter만 지연 생성해요. 선택되지 않은 SDK는 불러오지 않고 Provider 실패를 이유로 다른 Provider에 임의로 Fallback하지 않아요.
+- `[model]` 설정은 Root Profile과 Provider Retry·Timeout만 관리해요. OpenAI API Key와 AWS Credential은 `pangi.toml`에 저장하지 않아요.
+- SQLite 활성 Policy, 중앙 Redaction, 구조화 출력 검증, Invocation 기록과 선택 Provider를 하나의 Root Model 실행 경계로 조립해요.
 
-실제 Credential·Model 설정과 Runtime 조립, 사용처 Registry와 WBS-15 Eval 실행기는 후속 단계에서 구현해요.
+Model Policy 생성·Eval 실행과 활성화 운영 경로, 사용처 Registry는 후속 단계에서 구현해요. 활성 Policy가 없으면 Provider를 만들거나 Network를 호출하지 않고 요청을 거부해요.
 
 ### Root Orchestrator와 실행 Engine 기반
 
@@ -202,15 +205,17 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 - Guardrail을 통과해 생성된 Run은 `planning`에서 Root Decision을 한 번 수행하고, 성공한 Direct·Delegate Plan만 영속 Queue로 넘겨요. Decision과 Validation 실패는 외부 실행 전에 `failed`로 종료해요.
 - Queue Handler는 실행 결과를 결정적으로 합성하고 `SafeOutput` 저장, Output Event와 `composing → completed|failed` 전이를 하나의 SQLite Transaction으로 처리해요.
 - `composing` 중에도 Worker Lease와 Heartbeat를 유지해요. Handler 종료나 Lease 만료가 발생하면 Output이나 Root Decision을 다시 실행하지 않고 `composition_interrupted`로 실패시켜요.
+- Root Runtime은 Principal을 받는 불변 Catalog 경계를 사용해요. Subagent·Skill·Connection Registry가 구현되기 전에는 유효한 빈 Snapshot을 반환하므로 Direct만 가능하고 알 수 없는 Delegate·Skill은 외부 실행 전에 차단해요.
+- Root Composition Factory는 SQLite 활성 Model Policy와 Invocation 저장소, 선택 Provider, JSON Schema Validator와 빈 Catalog를 연결해요. Queue와 ASGI를 시작하지 않아 다음 통합 단계에서 같은 실행 경계를 재사용할 수 있어요.
 
-이 기반은 아직 보호된 Run 생성 API와 ASGI Queue Runtime, 실제 Model Provider·Root Catalog·Subagent Runtime에 조립되지 않았어요. 현재 Application Service와 Handler는 주입된 Port를 사용하는 상태예요.
+이 기반은 아직 보호된 Run 생성 API와 ASGI Queue Runtime, 실제 Subagent·Skill·Connection Registry에 조립되지 않았어요. 현재 Root Catalog는 존재하지 않는 Capability를 만들지 않는 빈 Snapshot을 사용해요.
 
 ## 아직 구현되지 않은 기능
 
-- Root Orchestrator와 실행 Handler의 실제 Model Provider·Queue Runtime·ASGI 연결, Lease·Heartbeat 운영 기본값
+- Root Orchestrator와 실행 Handler의 Queue Runtime·ASGI 연결, Lease·Heartbeat 운영 기본값
 - Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
-- Model Provider Credential·Runtime 조립, 사용처 Registry와 WBS-15 Eval 실행기 연결
+- Model Policy 생성·초기 활성화 운영 경로, 사용처 Registry와 WBS-15 Eval 실행기 연결
 - Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
 - Slack 요청 수신과 응답 전달
@@ -228,7 +233,7 @@ Python 3.11 이상과 `uv`가 필요해요. Backend 개발 의존성은 잠금 �
 uv sync --extra dev --python 3.11
 ```
 
-Provider SDK까지 설치하려면 필요한 Extra를 개발 환경에 추가하세요. Adapter는 구현했지만 Credential 설정과 Runtime 연결은 아직 제공하지 않아요.
+Root Model Runtime을 사용하려면 선택한 Provider Extra를 설치하세요. Runtime은 활성 Policy가 선택한 Provider만 지연 생성해요.
 
 ```bash
 # OpenAI Adapter와 개발 의존성을 함께 설치해요.
@@ -237,6 +242,21 @@ uv sync --extra dev --extra openai --python 3.11
 # Bedrock Adapter와 개발 의존성을 함께 설치해요.
 uv sync --extra dev --extra bedrock --python 3.11
 ```
+
+OpenAI는 SDK 표준 환경변수인 `OPENAI_API_KEY`를 사용해요. Bedrock은 AWS Credential Chain과 활성 Model Profile의 Region을 사용해요. Credential은 `.pangi/pangi.toml`, 로그와 Run Event에 저장하지 마세요.
+
+`pangi init`이 만드는 `[model]` 설정에는 비밀값이 없어요. `root_profile`은 SQLite의 활성 Model Policy 이름과 같아야 해요. Retry는 하나의 Root Logical Call 안에서 발생하는 실제 Provider 요청만 늘려요.
+
+```toml
+[model]
+root_profile = "root-default"
+max_attempts = 3
+attempt_timeout_seconds = 30.0
+total_timeout_seconds = 90.0
+retry_backoff_seconds = [0.5, 1.0]
+```
+
+활성 Model Policy가 없거나 선택한 Provider Extra가 설치되지 않으면 Root Model 실행은 실패 폐쇄해요. 다른 Provider로 자동 전환하지 않아요.
 
 Admin UI를 수정하거나 검증하려면 Node.js와 npm도 준비하세요.
 
@@ -332,7 +352,7 @@ uv run pytest \
 
 ### Root Orchestrator와 실행 Engine만 검증
 
-WBS-08.1~08.5.1에서 구현한 Decision·Plan 검증, Root 단일 호출, Plan·Result 영속화, Dependency 실행, 결정적 Reducer와 `SafeOutput` 완료 영속화를 확인하세요.
+WBS-08.1~08.5.2에서 구현한 Decision·Plan 검증, Root 단일 호출, Plan·Result 영속화, Dependency 실행, 결정적 Reducer, `SafeOutput` 완료 영속화와 실제 Model Runtime 조립을 확인하세요.
 
 ```bash
 uv run pytest \
@@ -340,12 +360,15 @@ uv run pytest \
   tests/unit/test_plan_validator.py \
   tests/unit/test_root_context.py \
   tests/unit/test_root_orchestrator.py \
+  tests/unit/test_root_catalog.py \
+  tests/unit/test_model_provider_router.py \
   tests/unit/test_orchestration_execution_contracts.py \
   tests/unit/test_orchestration_lifecycle.py \
   tests/unit/test_result_reducer.py \
   tests/contract/test_root_orchestration_model_contract.py \
   tests/integration/test_orchestration_execution.py \
   tests/integration/test_orchestration_lifecycle_persistence.py \
+  tests/integration/test_root_runtime_composition.py \
   tests/architecture/test_dependency_rules.py
 ```
 

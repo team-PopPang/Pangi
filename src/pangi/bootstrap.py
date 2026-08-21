@@ -9,36 +9,88 @@ from pangi.adapters.inbound.cli import CliDependencies, create_app
 from pangi.adapters.inbound.web import create_web_app
 from pangi.adapters.outbound.initialization import FileSystemInitializer
 from pangi.adapters.outbound.logging import TelemetryRedactionFilter
+from pangi.adapters.outbound.model_providers.json_schema import JsonSchemaOutputValidator
+from pangi.adapters.outbound.model_providers.router import PolicySelectedModelProvider
+from pangi.adapters.outbound.persistence.sqlite.database import SqliteDatabase
 from pangi.adapters.outbound.persistence.sqlite.factory import (
     build_audit_query_service,
     build_auth_sessions,
     build_bootstrap_admin,
     build_bootstrap_admin_for_cli,
     build_migration_admin,
+    build_model_invocation_recorder,
     build_model_policy_management_service,
+    build_model_policy_repository,
     build_run_cancellation_service,
     build_run_event_service,
     build_run_queue_metric_service,
     build_run_service,
     build_sqlite_database,
 )
+from pangi.adapters.outbound.root_catalog import EmptyRootCatalogProvider
 from pangi.adapters.outbound.runtime_control import UvicornRuntimeControl
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.adapters.outbound.runtime_readiness import LocalRuntimeReadinessProbe
 from pangi.adapters.outbound.system_checks import build_doctor_service
+from pangi.application.contracts.model_routing import ProviderRetryPolicy
 from pangi.application.contracts.paths import RuntimePaths
+from pangi.application.contracts.root_orchestration import RootOrchestratorPolicy
 from pangi.application.ports.runtime import RuntimeBackend
+from pangi.application.services.model_routing import (
+    GuardedModelExecutionService,
+    ModelPolicyService,
+)
+from pangi.application.services.redaction import (
+    RedactionService,
+    core_secret_redaction_policy,
+)
+from pangi.application.services.root_orchestrator import RootOrchestratorService
 from pangi.application.services.telemetry_redaction import (
     core_telemetry_redaction_service,
 )
 from pangi.config import PangiConfig
 from pangi.runtime import PangiRuntime
 
+_ROOT_PROMPT_VERSION = "root-orchestration-v1"
+
 
 def create_runtime(backend: RuntimeBackend) -> PangiRuntime:
     """Build the public runtime facade around an application backend."""
 
     return PangiRuntime(backend)
+
+
+def build_root_orchestrator_service(
+    database: SqliteDatabase,
+    config: PangiConfig,
+) -> RootOrchestratorService:
+    """Compose governed Root Model execution without starting Queue or ASGI runtime."""
+
+    repository = build_model_policy_repository(database)
+    retry_policy = ProviderRetryPolicy(
+        max_attempts=config.model.max_attempts,
+        attempt_timeout_seconds=config.model.attempt_timeout_seconds,
+        total_timeout_seconds=config.model.total_timeout_seconds,
+        retry_backoff_seconds=config.model.retry_backoff_seconds,
+    )
+    model = GuardedModelExecutionService(
+        ModelPolicyService(
+            profiles=repository,
+            policies=repository,
+            redactor=RedactionService(core_secret_redaction_policy()),
+        ),
+        provider=PolicySelectedModelProvider(retry_policy),
+        output_validator=JsonSchemaOutputValidator(),
+        invocations=build_model_invocation_recorder(database),
+    )
+    return RootOrchestratorService(
+        RootOrchestratorPolicy(
+            profile=config.model.root_profile,
+            prompt_version=_ROOT_PROMPT_VERSION,
+        ),
+        catalogs=EmptyRootCatalogProvider(),
+        model=model,
+    )
 
 
 def _resolve_cli_paths(project_local: bool, config_path: Path | None) -> RuntimePaths:
