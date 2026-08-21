@@ -2661,6 +2661,8 @@ Skill 삭제와 Holiday Calendar 활성화는 Client가 직전 Impact Response�
 | GET | `/api/v1/eval-runs/:id` | 결과 |
 | GET | `/api/v1/eval-runs/compare` | Baseline 비교 |
 
+초기 Local Dashboard의 `POST /api/v1/runs`는 Text, Thread와 선택적인 Explicit Skill만 받는다. Principal, Channel, Request ID, 생성 시각, Schedule과 Data Class는 신뢰된 서버 경계가 만들며 클라이언트가 제출하거나 덮어쓸 수 없다. Attachment는 안전한 Upload·Vault 경계가 연결될 때까지 이 API에서 받지 않는다. 기존 설정에 Data Class가 없으면 과소 분류를 피하기 위해 `restricted`를 사용하고, 활성 Model Policy가 이를 허용하지 않으면 Provider 호출 없이 실패 폐쇄한다.
+
 ### 17.5 Memory와 Admin
 
 | Method | Path | 역할 |
@@ -3304,6 +3306,7 @@ port = 8787
 max_concurrent_runs = 4
 max_subagents_per_run = 3
 run_timeout_seconds = 180
+run_data_classes = ["restricted"]
 
 [storage]
 url = "sqlite:///{data_dir}/pangi.sqlite3"

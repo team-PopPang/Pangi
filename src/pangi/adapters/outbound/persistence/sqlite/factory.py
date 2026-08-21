@@ -25,6 +25,7 @@ from pangi.adapters.outbound.persistence.sqlite.runs import (
 from pangi.adapters.outbound.persistence.sqlite.sessions import SqliteAuthSessionStore
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.run_queue import RunQueuePolicy
+from pangi.application.ports.run_queue import RunQueueRuntimeNotifier
 from pangi.application.services.audit import (
     AuditQueryService,
     core_audit_redaction_service,
@@ -136,12 +137,15 @@ def build_run_queue_service(
 
 def build_run_cancellation_service(
     database: SqliteDatabase,
+    *,
+    runtime_notifier: RunQueueRuntimeNotifier | None = None,
 ) -> RunCancellationService:
     """Build owner-authorized Run cancellation without starting a worker runtime."""
 
     return RunCancellationService(
         SqliteRunStore(database, _build_run_event_writer()),
         SqliteRunQueueStore(database, _build_run_event_writer()),
+        runtime_notifier=runtime_notifier,
     )
 
 

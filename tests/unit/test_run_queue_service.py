@@ -13,6 +13,7 @@ from pangi.application.contracts.run_queue import (
     RunQueuePolicy,
     RunRecoveryResult,
 )
+from pangi.application.ports.run_queue import RunQueueUnavailableError
 from pangi.application.services.run_queue import RunQueueRuntime, RunQueueService
 from pangi.domain.auth import UserRole
 from pangi.domain.runs import Principal, PrincipalChannel, Run, RunRequest, RunState, transition_run
@@ -173,8 +174,11 @@ def test_runtime_recovers_once_limits_concurrency_and_cancels_active_run() -> No
             worker_id_factory=lambda: "worker-identifier-0001",
         )
 
+        with pytest.raises(RunQueueUnavailableError):
+            runtime.wake()
         await runtime.start()
         await runtime.start()
+        assert runtime.ready
         await _wait_until(lambda: len(handler.started) == 2)
         assert handler.peak == 2
         assert store.recovery_calls == 1
@@ -195,9 +199,38 @@ def test_runtime_recovers_once_limits_concurrency_and_cancels_active_run() -> No
         await runtime.close()
 
         assert not runtime.started
+        assert not runtime.ready
         assert first in {run_id for run_id, _reason in store.abandoned}
         assert third in {run_id for run_id, _reason in store.abandoned}
         assert all(reason == "handler_returned" for _run_id, reason in store.abandoned)
+
+    asyncio.run(scenario())
+
+
+def test_dispatcher_failure_marks_runtime_not_ready() -> None:
+    class FailingStore(MemoryQueueStore):
+        async def claim_next(self, **_kwargs: object) -> RunClaim | None:
+            raise RuntimeError("queue read failed")
+
+    async def scenario() -> None:
+        store = FailingStore(())
+        service = RunQueueService(
+            store,
+            RunQueuePolicy(1, timedelta(seconds=30), timedelta(seconds=10)),
+            clock=lambda: NOW,
+        )
+        runtime = RunQueueRuntime(
+            service,
+            BlockingHandler(),
+            worker_id_factory=lambda: "worker-identifier-0001",
+        )
+
+        await runtime.start()
+        await _wait_until(lambda: not runtime.ready)
+
+        with pytest.raises(RunQueueUnavailableError):
+            runtime.wake()
+        await runtime.close()
 
     asyncio.run(scenario())
 

@@ -41,6 +41,18 @@ from pangi.domain.runs import (
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
 
 
+class QueueNotifier:
+    def __init__(self) -> None:
+        self.cancelled_run_ids: list[str] = []
+        self.ready = True
+
+    def wake(self) -> None:
+        raise AssertionError("cancellation must not wake the Queue")
+
+    def cancel_active(self, run_id: str) -> None:
+        self.cancelled_run_ids.append(run_id)
+
+
 class MutableClock:
     def __init__(self, current: datetime) -> None:
         self.current = current
@@ -214,9 +226,11 @@ def test_owner_cancel_and_admin_queue_metrics_are_enforced(tmp_path: Path) -> No
             clock.current += timedelta(seconds=1)
             await queue.enqueue(run_id=third.id, expected_revision=third.revision)
 
+            notifier = QueueNotifier()
             cancellation = RunCancellationService(
                 SqliteRunStore(database),
                 SqliteRunQueueStore(database),
+                runtime_notifier=notifier,
                 clock=lambda: NOW + timedelta(seconds=13),
             )
             with pytest.raises(RunNotFoundError):
@@ -230,6 +244,7 @@ def test_owner_cancel_and_admin_queue_metrics_are_enforced(tmp_path: Path) -> No
             )
             assert cancelled.changed
             assert cancelled.run.state is RunState.CANCELLED
+            assert notifier.cancelled_run_ids == [second.id]
 
             clock.current = NOW + timedelta(seconds=14)
             claim = await queue.claim_next(worker_id="worker-identifier-0001")

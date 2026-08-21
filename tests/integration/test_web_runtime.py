@@ -39,6 +39,7 @@ def test_composed_app_starts_sqlite_and_serves_packaged_shell(tmp_path: Path) ->
         assert ready.status_code == 200
         assert ready.json()["status"] == "ready"
         assert {check["id"] for check in ready.json()["checks"]} == {
+            "run-queue.runtime",
             "sqlite.runtime",
             "web.assets",
         }
@@ -134,6 +135,46 @@ def test_composed_bootstrap_api_creates_admin_with_safe_errors(tmp_path: Path) -
         session_token = client.cookies.get("pangi_session")
         csrf_token = client.cookies.get("pangi_csrf")
         session = client.get("/api/v1/auth/session")
+        failed_run = client.post(
+            "/api/v1/runs",
+            headers={
+                "Origin": "http://127.0.0.1:8787",
+                "Idempotency-Key": "runtime-fail-closed-once",
+                "X-CSRF-Token": str(csrf_token),
+            },
+            json={"text": "Return one direct answer."},
+        )
+        replayed_run = client.post(
+            "/api/v1/runs",
+            headers={
+                "Origin": "http://127.0.0.1:8787",
+                "Idempotency-Key": "runtime-fail-closed-once",
+                "X-CSRF-Token": str(csrf_token),
+            },
+            json={"text": "Return one direct answer."},
+        )
+        conflicting_run = client.post(
+            "/api/v1/runs",
+            headers={
+                "Origin": "http://127.0.0.1:8787",
+                "Idempotency-Key": "runtime-fail-closed-once",
+                "X-CSRF-Token": str(csrf_token),
+            },
+            json={"text": "Use a different semantic request."},
+        )
+        blocked_skill = client.post(
+            "/api/v1/runs",
+            headers={
+                "Origin": "http://127.0.0.1:8787",
+                "Idempotency-Key": "runtime-explicit-skill-once",
+                "X-CSRF-Token": str(csrf_token),
+            },
+            json={"text": "Use a Skill.", "explicit_skill": "missing-skill"},
+        )
+        run_list = client.get("/api/v1/runs")
+        failed_run_detail = client.get(
+            f"/api/v1/runs/{failed_run.json()['run']['id']}"
+        )
         missing_csrf = client.post(
             "/api/v1/auth/session/rotate",
             headers={"Origin": "http://127.0.0.1:8787"},
@@ -172,6 +213,21 @@ def test_composed_bootstrap_api_creates_admin_with_safe_errors(tmp_path: Path) -
     assert wrong_login.json()["error"]["code"] == "invalid_credentials"
     assert login.status_code == 200
     assert login.json()["session"]["principal"]["role"] == "admin"
+    assert failed_run.status_code == 202
+    assert failed_run.json()["run"]["state"] == "failed"
+    assert failed_run.json()["run"]["error_code"] == "model_policy_missing"
+    assert replayed_run.status_code == 202
+    assert replayed_run.json()["replayed"] is True
+    assert replayed_run.json()["run"]["id"] == failed_run.json()["run"]["id"]
+    assert conflicting_run.status_code == 409
+    assert conflicting_run.json()["error"]["code"] == "idempotency_conflict"
+    assert blocked_skill.status_code == 503
+    assert blocked_skill.json()["error"]["code"] == "explicit_skill_unavailable"
+    assert [item["id"] for item in run_list.json()["items"]] == [
+        failed_run.json()["run"]["id"]
+    ]
+    assert failed_run_detail.status_code == 200
+    assert failed_run_detail.json()["run"]["id"] == failed_run.json()["run"]["id"]
     assert session_token is not None
     assert csrf_token is not None
     login_cookies = login.headers.get_list("set-cookie")

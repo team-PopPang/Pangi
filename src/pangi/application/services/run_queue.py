@@ -15,7 +15,11 @@ from pangi.application.contracts.run_queue import (
     RunQueuePolicy,
     RunRecoveryResult,
 )
-from pangi.application.ports.run_queue import RunExecutionHandler, RunQueueStore
+from pangi.application.ports.run_queue import (
+    RunExecutionHandler,
+    RunQueueStore,
+    RunQueueUnavailableError,
+)
 from pangi.domain.runs import Run
 
 Clock = Callable[[], datetime]
@@ -121,6 +125,7 @@ class RunQueueRuntime:
         self._lifecycle_lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(service.policy.max_concurrent_runs)
         self._dispatcher: asyncio.Task[None] | None = None
+        self._dispatcher_failed = False
         self._active: dict[str, tuple[RunClaim, asyncio.Task[None]]] = {}
         self._started = False
         self._stopping = False
@@ -128,6 +133,17 @@ class RunQueueRuntime:
     @property
     def started(self) -> bool:
         return self._started
+
+    @property
+    def ready(self) -> bool:
+        dispatcher = self._dispatcher
+        return (
+            self._started
+            and not self._stopping
+            and not self._dispatcher_failed
+            and dispatcher is not None
+            and not dispatcher.done()
+        )
 
     @property
     def active_run_ids(self) -> tuple[str, ...]:
@@ -139,11 +155,13 @@ class RunQueueRuntime:
                 return
             await self._service.recover_expired()
             self._stopping = False
+            self._dispatcher_failed = False
             self._started = True
             self._dispatcher = asyncio.create_task(
                 self._dispatch(),
                 name="pangi-run-queue-dispatcher",
             )
+            self._dispatcher.add_done_callback(self._dispatcher_finished)
             self._wake.set()
 
     async def close(self) -> None:
@@ -155,8 +173,7 @@ class RunQueueRuntime:
             self._dispatcher = None
             if dispatcher is not None:
                 dispatcher.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await dispatcher
+                await asyncio.gather(dispatcher, return_exceptions=True)
             tasks = tuple(task for _claim, task in self._active.values())
             for task in tasks:
                 task.cancel()
@@ -165,6 +182,7 @@ class RunQueueRuntime:
             self._active.clear()
             self._started = False
             self._stopping = False
+            self._dispatcher_failed = False
             self._wake.clear()
 
     async def enqueue(self, *, run_id: str, expected_revision: int) -> Run:
@@ -172,8 +190,18 @@ class RunQueueRuntime:
             run_id=run_id,
             expected_revision=expected_revision,
         )
-        self._wake.set()
+        self.wake()
         return run
+
+    def wake(self) -> None:
+        if not self.ready:
+            raise RunQueueUnavailableError("The Run Queue dispatcher is unavailable")
+        self._wake.set()
+
+    def cancel_active(self, run_id: str) -> None:
+        active = self._active.get(run_id)
+        if active is not None:
+            active[1].cancel()
 
     async def cancel(self, *, run_id: str) -> RunCancellation:
         result = await self._service.cancel(run_id=run_id)
@@ -181,6 +209,13 @@ class RunQueueRuntime:
         if result.changed and active is not None:
             active[1].cancel()
         return result
+
+    def _dispatcher_finished(self, future: asyncio.Future[None]) -> None:
+        if future.cancelled() or self._stopping:
+            return
+        error = future.exception()
+        if error is not None:
+            self._dispatcher_failed = True
 
     async def _dispatch(self) -> None:
         while True:

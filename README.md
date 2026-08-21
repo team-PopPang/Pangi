@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07을 완료했고 WBS-06·08을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. Root Decision, Plan 검증·영속화, Dependency 실행과 안전한 결과 합성 기반도 구현했지만 아직 실제 Run 생성·Queue Runtime과 Model Provider에는 조립하지 않았어요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06을 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요.
 
 ## 현재 구현 상태
 
@@ -15,7 +15,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 05. Run 상태·Queue·Event | 완료 | Run/Step/Event 계약과 Schema, 생성·조회·Idempotency, Queue·Lease·복구, Owner 기반 API, Event JSON·SSE와 운영 Metric |
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
 | 07. Model Routing과 Egress Policy | 완료 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation 영속화·계측, 관리자 조회·영향 분석·실패 폐쇄 Eval 활성화 Gate API와 읽기 전용 Dashboard |
-| 08. Root Orchestrator와 실행 Engine | 진행 중 | Direct·Delegate·Skill Decision, Catalog Context와 단일 Root 호출, Plan 검증·영속화, Dependency 실행·복구, 결정적 Reducer와 Output Guardrail 연결 |
+| 08. Root Orchestrator와 실행 Engine | 완료 | 보호된 Run 생성 API, Data Class 기반 단일 Root 호출, Plan 검증·영속화, Queue Runtime·ASGI 생명주기, Dependency 실행·복구, 결정적 Reducer와 `SafeOutput` 완료 |
 | 09~20 | 예정 | MCP, Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
@@ -75,7 +75,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 - Admin은 Queue 깊이, 실행 수, 만료 Lease 수와 가장 오래된 대기 시간을 식별자 없는 Metric으로 조회할 수 있어요.
 - OpenAPI와 Frontend 생성 Type, Run API Client와 `EventSource` Helper를 함께 제공해요.
 
-Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐어요. 실제 실행 Handler와 Queue Runtime 조립, Run 생성 진입점, Run 화면은 후속 WBS에서 연결해요.
+Run 조회·생성·취소·Event·Metric Service와 실제 실행 Handler는 ASGI Composition Root에 연결됐어요. Startup은 SQLite 다음 Queue 복구·Dispatcher 순서로 진행하고 Shutdown은 역순으로 정리해요. Queue Dispatcher가 중단되면 Readiness도 `not_ready`로 바뀌어요. Run Timeline·Workflow 화면은 후속 WBS에서 연결해요.
 
 ### Input Guardrail 기반
 
@@ -83,11 +83,11 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 - 본문은 CRLF/CR과 Unicode NFC를 정규화하고 UTF-8 Byte 기준 크기와 주입된 Control/Bidi/Hidden Unicode 정책을 적용해요. 탭·줄바꿈과 ZWJ 결합 Emoji는 보존해요.
 - Attachment의 개수, 필수 크기·MIME Metadata, 개별·전체 Byte Limit과 허용 MIME을 검사해요.
 - Explicit Skill 접근은 별도 Port로 검사해요. Skill 식별자·Version 형식은 아직 확정하지 않았어요.
-- 사용자·Channel별 요청률은 최대 Key 수가 제한된 단일 Process Sliding Window Adapter로 검사해요. 조직 운영 기본값은 아직 없어요.
+- 사용자·Channel별 요청률은 최대 Key 수가 제한된 단일 Process Sliding Window Adapter로 검사해요. 현재 Local Dashboard Baseline은 분당 60건이에요.
 - Guardrail을 통과한 뒤에만 기존 Run 생성·SQLite Idempotency 경계를 호출해요. 차단된 요청은 Run, Event와 Idempotency Record를 만들지 않아요.
 - 판정에는 정책 Version·Fingerprint와 안전한 수치 Metadata만 남겨요. 요청 본문, Idempotency Key와 Attachment Reference는 포함하지 않아요.
 
-이 경계는 아직 HTTP나 Channel의 Run 생성 진입점에 조립되지 않았어요. WBS-08·11·16에서 Run을 수신할 때 보호된 제출 Service를 사용해요.
+`POST /api/v1/runs`는 로그인 Session, Same-origin, CSRF와 `Idempotency-Key`를 확인한 뒤 이 경계를 사용해요. 초기 계약은 Text, Thread와 선택적인 Explicit Skill만 받고 Attachment는 안전한 Upload 경계가 생길 때까지 허용하지 않아요. Explicit Skill은 Registry가 구현되는 WBS-11 전까지 실패 폐쇄해요.
 
 ### 중앙 Redaction과 External Data
 
@@ -115,14 +115,14 @@ Run 조회·취소·Event·Metric Service는 ASGI Composition Root에 연결됐�
 
 ### 최종 Output Guardrail 기반
 
-- WBS-08이 앞으로 만들 Direct Answer·Reducer 결과를 위한 Framework-free `OutputCandidate`→`SafeOutput` 경계를 제공해요. 모델 출력은 항상 `untrusted`로 유지해요.
+- WBS-08의 Direct Answer·Reducer 결과를 위한 Framework-free `OutputCandidate`→`SafeOutput` 경계를 제공해요. 모델 출력은 항상 `untrusted`로 유지해요.
 - CRLF/NFC 정규화와 전체 입력 UTF-8 Byte Limit 뒤에 중앙 `core-secret-v1` Redaction을 Markdown·Evidence에 함께 적용해요.
 - Python·Node Stack Trace와 Unix·Windows 내부 Path를 Versioned Rule로 제거하고 Raw HTML과 Slack Angle Markup을 Escape해요.
 - Markdown Inline·Reference Link와 Evidence Link에 같은 Scheme 정책을 적용해요. 허용하지 않은 Scheme과 Protocol-relative Link는 제거하고 Inline Link Label은 보존해요.
 - Broadcast Mention은 항상 중립화하고 일반 Mention은 명시된 개수를 넘긴 항목만 중립화해요. 최종 길이는 한국어·Emoji Codepoint를 깨뜨리지 않고 UTF-8 Byte 기준으로 잘라요.
 - 허용된 결과에는 Sanitized Content Fingerprint, 정책 Version·Fingerprint와 변경 수치만 제공해요. 원문 Output·Evidence와 Rule 본문은 오류·`repr`에서 제외해요.
 
-이 경계는 아직 WBS-08의 `AgentResult`·Reducer나 WBS-16의 Slack Renderer에 조립되지 않았어요. 채널 Renderer는 공통 Guardrail을 우회하지 않고 `SafeOutput`만 받아야 해요.
+이 경계는 Root Orchestrator의 Direct·Delegate 합성과 영속 `run_outputs` 저장에 연결됐어요. WBS-16의 Slack Renderer도 공통 Guardrail을 우회하지 않고 `SafeOutput`만 받아야 해요.
 
 ### Log와 Run Event Redaction
 
@@ -206,14 +206,17 @@ Model Policy 생성·Eval 실행과 활성화 운영 경로, 사용처 Registry�
 - Queue Handler는 실행 결과를 결정적으로 합성하고 `SafeOutput` 저장, Output Event와 `composing → completed|failed` 전이를 하나의 SQLite Transaction으로 처리해요.
 - `composing` 중에도 Worker Lease와 Heartbeat를 유지해요. Handler 종료나 Lease 만료가 발생하면 Output이나 Root Decision을 다시 실행하지 않고 `composition_interrupted`로 실패시켜요.
 - Root Runtime은 Principal을 받는 불변 Catalog 경계를 사용해요. Subagent·Skill·Connection Registry가 구현되기 전에는 유효한 빈 Snapshot을 반환하므로 Direct만 가능하고 알 수 없는 Delegate·Skill은 외부 실행 전에 차단해요.
-- Root Composition Factory는 SQLite 활성 Model Policy와 Invocation 저장소, 선택 Provider, JSON Schema Validator와 빈 Catalog를 연결해요. Queue와 ASGI를 시작하지 않아 다음 통합 단계에서 같은 실행 경계를 재사용할 수 있어요.
+- Root Composition Factory는 SQLite 활성 Model Policy와 Invocation 저장소, 선택 Provider, JSON Schema Validator와 빈 Catalog를 연결해요.
+- `POST /api/v1/runs`는 Principal·Request ID·생성 시각과 Data Class를 서버에서만 결정해요. 클라이언트는 이 Metadata를 제출할 수 없어요.
+- `runtime.run_data_classes`는 Root에 전달할 신뢰된 분류 집합이에요. 기존 설정에는 과소 분류를 피하기 위해 `restricted`를 기본값으로 적용해요.
+- Guardrail을 통과한 Run은 Root Planning과 Plan·Queue Commit을 마친 뒤 Process-local Dispatcher를 깨워요. 정확한 Idempotency Replay는 Root를 다시 호출하지 않아요.
+- Queue Runtime은 ASGI와 함께 시작·종료하고 Dispatcher 상태를 Readiness에 반영해요. 취소는 DB 상태를 먼저 확정한 뒤 같은 Process의 활성 실행 Task에도 신호를 전달해요.
 
-이 기반은 아직 보호된 Run 생성 API와 ASGI Queue Runtime, 실제 Subagent·Skill·Connection Registry에 조립되지 않았어요. 현재 Root Catalog는 존재하지 않는 Capability를 만들지 않는 빈 Snapshot을 사용해요.
+현재 Root Catalog는 존재하지 않는 Capability를 만들지 않는 빈 Snapshot을 사용해요. 따라서 실제 Runtime은 Direct 요청만 완료할 수 있고 Delegate·Skill은 WBS-09~11의 Registry와 실행기가 연결될 때까지 실패 폐쇄해요.
 
 ## 아직 구현되지 않은 기능
 
-- Root Orchestrator와 실행 Handler의 Queue Runtime·ASGI 연결, Lease·Heartbeat 운영 기본값
-- Input Guardrail을 사용하는 Run 생성 진입점과 Run Timeline·Workflow Admin UI
+- Attachment Upload와 Run Timeline·Workflow Admin UI
 - 실제 MCP Tool Registry·실행 Adapter와 Policy·Approval·Budget 영속화
 - Model Policy 생성·초기 활성화 운영 경로, 사용처 Registry와 WBS-15 Eval 실행기 연결
 - Subagent와 Web Search
@@ -223,7 +226,7 @@ Model Policy 생성·Eval 실행과 활성화 운영 경로, 사용처 Registry�
 - JSON Log Formatter·Metric·Trace와 선택형 OpenTelemetry
 - Analytics, Feedback, API Key·IP Policy와 운영 Upgrade/Rollback
 
-현재 Runtime은 설치·저장소·인증·Admin Shell, Run 영속성·Queue 복구와 Event 전달 기반을 검증하는 단계예요. 실제 업무 요청을 처리하는 Agent 기능은 후속 WBS에서 연결해요.
+현재 Runtime은 인증된 Text 요청을 Direct Root 응답으로 처리하고 안전한 Output으로 저장할 수 있어요. 실제 MCP Tool, Subagent, Skill과 외부 Channel을 사용하는 업무 요청은 후속 WBS에서 연결해요.
 
 ## 개발 환경 준비
 
@@ -245,7 +248,17 @@ uv sync --extra dev --extra bedrock --python 3.11
 
 OpenAI는 SDK 표준 환경변수인 `OPENAI_API_KEY`를 사용해요. Bedrock은 AWS Credential Chain과 활성 Model Profile의 Region을 사용해요. Credential은 `.pangi/pangi.toml`, 로그와 Run Event에 저장하지 마세요.
 
-`pangi init`이 만드는 `[model]` 설정에는 비밀값이 없어요. `root_profile`은 SQLite의 활성 Model Policy 이름과 같아야 해요. Retry는 하나의 Root Logical Call 안에서 발생하는 실제 Provider 요청만 늘려요.
+`pangi init`이 만드는 `[runtime]` 설정의 `run_data_classes`는 HTTP 본문이 아니라 신뢰된 서버 정책이에요. 기본 `restricted`를 낮추려면 실제 입력과 Provider 반출 정책을 검토한 뒤 명시적으로 변경하세요.
+
+```toml
+[runtime]
+max_concurrent_runs = 4
+max_subagents_per_run = 3
+run_timeout_seconds = 180
+run_data_classes = ["restricted"]
+```
+
+`[model]` 설정에는 비밀값이 없어요. `root_profile`은 SQLite의 활성 Model Policy 이름과 같아야 해요. Retry는 하나의 Root Logical Call 안에서 발생하는 실제 Provider 요청만 늘려요.
 
 ```toml
 [model]
@@ -352,7 +365,7 @@ uv run pytest \
 
 ### Root Orchestrator와 실행 Engine만 검증
 
-WBS-08.1~08.5.2에서 구현한 Decision·Plan 검증, Root 단일 호출, Plan·Result 영속화, Dependency 실행, 결정적 Reducer, `SafeOutput` 완료 영속화와 실제 Model Runtime 조립을 확인하세요.
+WBS-08.1~08.5.3에서 구현한 Decision·Plan 검증, Root 단일 호출, Plan·Result 영속화, Dependency 실행, 결정적 Reducer, `SafeOutput` 완료 영속화, 보호된 Run API와 Queue·ASGI Runtime 조립을 확인하세요.
 
 ```bash
 uv run pytest \
@@ -365,10 +378,16 @@ uv run pytest \
   tests/unit/test_orchestration_execution_contracts.py \
   tests/unit/test_orchestration_lifecycle.py \
   tests/unit/test_result_reducer.py \
+  tests/unit/test_run_submissions.py \
+  tests/unit/test_runtime_lifecycle.py \
   tests/contract/test_root_orchestration_model_contract.py \
+  tests/contract/test_run_web_contract.py \
+  tests/contract/test_openapi_contract.py \
   tests/integration/test_orchestration_execution.py \
   tests/integration/test_orchestration_lifecycle_persistence.py \
+  tests/integration/test_run_submission_runtime.py \
   tests/integration/test_root_runtime_composition.py \
+  tests/integration/test_web_runtime.py \
   tests/architecture/test_dependency_rules.py
 ```
 
