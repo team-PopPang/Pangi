@@ -37,6 +37,17 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - Web Search 전용 SSRF Pipeline
 - Software Delivery의 Repository Write Worker
 
+## 구현 순서
+
+1. **Connection·Tool Registry 계약과 Lifecycle 상태기계(WBS-09.1)**: User/Instance Scope, Transport·Auth·상태 불변식, 허용 Lifecycle 전이와 제한된 Canonical Tool Schema Fingerprint를 구현하고 WBS-06 `ResolvedTool` 계약에 연결한다.
+2. **Connection·Tool Policy 영속화(WBS-09.2)**: `connections`, `connection_tools`, `tool_policies`, `tool_invocations` Migration과 Repository를 구현하고 Stable Resolver·Policy·Schema·Budget Adapter를 WBS-06 Guardrail에 주입한다.
+3. **SecretStore와 stdio Transport(WBS-09.3)**: Keyring 우선 SecretStore와 암호화 File Vault Fallback, stdio Command·Argument·Environment 정책과 Fake Server Fixture를 구현한다.
+4. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
+5. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
+6. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
+
+위 하위 번호는 현재 확인된 책임 경계다. 구현 중 독립적인 결과나 별도 보안·검증 Gate가 확인되면 루트 WBS 운영 규칙에 따라 단계를 더 나눈다.
+
 ## 기술 설계
 
 - HTTP는 기본 HTTPS, stdio는 절대 경로/등록 Alias와 Argument Array만 허용한다.
@@ -50,7 +61,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 
 ## 구현 체크리스트
 
-- [ ] Connection/Tool/Policy Domain Model과 Lifecycle을 구현한다.
+- [x] Connection/Tool/Policy Domain Model과 Lifecycle을 구현한다.
 - [ ] stdio와 Streamable HTTP Adapter 및 Fake Server Fixture를 만든다.
 - [ ] OAuth Discovery, PKCE, Callback와 Token Refresh/Revoke를 구현한다.
 - [ ] Keyring 우선 SecretStore와 암호화 File Vault Fallback을 구현한다.
@@ -69,6 +80,16 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - [ ] Redirect/DNS/stdio Command/Environment 정책 위반을 차단한다.
 - [ ] Token이 DB/API/Log/Card와 Backup에 평문으로 없는지 검사한다.
 - [ ] 연결/재연결/끊기/진단과 Region/Workspace Qualifier를 E2E로 확인한다.
+
+## 1차 구현 결과
+
+- WBS-06의 `ToolConnectionScope`를 Connection Scope로 재사용하고 stdio/Streamable HTTP Transport, 인증 유형, Connection 상태와 Tool Registry 상태를 Framework-free Domain 계약으로 추가했다.
+- User Scope Owner 필수·Instance Scope Owner 금지, Transport별 Command/Endpoint 상호 배타, 인증 유형과 Transport 조합, 시간·상태 Metadata 불변식을 고정했다.
+- `disconnected`, `connecting`, `connected`, `degraded`, `error`의 허용 전이와 안전한 `connection_invalid_state_transition` 오류를 구현했다. 실제 연결 Side Effect와 Disconnect 정리 순서는 아직 실행하지 않는다.
+- Tool Schema의 깊이·항목·UTF-8 Byte를 제한한 뒤 Object Key를 정렬한 Canonical JSON SHA-256 Fingerprint와 불변 `ToolRegistrySnapshot`을 생성한다.
+- Registry Snapshot은 Connection Scope·Owner, Stable Tool ID, Remote Name, Permission과 Schema Fingerprint를 기존 WBS-06 `ResolvedTool`로 손실 없이 변환한다. `new`, `changed`, `unavailable` Tool은 비활성으로 해석하고 `active` Tool도 명시 Policy가 없으면 Guardrail이 기본 Deny한다.
+- Endpoint, Command, Owner, Secret Reference, Remote Tool Name과 Schema 원문을 객체 표현과 오류에서 제외했다.
+- 실제 SQLite, MCP SDK, SecretStore, Transport, OAuth, API와 Admin UI는 WBS-09.2~09.6에 남겼다.
 
 ## 완료 조건
 

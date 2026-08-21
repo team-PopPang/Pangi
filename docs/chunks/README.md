@@ -36,7 +36,7 @@
 | 06 | [Guardrail·보안·Audit](06-guardrails-security-and-audit.md) | 입력·Tool·출력 경계와 Audit 정책을 코드로 강제한다. | 02, 03, 05 | 진행 중 |
 | 07 | [Model Routing과 Egress Policy](07-model-routing-and-egress-policy.md) | Provider Adapter와 데이터 분류 기반 모델 반출 정책을 만든다. | 02, 03, 06 | 완료 |
 | 08 | [Root Orchestrator와 실행 Engine](08-root-orchestrator-and-execution-engine.md) | Root 1회 Decision, Plan 검증, 실행과 결정적 결과 합성을 만든다. | 05, 06, 07 | 완료 |
-| 09 | [MCP 연결과 Tool Policy](09-mcp-connections-and-tool-policy.md) | MCP Transport, OAuth, Secret, Discovery, Tool 실행과 연결 UI를 만든다. | 03, 04, 06 | 예정 |
+| 09 | [MCP 연결과 Tool Policy](09-mcp-connections-and-tool-policy.md) | MCP Transport, OAuth, Secret, Discovery, Tool 실행과 연결 UI를 만든다. | 03, 04, 06 | 진행 중 |
 | 10 | [Subagent와 Web Search](10-subagents-and-web-search.md) | 깊이 1 Subagent, 제한 병렬 실행, Synthesis와 안전한 Web 검색을 만든다. | 07, 08, 09 | 예정 |
 | 11 | [Skill Compiler·Version·Trigger](11-skill-compiler-version-and-triggers.md) | 선언형 Skill, Compiler, 불변 Version과 Trigger Registry를 만든다. | 03, 06, 09 | 예정 |
 | 12 | [Workflow UI와 Skill Lifecycle](12-workflow-ui-and-skill-lifecycle.md) | Canonical Graph 기반 Definition/Trace UI와 Skill 관리 UX를 만든다. | 04, 05, 11 | 예정 |
