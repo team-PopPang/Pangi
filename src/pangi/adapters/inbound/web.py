@@ -35,15 +35,18 @@ from pangi.adapters.inbound.web_contracts import (
     ModelPolicyEvaluationEnvelope,
     ModelPolicyListEnvelope,
     RunCancellationEnvelope,
+    RunCreateRequest,
     RunEnvelope,
     RunEventListEnvelope,
     RunEventResponse,
     RunListEnvelope,
     RunQueueMetricsResponse,
+    RunSubmissionEnvelope,
     SessionEnvelope,
 )
 from pangi.application.contracts.audit import AuditListQuery
 from pangi.application.contracts.auth import AuthenticatedPrincipal, IssuedSession
+from pangi.application.contracts.guardrails import GuardrailBlockedError
 from pangi.application.contracts.model_policy_management import ModelPolicyListQuery
 from pangi.application.contracts.run_events import RunEventStreamPolicy
 from pangi.application.contracts.runs import RunListQuery
@@ -91,8 +94,11 @@ from pangi.application.ports.run_queue import (
     RunQueueError,
     RunQueueNotFoundError,
     RunQueuePersistenceError,
+    RunQueueUnavailableError,
 )
+from pangi.application.ports.run_submissions import RunSubmissionOperations
 from pangi.application.ports.runs import (
+    IdempotencyUnavailableError,
     InvalidRunCursorError,
     RunNotFoundError,
     RunOperationError,
@@ -103,6 +109,7 @@ from pangi.application.ports.runtime import RuntimeBackend
 from pangi.application.services.auth import ensure_role
 from pangi.domain.audit import AuditOutcome
 from pangi.domain.auth import UserRole
+from pangi.domain.guardrails import GuardrailErrorCode
 from pangi.domain.runs import PrincipalChannel, RunState
 
 _LOGGER = logging.getLogger(__name__)
@@ -271,6 +278,7 @@ def create_web_app(
     run_events: RunEventOperations,
     run_queue_metrics: RunQueueMetricOperations,
     static_root: Path,
+    run_submissions: RunSubmissionOperations | None = None,
     model_policy_operations: ModelPolicyManagementOperations | None = None,
     event_stream_policy: RunEventStreamPolicy = _DEFAULT_EVENT_STREAM_POLICY,
     event_stream_sleeper: Sleeper = asyncio.sleep,
@@ -298,6 +306,11 @@ def create_web_app(
         openapi_url=None,
         lifespan=lifespan,
     )
+
+    def run_submission_service() -> RunSubmissionOperations:
+        if run_submissions is None:
+            raise HTTPException(status_code=503, detail="Run submission is unavailable")
+        return run_submissions
 
     def error_response(
         request: Request,
@@ -372,6 +385,46 @@ def create_web_app(
             message="The authenticated role is not allowed",
         )
 
+    @app.exception_handler(GuardrailBlockedError)
+    async def guardrail_blocked_error(
+        request: Request,
+        error: GuardrailBlockedError,
+    ) -> JSONResponse:
+        if error.code is GuardrailErrorCode.RATE_LIMIT_EXCEEDED:
+            retry_after = error.decision.retry_after_seconds
+            return error_response(
+                request,
+                status_code=429,
+                code=error.code.value,
+                message="Too many Run requests; try again later",
+                headers={"Retry-After": str(retry_after or 1)},
+            )
+        if error.code is GuardrailErrorCode.EXPLICIT_SKILL_UNAVAILABLE:
+            return error_response(
+                request,
+                status_code=503,
+                code=error.code.value,
+                message="Explicit Skill execution is unavailable",
+            )
+        if error.code in {
+            GuardrailErrorCode.PRINCIPAL_INACTIVE,
+            GuardrailErrorCode.PRINCIPAL_ID_MISMATCH,
+            GuardrailErrorCode.PRINCIPAL_ROLE_MISMATCH,
+            GuardrailErrorCode.EXPLICIT_SKILL_DENIED,
+        }:
+            return error_response(
+                request,
+                status_code=403,
+                code=error.code.value,
+                message="The Run request is not allowed",
+            )
+        return error_response(
+            request,
+            status_code=422,
+            code=error.code.value,
+            message="The Run request did not pass input validation",
+        )
+
     @app.exception_handler(AuditOperationError)
     async def audit_operation_error(
         request: Request,
@@ -417,7 +470,7 @@ def create_web_app(
                 code=error.code,
                 message="The Run was not found",
             )
-        if isinstance(error, RunPersistenceError):
+        if isinstance(error, (RunPersistenceError, IdempotencyUnavailableError)):
             return error_response(
                 request,
                 status_code=503,
@@ -486,7 +539,7 @@ def create_web_app(
                 code=error.code,
                 message="The Run cannot be cancelled in its current state",
             )
-        if isinstance(error, RunQueuePersistenceError):
+        if isinstance(error, (RunQueuePersistenceError, RunQueueUnavailableError)):
             return error_response(
                 request,
                 status_code=503,
@@ -970,6 +1023,52 @@ def create_web_app(
                 message="The request could not be validated",
             )
         return ModelPolicyActivationEnvelope.from_contract(activation)
+
+    @app.post(
+        "/api/v1/runs",
+        operation_id="createRun",
+        status_code=202,
+        response_model=RunSubmissionEnvelope,
+        responses={
+            401: {"model": ErrorEnvelope, "description": "Authentication required"},
+            403: {"model": ErrorEnvelope, "description": "CSRF, origin, or policy rejected"},
+            409: {"model": ErrorEnvelope, "description": "Idempotency conflict"},
+            422: {"model": ErrorEnvelope, "description": "Request or Guardrail validation failed"},
+            429: {"model": ErrorEnvelope, "description": "Run rate limit exceeded"},
+            500: {"model": ErrorEnvelope, "description": "Unexpected server error"},
+            503: {"model": ErrorEnvelope, "description": "Run submission unavailable"},
+        },
+    )
+    async def create_run(
+        payload: RunCreateRequest,
+        request: Request,
+        response: Response,
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=255),
+        ],
+        principal: AuthenticatedPrincipal = Depends(current_principal),  # noqa: B008
+    ) -> RunSubmissionEnvelope | JSONResponse:
+        if not _origin_allowed(request, required=True):
+            raise CsrfRejectedError("The request origin is invalid")
+        _csrf_token(request)
+        try:
+            result = await run_submission_service().submit_run(
+                actor=principal,
+                text=payload.text,
+                idempotency_key=idempotency_key,
+                thread_key=payload.thread_key,
+                explicit_skill=payload.explicit_skill,
+            )
+        except ValueError:
+            return error_response(
+                request,
+                status_code=422,
+                code="invalid_request",
+                message="The request could not be validated",
+            )
+        response.headers["Location"] = f"/api/v1/runs/{result.run.id}"
+        return RunSubmissionEnvelope.from_contract(result)
 
     @app.get(
         "/api/v1/runs",

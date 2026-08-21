@@ -15,7 +15,11 @@ from pangi.application.ports.run_events import (
     RunEventStore,
     RunQueueMetricStore,
 )
-from pangi.application.ports.run_queue import RunQueueNotFoundError, RunQueueStore
+from pangi.application.ports.run_queue import (
+    RunQueueNotFoundError,
+    RunQueueRuntimeNotifier,
+    RunQueueStore,
+)
 from pangi.application.ports.runs import RunNotFoundError, RunStore
 from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.runs import EventVisibility, RunState
@@ -44,10 +48,12 @@ class RunCancellationService:
         run_store: RunStore,
         queue_store: RunQueueStore,
         *,
+        runtime_notifier: RunQueueRuntimeNotifier | None = None,
         clock: Clock = _utc_now,
     ) -> None:
         self._run_store = run_store
         self._queue_store = queue_store
+        self._runtime_notifier = runtime_notifier
         self._clock = clock
 
     async def cancel_run(
@@ -67,10 +73,13 @@ class RunCancellationService:
         if at.tzinfo is None or at.utcoffset() is None:
             raise ValueError("cancellation clock must return a timezone-aware datetime")
         try:
-            return await self._queue_store.cancel(
+            result = await self._queue_store.cancel(
                 run_id=run_id,
                 at=at.astimezone(UTC),
             )
+            if result.changed and self._runtime_notifier is not None:
+                self._runtime_notifier.cancel_active(run_id)
+            return result
         except RunQueueNotFoundError as error:
             raise RunNotFoundError("The Run was not found") from error
 

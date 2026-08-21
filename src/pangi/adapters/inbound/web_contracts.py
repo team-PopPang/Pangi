@@ -21,7 +21,7 @@ from pangi.application.contracts.model_policy_management import (
 )
 from pangi.application.contracts.run_events import RunEventPage, RunQueueMetrics
 from pangi.application.contracts.run_queue import RunCancellation
-from pangi.application.contracts.runs import RunListPage, RunSummary
+from pangi.application.contracts.runs import RunListPage, RunSubmission, RunSummary
 from pangi.domain.audit import AuditEvent, AuditOutcome
 from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.model_routing import (
@@ -215,6 +215,14 @@ class AttachmentResponse(_StrictApiModel):
         )
 
 
+class RunCreateRequest(_StrictApiModel):
+    """Untrusted text-only fields accepted by the local Run endpoint."""
+
+    text: str = Field(min_length=1, max_length=100_000)
+    thread_key: str | None = Field(default=None, min_length=1, max_length=255)
+    explicit_skill: str | None = Field(default=None, min_length=1, max_length=255)
+
+
 class RunRequestResponse(_StrictApiModel):
     request_id: str
     principal_id: str
@@ -278,6 +286,18 @@ class RunEnvelope(_StrictApiModel):
     @classmethod
     def from_domain(cls, run: Run) -> RunEnvelope:
         return cls(run=RunResponse.from_domain(run))
+
+
+class RunSubmissionEnvelope(_StrictApiModel):
+    run: RunResponse
+    replayed: bool
+
+    @classmethod
+    def from_contract(cls, result: RunSubmission) -> RunSubmissionEnvelope:
+        return cls(
+            run=RunResponse.from_domain(result.run),
+            replayed=result.replayed,
+        )
 
 
 class RunSummaryResponse(_StrictApiModel):

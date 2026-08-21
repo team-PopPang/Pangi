@@ -74,6 +74,35 @@ class RuntimeConfig(_StrictModel):
     max_concurrent_runs: int = Field(default=4, ge=1, le=64)
     max_subagents_per_run: int = Field(default=3, ge=0, le=16)
     run_timeout_seconds: int = Field(default=180, ge=1, le=3600)
+    run_data_classes: tuple[
+        Literal["public", "internal", "confidential", "personal", "restricted"],
+        ...,
+    ] = ("restricted",)
+
+    @field_validator("run_data_classes", mode="before")
+    @classmethod
+    def normalize_run_data_classes(cls, value: object) -> object:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @field_validator("run_data_classes")
+    @classmethod
+    def validate_run_data_classes(
+        cls,
+        value: tuple[
+            Literal["public", "internal", "confidential", "personal", "restricted"],
+            ...,
+        ],
+    ) -> tuple[
+        Literal["public", "internal", "confidential", "personal", "restricted"],
+        ...,
+    ]:
+        if not value:
+            raise ValueError("run_data_classes must contain at least one data class")
+        if len(value) != len(set(value)):
+            raise ValueError("run_data_classes cannot contain duplicates")
+        return value
 
 
 class ModelRuntimeConfig(_StrictModel):
@@ -182,6 +211,9 @@ class PangiConfig(_StrictModel):
                 f"max_concurrent_runs = {self.runtime.max_concurrent_runs}",
                 f"max_subagents_per_run = {self.runtime.max_subagents_per_run}",
                 f"run_timeout_seconds = {self.runtime.run_timeout_seconds}",
+                "run_data_classes = ["
+                + ", ".join(quote(value) for value in self.runtime.run_data_classes)
+                + "]",
                 "",
                 "[model]",
                 f"root_profile = {quote(self.model.root_profile)}",

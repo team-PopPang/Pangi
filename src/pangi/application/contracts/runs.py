@@ -17,6 +17,14 @@ class RunCreation:
 
 
 @dataclass(frozen=True, slots=True)
+class RunSubmission:
+    """The owner-visible Run returned after guarded orchestration submission."""
+
+    run: Run
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RunCreateRecord:
     """Values a persistence adapter must commit as one transaction."""
 

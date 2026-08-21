@@ -162,7 +162,8 @@ export interface paths {
         /** List Runs */
         get: operations["listRuns"];
         put?: never;
-        post?: never;
+        /** Create Run */
+        post: operations["createRun"];
         delete?: never;
         options?: never;
         head?: never;
@@ -593,6 +594,18 @@ export interface components {
             changed: boolean;
             run: components["schemas"]["RunResponse"];
         };
+        /**
+         * RunCreateRequest
+         * @description Untrusted text-only fields accepted by the local Run endpoint.
+         */
+        RunCreateRequest: {
+            /** Explicit Skill */
+            explicit_skill?: string | null;
+            /** Text */
+            text: string;
+            /** Thread Key */
+            thread_key?: string | null;
+        };
         /** RunEnvelope */
         RunEnvelope: {
             run: components["schemas"]["RunResponse"];
@@ -712,6 +725,12 @@ export interface components {
          * @enum {string}
          */
         RunState: "received" | "blocked" | "planning" | "queued" | "running" | "composing" | "completed" | "failed" | "cancelled" | "interrupted";
+        /** RunSubmissionEnvelope */
+        RunSubmissionEnvelope: {
+            /** Replayed */
+            replayed: boolean;
+            run: components["schemas"]["RunResponse"];
+        };
         /** RunSummaryResponse */
         RunSummaryResponse: {
             /**
@@ -1469,6 +1488,95 @@ export interface operations {
                 };
             };
             /** @description Run store unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createRun: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSubmissionEnvelope"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF, origin, or policy rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Idempotency conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Request or Guardrail validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Run rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unexpected server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Run submission unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

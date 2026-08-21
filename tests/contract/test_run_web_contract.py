@@ -14,7 +14,7 @@ from pangi.application.contracts.run_events import (
     RunQueueMetrics,
 )
 from pangi.application.contracts.run_queue import RunCancellation
-from pangi.application.contracts.runs import RunListPage, RunSummary
+from pangi.application.contracts.runs import RunListPage, RunSubmission, RunSummary
 from pangi.application.ports.run_events import RunEventNotFoundError
 from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.runs import (
@@ -133,6 +133,11 @@ class RunApi:
     def __init__(self) -> None:
         self.event_calls: list[tuple[str, int, int]] = []
         self.cancel_calls: list[str] = []
+        self.submission_calls: list[dict[str, object]] = []
+
+    async def submit_run(self, **kwargs: object) -> RunSubmission:
+        self.submission_calls.append(kwargs)
+        return RunSubmission(_run(), False)
 
     async def list_runs(self, **_kwargs: object) -> RunListPage:
         run = _run()
@@ -211,6 +216,7 @@ def _app(
         run_cancellations=api,
         run_events=api,
         run_queue_metrics=api,
+        run_submissions=api,
         static_root=_static_root(tmp_path),
         event_stream_policy=RunEventStreamPolicy(2, 0.001, 0.001),
         **options,
@@ -251,6 +257,76 @@ def test_run_json_routes_hide_worker_and_idempotency_data(tmp_path: Path) -> Non
         "expired_lease_count": 1,
         "oldest_queued_at": NOW.isoformat().replace("+00:00", "Z"),
         "oldest_queued_age_seconds": 30.0,
+    }
+
+
+def test_create_run_requires_mutation_guards_and_server_owned_metadata(tmp_path: Path) -> None:
+    auth = AuthSessions(role=UserRole.MEMBER)
+    api = RunApi()
+    with TestClient(
+        _app(tmp_path, auth=auth, api=api),
+        base_url="http://127.0.0.1:8787",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        _authenticate(client)
+        missing_origin = client.post(
+            "/api/v1/runs",
+            json={"text": "hello"},
+            headers={
+                "Idempotency-Key": "create-once",
+                "X-CSRF-Token": "c" * 43,
+            },
+        )
+        missing_idempotency = client.post(
+            "/api/v1/runs",
+            json={"text": "hello"},
+            headers={
+                "Origin": "http://127.0.0.1:8787",
+                "X-CSRF-Token": "c" * 43,
+            },
+        )
+        forged_metadata = client.post(
+            "/api/v1/runs",
+            json={"text": "hello", "data_classes": ["public"]},
+            headers={
+                "Origin": "http://127.0.0.1:8787",
+                "Idempotency-Key": "create-once",
+                "X-CSRF-Token": "c" * 43,
+            },
+        )
+        created = client.post(
+            "/api/v1/runs",
+            json={
+                "text": "hello",
+                "thread_key": "thread-1",
+                "explicit_skill": None,
+            },
+            headers={
+                "Origin": "http://127.0.0.1:8787",
+                "Idempotency-Key": "create-once",
+                "X-CSRF-Token": "c" * 43,
+            },
+        )
+
+    assert missing_origin.status_code == 403
+    assert missing_idempotency.status_code == forged_metadata.status_code == 422
+    assert created.status_code == 202
+    assert created.headers["location"] == f"/api/v1/runs/{RUN_ID}"
+    assert created.json()["replayed"] is False
+    assert "idempotency_key" not in created.json()["run"]["request"]
+    assert "data_classes" not in created.json()["run"]["request"]
+    assert len(api.submission_calls) == 1
+    call = api.submission_calls[0]
+    assert call["actor"] == auth.principal
+    assert call["text"] == "hello"
+    assert call["idempotency_key"] == "create-once"
+    assert call["thread_key"] == "thread-1"
+    assert set(call) == {
+        "actor",
+        "text",
+        "idempotency_key",
+        "thread_key",
+        "explicit_skill",
     }
 
 

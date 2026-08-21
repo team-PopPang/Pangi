@@ -37,6 +37,32 @@ class RunQueuePersistenceError(RunQueueError):
     code = "run_queue_persistence_error"
 
 
+class RunQueueUnavailableError(RunQueueError):
+    """The process-local dispatcher cannot currently accept wake-ups."""
+
+    code = "run_queue_unavailable"
+
+
+class RunQueueRuntimeStatus(Protocol):
+    @property
+    def ready(self) -> bool:
+        """Return whether the process-local dispatcher can serve queued work."""
+
+        ...
+
+
+class RunQueueRuntimeNotifier(RunQueueRuntimeStatus, Protocol):
+    def wake(self) -> None:
+        """Wake a healthy dispatcher after a durable Queue commit."""
+
+        ...
+
+    def cancel_active(self, run_id: str) -> None:
+        """Signal cancellation to one process-local active handler, if present."""
+
+        ...
+
+
 class RunQueueStore(Protocol):
     async def enqueue(
         self,

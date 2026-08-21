@@ -47,6 +47,7 @@ def test_openapi_has_stable_operations_and_error_schemas() -> None:
         "listModelPolicies",
         "evaluateModelPolicy",
         "activateModelPolicy",
+        "createRun",
         "listRuns",
         "listAuditEvents",
         "getRunQueueMetrics",
@@ -95,10 +96,12 @@ def test_openapi_has_stable_operations_and_error_schemas() -> None:
         "ModelPolicyEvaluationEnvelope",
         "ModelPolicyListEnvelope",
         "RunCancellationEnvelope",
+        "RunCreateRequest",
         "RunEnvelope",
         "RunEventListEnvelope",
         "RunListEnvelope",
         "RunQueueMetricsResponse",
+        "RunSubmissionEnvelope",
         "SessionEnvelope",
     } <= set(schemas)
     assert schemas["BootstrapAdminRequest"]["properties"]["token"]["writeOnly"] is True
@@ -116,6 +119,16 @@ def test_openapi_has_stable_operations_and_error_schemas() -> None:
     assert not {"worker_id", "lease_expires_at", "heartbeat_at"} & set(run_response)
     run_request = schemas["RunRequestResponse"]["properties"]
     assert "idempotency_key" not in run_request
+    create_request = schemas["RunCreateRequest"]["properties"]
+    assert set(create_request) == {"text", "thread_key", "explicit_skill"}
+    assert not {
+        "principal",
+        "request_id",
+        "created_at",
+        "schedule_id",
+        "attachments",
+        "data_classes",
+    } & set(create_request)
 
     event_response = paths["/api/v1/runs/{run_id}/events"]["get"]["responses"]["200"]
     assert set(event_response["content"]) == {

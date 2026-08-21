@@ -27,6 +27,7 @@ def test_default_config_round_trips_through_toml(tmp_path: Path) -> None:
     assert loaded.auth.session_rotation_minutes == 30
     assert loaded.auth.login_attempt_limit == 5
     assert loaded.auth.login_attempt_window_seconds == 300
+    assert loaded.runtime.run_data_classes == ("restricted",)
     assert loaded.model.root_profile == "root-default"
     assert loaded.model.max_attempts == 3
     assert loaded.model.retry_backoff_seconds == (0.5, 1.0)
@@ -85,6 +86,24 @@ def test_model_section_is_optional_for_existing_schema_v1_config(tmp_path: Path)
     assert loaded.model.root_profile == "root-default"
     assert loaded.model.max_attempts == 3
     assert loaded.model.retry_backoff_seconds == (0.5, 1.0)
+
+
+def test_run_data_classes_are_optional_for_existing_schema_v1_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "legacy.toml"
+    config_path.write_text(
+        PangiConfig().to_toml().replace('run_data_classes = ["restricted"]\n', ""),
+        "utf-8",
+    )
+
+    loaded = PangiConfig.load(config_path)
+
+    assert loaded.runtime.run_data_classes == ("restricted",)
+
+
+@pytest.mark.parametrize("values", [[], ["internal", "internal"], ["secret"]])
+def test_invalid_run_data_classes_are_rejected(values: list[str]) -> None:
+    with pytest.raises(ValidationError):
+        PangiConfig.model_validate({"runtime": {"run_data_classes": values}})
 
 
 def test_unknown_keys_are_rejected_without_echoing_values(tmp_path: Path) -> None:
