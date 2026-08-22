@@ -31,6 +31,17 @@ class ToolPolicyState(StrEnum):
     RETIRED = "retired"
 
 
+class ToolApprovalState(StrEnum):
+    ACTIVE = "active"
+    CONSUMED = "consumed"
+
+
+class ToolApprovalConsumptionStatus(StrEnum):
+    CONSUMED = "consumed"
+    INVALID = "invalid"
+    EXPIRED = "expired"
+
+
 class ToolGuardrailStage(StrEnum):
     PRINCIPAL = "principal"
     RESOLUTION = "resolution"

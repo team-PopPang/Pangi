@@ -10,6 +10,9 @@ from math import isfinite
 from typing import NoReturn
 
 from pangi.application.contracts.auth import AuthenticatedPrincipal
+from pangi.application.contracts.tool_approval_persistence import (
+    ToolApprovalExpectation,
+)
 from pangi.application.contracts.tool_guardrails import (
     ApprovalGrant,
     GuardedToolCall,
@@ -23,7 +26,7 @@ from pangi.application.contracts.tool_guardrails import (
 )
 from pangi.application.ports.tool_guardrails import (
     StableToolResolver,
-    ToolApprovalVerifier,
+    ToolApprovalConsumer,
     ToolArgumentValidator,
     ToolBudgetLedger,
     ToolExecutor,
@@ -31,6 +34,7 @@ from pangi.application.ports.tool_guardrails import (
 )
 from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.tool_guardrails import (
+    ToolApprovalConsumptionStatus,
     ToolApprovalRequirement,
     ToolConnectionScope,
     ToolGuardrailErrorCode,
@@ -96,14 +100,14 @@ class ToolGuardrailService:
         resolver: StableToolResolver,
         policy_provider: ToolPolicyProvider,
         argument_validator: ToolArgumentValidator,
-        approval_verifier: ToolApprovalVerifier,
+        approval_consumer: ToolApprovalConsumer,
         budget_ledger: ToolBudgetLedger,
         clock: Callable[[], datetime],
     ) -> None:
         self._resolver = resolver
         self._policy_provider = policy_provider
         self._argument_validator = argument_validator
-        self._approval_verifier = approval_verifier
+        self._approval_consumer = approval_consumer
         self._budget_ledger = budget_ledger
         self._clock = clock
 
@@ -231,7 +235,7 @@ class ToolGuardrailService:
                 argument_bytes=argument_bytes,
             )
 
-        await self._guard_approval(
+        approval_grant_id = await self._guard_approval(
             actor=actor,
             request=request,
             tool=tool,
@@ -292,6 +296,7 @@ class ToolGuardrailService:
             canonical_arguments_json=canonical_arguments,
             arguments_fingerprint=arguments_fingerprint,
             policy_fingerprint=policy.fingerprint,
+            approval_grant_id=approval_grant_id,
             limits=ToolExecutionLimits(
                 timeout_seconds=policy.timeout_seconds,
                 max_result_bytes=policy.max_result_bytes,
@@ -308,9 +313,9 @@ class ToolGuardrailService:
         policy: ToolPolicy,
         arguments_fingerprint: str,
         argument_bytes: int,
-    ) -> None:
+    ) -> str | None:
         if policy.approval is ToolApprovalRequirement.NONE:
-            return
+            return None
         if request.approval_reference is None:
             self._block(
                 request,
@@ -320,20 +325,22 @@ class ToolGuardrailService:
                 policy=policy,
                 argument_bytes=argument_bytes,
             )
-        grant = await self._approval_verifier.resolve_approval(request.approval_reference)
-        if grant is None:
-            self._block(
-                request,
-                ToolGuardrailStage.APPROVAL,
-                ToolGuardrailErrorCode.APPROVAL_INVALID,
-                tool=tool,
-                policy=policy,
-                argument_bytes=argument_bytes,
-            )
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("Tool guardrail clock must return a timezone-aware datetime")
-        if grant.expires_at <= now.astimezone(UTC):
+        consumed = await self._approval_consumer.consume_approval(
+            request.approval_reference,
+            expectation=ToolApprovalExpectation(
+                subject_user_id=actor.user_id,
+                run_id=request.run_id,
+                tool_id=tool.tool_id,
+                arguments_fingerprint=arguments_fingerprint,
+                policy_fingerprint=policy.fingerprint,
+                approval_requirement=policy.approval,
+                consumed_at=now,
+            ),
+        )
+        if consumed.status is ToolApprovalConsumptionStatus.EXPIRED:
             self._block(
                 request,
                 ToolGuardrailStage.APPROVAL,
@@ -342,7 +349,20 @@ class ToolGuardrailService:
                 policy=policy,
                 argument_bytes=argument_bytes,
             )
-        if not self._approval_matches(
+        grant = consumed.grant
+        if (
+            consumed.status is not ToolApprovalConsumptionStatus.CONSUMED
+            or grant is None
+        ):
+            self._block(
+                request,
+                ToolGuardrailStage.APPROVAL,
+                ToolGuardrailErrorCode.APPROVAL_INVALID,
+                tool=tool,
+                policy=policy,
+                argument_bytes=argument_bytes,
+            )
+        if grant.expires_at <= now.astimezone(UTC) or not self._approval_matches(
             grant,
             actor=actor,
             request=request,
@@ -358,6 +378,7 @@ class ToolGuardrailService:
                 policy=policy,
                 argument_bytes=argument_bytes,
             )
+        return grant.grant_id
 
     @staticmethod
     def _approval_matches(
@@ -375,6 +396,7 @@ class ToolGuardrailService:
             or grant.tool_id != tool.tool_id
             or grant.arguments_fingerprint != arguments_fingerprint
             or grant.policy_fingerprint != policy.fingerprint
+            or grant.approval_requirement is not policy.approval
         ):
             return False
         if policy.approval is ToolApprovalRequirement.USER:

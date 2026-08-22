@@ -172,9 +172,11 @@ class ToolCallRequest:
 class ApprovalGrant:
     """Verified approval claims; source reference and identities stay out of repr."""
 
+    grant_id: str
     subject_user_id: str = field(repr=False)
     approver_user_id: str = field(repr=False)
     approver_role: UserRole
+    approval_requirement: ToolApprovalRequirement
     run_id: str = field(repr=False)
     tool_id: str
     arguments_fingerprint: str
@@ -183,6 +185,7 @@ class ApprovalGrant:
 
     def __post_init__(self) -> None:
         for value, field_name in (
+            (self.grant_id, "grant_id"),
             (self.subject_user_id, "subject_user_id"),
             (self.approver_user_id, "approver_user_id"),
             (self.run_id, "run_id"),
@@ -191,8 +194,15 @@ class ApprovalGrant:
             _validate_opaque_identifier(value, field_name=field_name)
         try:
             object.__setattr__(self, "approver_role", UserRole(self.approver_role))
+            object.__setattr__(
+                self,
+                "approval_requirement",
+                ToolApprovalRequirement(self.approval_requirement),
+            )
         except ValueError as error:
-            raise ValueError("approver_role is invalid") from error
+            raise ValueError("Approval Grant contains an invalid enum value") from error
+        if self.approval_requirement is ToolApprovalRequirement.NONE:
+            raise ValueError("an Approval Grant must require user or admin approval")
         _validate_fingerprint(
             self.arguments_fingerprint,
             field_name="arguments_fingerprint",
@@ -317,6 +327,7 @@ class GuardedToolCall:
     canonical_arguments_json: str = field(repr=False)
     arguments_fingerprint: str
     policy_fingerprint: str
+    approval_grant_id: str | None
     limits: ToolExecutionLimits
     decision: ToolGuardrailDecision
 
@@ -327,6 +338,11 @@ class GuardedToolCall:
             field_name="arguments_fingerprint",
         )
         _validate_fingerprint(self.policy_fingerprint, field_name="policy_fingerprint")
+        if self.approval_grant_id is not None:
+            _validate_opaque_identifier(
+                self.approval_grant_id,
+                field_name="approval_grant_id",
+            )
         if self.decision.outcome is not ToolGuardrailOutcome.ALLOWED:
             raise ValueError("a guarded Tool call requires an allowed decision")
         if self.decision.tool_id != self.tool.tool_id:

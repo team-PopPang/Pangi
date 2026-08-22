@@ -24,6 +24,9 @@ from pangi.adapters.outbound.persistence.sqlite.runs import (
     SqliteRunStore,
 )
 from pangi.adapters.outbound.persistence.sqlite.sessions import SqliteAuthSessionStore
+from pangi.adapters.outbound.persistence.sqlite.tool_approvals import (
+    SqliteToolApprovalStore,
+)
 from pangi.adapters.outbound.persistence.sqlite.tool_governance import (
     SqliteToolBudgetLedger,
     SqliteToolPolicyRepository,
@@ -31,6 +34,9 @@ from pangi.adapters.outbound.persistence.sqlite.tool_governance import (
 from pangi.adapters.outbound.tool_arguments import JsonSchemaToolArgumentValidator
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.run_queue import RunQueuePolicy
+from pangi.application.contracts.tool_approval_persistence import (
+    ToolApprovalIssuancePolicy,
+)
 from pangi.application.ports.run_queue import RunQueueRuntimeNotifier
 from pangi.application.services.audit import (
     AuditQueryService,
@@ -220,6 +226,16 @@ def build_tool_argument_validator(
     """Build network-free validation against persisted Tool Schema snapshots."""
 
     return JsonSchemaToolArgumentValidator(build_connection_registry(database))
+
+
+def build_tool_approval_store(database: SqliteDatabase) -> SqliteToolApprovalStore:
+    """Build short-lived hashed Tool Approval issuance and atomic consumption."""
+
+    return SqliteToolApprovalStore(
+        database,
+        ToolApprovalIssuancePolicy(max_ttl_seconds=600),
+        _build_audit_writer(),
+    )
 
 
 def build_bootstrap_admin_for_cli(
