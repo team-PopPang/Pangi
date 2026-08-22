@@ -9,12 +9,19 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
 
+from pangi.domain.secrets import SecretReference
 from pangi.domain.tool_guardrails import ToolConnectionScope
 
 ConnectionScope = ToolConnectionScope
 
 _STABLE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
 _OPAQUE_IDENTIFIER = re.compile(r"^[!-~]{1,1024}$")
+_ENVIRONMENT_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
+
+MAX_STDIO_ARGUMENTS = 64
+MAX_STDIO_ARGUMENT_CHARACTERS = 4_096
+MAX_STDIO_ARGUMENT_BYTES = 65_536
+MAX_STDIO_ENVIRONMENT_REFERENCES = 32
 
 
 class ConnectionTransport(StrEnum):
@@ -77,6 +84,10 @@ class Connection:
     endpoint: str | None = field(default=None, repr=False)
     command: str | None = field(default=None, repr=False)
     args: tuple[str, ...] = field(default=(), repr=False)
+    env_secret_refs: Mapping[str, SecretReference] = field(
+        default_factory=dict,
+        repr=False,
+    )
     secret_ref: str | None = field(default=None, repr=False)
     connected_at: datetime | None = None
     last_checked_at: datetime | None = None
@@ -101,11 +112,14 @@ class Connection:
         except ValueError as error:
             raise ConnectionContractError("Connection contains an invalid enum value") from error
         _validate_scope(self.scope, self.owner_user_id)
+        environment_references = _normalize_environment_references(self.env_secret_refs)
+        object.__setattr__(self, "env_secret_refs", environment_references)
         _validate_transport(
             self.transport,
             endpoint=self.endpoint,
             command=self.command,
             args=self.args,
+            env_secret_refs=environment_references,
         )
         _validate_auth_transport(self.auth_type, self.transport)
         if self.secret_ref is not None:
@@ -234,6 +248,12 @@ def _validate_text(value: object, *, field_name: str, limit: int) -> None:
         raise ConnectionContractError(
             f"{field_name} must contain 1-{limit} non-blank characters"
         )
+    if "\x00" in value:
+        raise ConnectionContractError(f"{field_name} cannot contain NUL")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ConnectionContractError(f"{field_name} must be valid UTF-8 text") from None
 
 
 def _validate_scope(scope: ConnectionScope, owner_user_id: str | None) -> None:
@@ -251,21 +271,56 @@ def _validate_transport(
     endpoint: str | None,
     command: str | None,
     args: tuple[str, ...],
+    env_secret_refs: Mapping[str, SecretReference],
 ) -> None:
     if not isinstance(args, tuple):
         raise ConnectionContractError("stdio args must be an immutable tuple")
-    if len(args) > 64:
-        raise ConnectionContractError("stdio args must contain at most 64 values")
+    if len(args) > MAX_STDIO_ARGUMENTS:
+        raise ConnectionContractError(
+            f"stdio args must contain at most {MAX_STDIO_ARGUMENTS} values"
+        )
+    total_argument_bytes = 0
     for argument in args:
-        _validate_text(argument, field_name="stdio argument", limit=4_096)
+        _validate_text(
+            argument,
+            field_name="stdio argument",
+            limit=MAX_STDIO_ARGUMENT_CHARACTERS,
+        )
+        total_argument_bytes += len(argument.encode("utf-8"))
+    if total_argument_bytes > MAX_STDIO_ARGUMENT_BYTES:
+        raise ConnectionContractError("stdio args exceed the total byte limit")
     if transport is ConnectionTransport.STDIO:
         if command is None or endpoint is not None:
             raise ConnectionContractError("stdio requires only a command")
         _validate_text(command, field_name="stdio command", limit=4_096)
         return
+    if env_secret_refs:
+        raise ConnectionContractError("Environment Secret references require stdio transport")
     if endpoint is None or command is not None or args:
         raise ConnectionContractError("Streamable HTTP requires only an endpoint")
     _validate_text(endpoint, field_name="Streamable HTTP endpoint", limit=2_048)
+
+
+def _normalize_environment_references(
+    value: Mapping[str, SecretReference],
+) -> Mapping[str, SecretReference]:
+    if not isinstance(value, Mapping):
+        raise ConnectionContractError("env_secret_refs must be a mapping")
+    if len(value) > MAX_STDIO_ENVIRONMENT_REFERENCES:
+        raise ConnectionContractError(
+            "env_secret_refs must contain at most "
+            f"{MAX_STDIO_ENVIRONMENT_REFERENCES} values"
+        )
+    normalized: dict[str, SecretReference] = {}
+    for name, reference in value.items():
+        if not isinstance(name, str) or _ENVIRONMENT_NAME.fullmatch(name) is None:
+            raise ConnectionContractError("environment name must be a stable uppercase name")
+        if not isinstance(reference, SecretReference):
+            raise ConnectionContractError(
+                "environment Secret references must be SecretReference values"
+            )
+        normalized[name] = reference
+    return MappingProxyType(dict(sorted(normalized.items())))
 
 
 def _validate_auth_transport(

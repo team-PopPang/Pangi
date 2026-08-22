@@ -1180,6 +1180,14 @@ class ConnectionConfig(BaseModel):
 - Shell String을 실행하지 않고 `execve` 스타일 Argument Array를 사용한다.
 - Working Directory는 Pangi Runtime의 격리된 Connector Directory다.
 - Environment는 Allowlist Key만 넘긴다.
+- `[mcp.stdio]`의 `allowed_executables`, `executable_aliases`, `environment_allowlist`는 기본으로 비어 있다. 이 설정은 초기화와 서버 시작을 막지 않지만 stdio Launch는 등록 전 실패 폐쇄한다.
+- 절대 경로는 Allowlist와 정확히 일치해야 하고 Alias는 절대 경로에 명시적으로 연결돼야 한다. PATH 검색과 `shutil.which`를 사용하지 않는다.
+- Executable은 Canonical Path의 일반 실행 파일이어야 한다. 현재 사용자 또는 Root가 소유하고 Group·Other 쓰기 권한이 없어야 하며 Device·Inode를 실제 실행 직전에 다시 확인한다.
+- Argument는 최대 64개, 항목당 4,096자, 전체 65,536 UTF-8 Byte로 제한한다. NUL과 잘못된 UTF-8을 거부하고 Shell Metacharacter는 해석하지 않는다.
+- Environment Secret은 이름별 Versioned `SecretReference`로만 Connection `config_json` v2에 저장한다. 최대 32개를 허용하고 모든 Reference를 해석한 뒤에만 Launch 결과를 만든다.
+- `PATH`, `PYTHONPATH`, `PYTHONHOME`, `NODE_OPTIONS`, `BASH_ENV`, `ENV`, `LD_*`, `DYLD_*`는 명시적 덮어쓰기를 금지한다.
+- Working Directory는 `<data_dir>/connectors/<connection_id>`에 `0700`으로 만들고 소유자, 심볼릭 링크, 파일 종류와 Device·Inode 교체를 검사한다.
+- 해석 결과의 Command·Argument·Environment·Working Directory와 Secret Reference는 객체 표현, 공개 오류와 로그에 포함하지 않는다.
 - `display_qualifier`는 Region이나 Workspace처럼 사용자가 연결을 구분하는 안전한 표시값이다. Secret, Account ID, Endpoint 원문을 넣지 않는다.
 - 연결별 동시 호출 수, Timeout, 최대 Result Byte를 제한한다.
 

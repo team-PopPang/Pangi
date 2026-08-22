@@ -187,6 +187,7 @@ class SqliteMigrationAdmin:
                 connection = await self._connections.open()
                 failed_version = pending[0].descriptor.version
                 try:
+                    await connection.execute("PRAGMA foreign_keys=OFF")
                     await connection.execute("BEGIN IMMEDIATE")
                     for migration in pending:
                         failed_version = migration.descriptor.version
@@ -235,14 +236,27 @@ class SqliteMigrationAdmin:
                                 },
                             ),
                         )
+                    foreign_key_violations = await fetch_all(
+                        connection,
+                        "PRAGMA foreign_key_check",
+                    )
+                    if foreign_key_violations:
+                        raise MigrationIntegrityError(
+                            "migration produced invalid foreign key references"
+                        )
                     await connection.execute(f"PRAGMA user_version={plan.target_version}")
                     await connection.commit()
+                    await connection.execute("PRAGMA foreign_keys=ON")
                 except Exception as error:
                     await connection.rollback()
                     raise MigrationApplyError(
                         f"migration batch failed at version {failed_version}; changes rolled back"
                     ) from error
                 finally:
+                    try:
+                        await connection.execute("PRAGMA foreign_keys=ON")
+                    except aiosqlite.Error:
+                        pass
                     await connection.close()
                 return MigrationApplyResult(
                     self.paths.database_file,

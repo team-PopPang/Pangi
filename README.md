@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06·09를 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요. MCP 연결 구현은 Connection·Tool Registry, 불변 Tool Policy, 안전한 JSON Schema 검증, 영속 Call Budget, 일회성 Approval Grant, Tool Invocation Lifecycle과 Keyring·암호화 File Vault SecretStore까지 마련했어요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06·09를 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요. MCP 연결 구현은 Connection·Tool Registry, 불변 Tool Policy, 안전한 JSON Schema 검증, 영속 Call Budget, 일회성 Approval Grant, Tool Invocation Lifecycle, Keyring·암호화 File Vault SecretStore와 stdio 실행 입력 정책까지 마련했어요.
 
 ## 현재 구현 상태
 
@@ -16,7 +16,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
 | 07. Model Routing과 Egress Policy | 완료 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation 영속화·계측, 관리자 조회·영향 분석·실패 폐쇄 Eval 활성화 Gate API와 읽기 전용 Dashboard |
 | 08. Root Orchestrator와 실행 Engine | 완료 | 보호된 Run 생성 API, Data Class 기반 단일 Root 호출, Plan 검증·영속화, Queue Runtime·ASGI 생명주기, Dependency 실행·복구, 결정적 Reducer와 `SafeOutput` 완료 |
-| 09. MCP 연결과 Tool Policy | 진행 중 | Connection·Tool Registry, User/Instance Scope, 불변 Tool Policy·CAS 활성화, 안전한 JSON Schema 검증, 원자적 Call Budget, Hash 기반 일회성 Approval Grant, Tool Invocation Lifecycle, Keyring·암호화 File Vault SecretStore |
+| 09. MCP 연결과 Tool Policy | 진행 중 | Connection·Tool Registry, User/Instance Scope, 불변 Tool Policy·CAS 활성화, 안전한 JSON Schema 검증, 원자적 Call Budget, Hash 기반 일회성 Approval Grant, Tool Invocation Lifecycle, Keyring·암호화 File Vault SecretStore, stdio Executable·Argument·Environment Secret·격리 Directory 정책 |
 | 10~20 | 예정 | Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
@@ -127,7 +127,19 @@ Connection·Tool Registry는 WBS-09.2.1에서, Tool Policy·JSON Schema·Call Bu
 - File Vault는 AES-256-GCM, 쓰기마다 새로운 Nonce와 인증 Metadata를 사용해요. Vault 경로·파일 권한·소유자·심볼릭 링크를 확인하고 암호문을 원자적으로 교체해요.
 - Master Key는 환경변수 또는 Vault 밖의 소유자 전용 `0600` 파일에서만 읽어요. SQLite, `pangi.toml`과 Vault Envelope에는 저장하지 않아요.
 
-SecretStore 기반은 WBS-09.3.1에서 구현했어요. stdio 실행 정책과 MCP Client는 WBS-09.3.2, Streamable HTTP·OAuth는 WBS-09.4에 남아 있어요.
+SecretStore 기반은 WBS-09.3.1에서 구현했어요. stdio 실행 입력 정책은 WBS-09.3.2.1에서 구현했고 실제 MCP Client와 Process Lifecycle은 WBS-09.3.2.2, Streamable HTTP·OAuth는 WBS-09.4에 남아 있어요.
+
+### stdio 실행 정책 기반
+
+- `[mcp.stdio]`의 허용 Executable 절대 경로, Alias와 Environment Allowlist는 기본으로 비어 있어요. 기존 초기화와 서버 시작은 그대로 동작하지만 등록 전 stdio Launch는 실패 폐쇄해요.
+- Executable은 등록된 절대 경로나 Alias로만 찾고 PATH 검색과 Shell 해석을 사용하지 않아요. 일반 실행 파일, 소유자, 실행 권한과 Group·Other 쓰기 금지를 확인해요.
+- Argument는 불변 배열로 보존해요. 개수·항목 길이·전체 UTF-8 Byte와 NUL을 제한하며 `$`, `;` 같은 문자는 실행 정책에서 해석하지 않아요.
+- Connection은 환경변수별 `SecretReference`만 Canonical `config_json` v2에 저장해요. 모든 Reference를 `SecretStore`에서 해석하기 전에는 Launch 결과를 만들지 않아요.
+- `PATH`, Python·Node·Shell 초기화 변수와 `LD_*`, `DYLD_*` 덮어쓰기를 거부해요.
+- Working Directory는 `<data_dir>/connectors/<connection_id>`에 `0700`으로 만들어요. Executable과 Directory의 Device·Inode를 기록하고 실제 Process 생성 직전에 다시 확인할 수 있어요.
+- Command·Argument·Environment·Secret Reference와 Working Directory는 Launch 결과의 객체 표현과 안전한 오류에 노출하지 않아요.
+
+이 단계는 외부 Process를 생성하지 않아요. MCP SDK, stdio Stream, 초기화·Ping과 종료·강제 종료는 다음 WBS에서 연결해요.
 
 ### 최종 Output Guardrail 기반
 
@@ -267,6 +279,19 @@ Tool Argument의 JSON Schema 검증과 SecretStore 기반을 개발하거나 검
 ```bash
 uv sync --extra dev --extra mcp --python 3.11
 ```
+
+stdio MCP 실행 입력은 `[mcp.stdio]`에서 명시적으로 등록하세요. 비어 있는 기본값은 모든 stdio Launch를 거부해요. Alias와 Allowlist에는 Secret을 넣지 말고 운영자가 신뢰하는 절대 실행 경로만 사용하세요.
+
+```toml
+[mcp.stdio]
+allowed_executables = ["/absolute/path/to/filesystem-mcp"]
+environment_allowlist = ["FILESYSTEM_TOKEN"]
+
+[mcp.stdio.executable_aliases]
+filesystem = "/absolute/path/to/filesystem-mcp"
+```
+
+환경변수의 실제 값은 이 설정에 적지 않아요. Connection에는 `FILESYSTEM_TOKEN`이 가리키는 Versioned `SecretReference`만 저장하고 실제 값은 `SecretStore`에서 해석해요. Connection 생성 API와 UI는 후속 단계에서 제공해요.
 
 `[secrets]`에는 Secret 원문이 아니라 Backend 선택과 외부 Master Key 위치만 적어요. `auto`는 사용 가능한 OS Keyring을 우선 선택하고, Keyring을 사용할 수 없을 때 `PANGI_SECRET_MASTER_KEY`가 명시돼 있어야 File Vault를 선택해요.
 
@@ -519,6 +544,19 @@ uv run --extra mcp pytest \
   tests/unit/test_secret_store.py \
   tests/integration/test_file_vault_secret_store.py \
   tests/unit/test_config.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### stdio 실행 정책만 검증
+
+WBS-09.3.2.1에서 구현한 등록 Executable·Alias, Literal Argument, Environment Secret Allowlist, 격리 Working Directory와 Migration 13을 확인하세요. 이 Test는 실제 MCP Process를 실행하지 않아요.
+
+```bash
+uv run --extra mcp pytest \
+  tests/unit/test_connection_domain.py \
+  tests/unit/test_stdio_launch.py \
+  tests/integration/test_connection_registry_persistence.py \
+  tests/integration/test_sqlite_migrations.py \
   tests/architecture/test_dependency_rules.py
 ```
 

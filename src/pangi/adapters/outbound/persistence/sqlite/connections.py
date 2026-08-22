@@ -27,6 +27,7 @@ from pangi.domain.connections import (
     ConnectionToolState,
     ConnectionTransport,
 )
+from pangi.domain.secrets import SecretReference
 from pangi.domain.tool_guardrails import ToolPermission
 
 _CONNECTION_COLUMNS = """
@@ -80,7 +81,11 @@ def _config_json(connection: Connection) -> str:
             "args": list(connection.args),
             "command": connection.command,
             "endpoint": connection.endpoint,
-            "schema_version": 1,
+            "env_secret_refs": {
+                name: reference.value
+                for name, reference in connection.env_secret_refs.items()
+            },
+            "schema_version": 2,
         }
     )
 
@@ -102,22 +107,38 @@ def _optional_text(row: aiosqlite.Row, name: str) -> str | None:
 
 def _connection_from_row(row: aiosqlite.Row) -> Connection:
     config = json.loads(str(row["config_json"]))
-    expected_keys = {"args", "command", "endpoint", "schema_version"}
+    expected_keys = {
+        "args",
+        "command",
+        "endpoint",
+        "env_secret_refs",
+        "schema_version",
+    }
     if not isinstance(config, dict) or set(config) != expected_keys:
         raise ValueError("persisted Connection config has an invalid shape")
-    if config["schema_version"] != 1:
+    if config["schema_version"] != 2:
         raise ValueError("persisted Connection config uses an unsupported schema")
     if _canonical_json(config) != str(row["config_json"]):
         raise ValueError("persisted Connection config is not canonical")
     args = config["args"]
     command = config["command"]
     endpoint = config["endpoint"]
+    raw_environment_references = config["env_secret_refs"]
     if not isinstance(args, list) or any(not isinstance(item, str) for item in args):
         raise ValueError("persisted Connection args are invalid")
     if command is not None and not isinstance(command, str):
         raise ValueError("persisted Connection command is invalid")
     if endpoint is not None and not isinstance(endpoint, str):
         raise ValueError("persisted Connection endpoint is invalid")
+    if not isinstance(raw_environment_references, dict) or any(
+        not isinstance(name, str) or not isinstance(reference, str)
+        for name, reference in raw_environment_references.items()
+    ):
+        raise ValueError("persisted Connection environment references are invalid")
+    environment_references = {
+        name: SecretReference.parse(reference)
+        for name, reference in raw_environment_references.items()
+    }
     return Connection(
         id=str(row["id"]),
         kind=str(row["kind"]),
@@ -129,6 +150,7 @@ def _connection_from_row(row: aiosqlite.Row) -> Connection:
         endpoint=endpoint,
         command=command,
         args=tuple(args),
+        env_secret_refs=environment_references,
         auth_type=ConnectionAuthType(str(row["auth_type"])),
         secret_ref=_optional_text(row, "secret_ref"),
         state=ConnectionState(str(row["state"])),

@@ -66,9 +66,10 @@ def test_plan_is_read_only_and_apply_is_idempotent(tmp_path: Path) -> None:
         10,
         11,
         12,
+        13,
     ]
     assert paths.database_file.exists()
-    assert first.current_version == 12
+    assert first.current_version == 13
     assert [migration.version for migration in first.applied] == [
         1,
         2,
@@ -82,8 +83,9 @@ def test_plan_is_read_only_and_apply_is_idempotent(tmp_path: Path) -> None:
         10,
         11,
         12,
+        13,
     ]
-    assert second.current_version == 12
+    assert second.current_version == 13
     assert second.applied == ()
     assert second.backup_file is None
 
@@ -112,7 +114,7 @@ def test_sqlite_connection_profile_is_enforced(tmp_path: Path) -> None:
         finally:
             await connection.close()
 
-    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 12)
+    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 13)
 
 
 def test_applied_migration_checksum_change_is_rejected(tmp_path: Path) -> None:
@@ -154,6 +156,31 @@ def test_pending_batch_rolls_back_all_schema_changes_on_failure(tmp_path: Path) 
         paths,
         config.storage,
         registry=StaticMigrationRegistry(first, broken),
+    )
+
+    with pytest.raises(MigrationApplyError, match="changes rolled back"):
+        asyncio.run(admin.apply())
+
+    with sqlite3.connect(paths.database_file) as connection:
+        tables = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    assert tables == []
+
+
+def test_pending_batch_rolls_back_foreign_key_violations(tmp_path: Path) -> None:
+    paths, config = _initialized_runtime(tmp_path)
+    invalid = MigrationSource.from_sql(
+        1,
+        "invalid_foreign_key",
+        "CREATE TABLE parent (id INTEGER PRIMARY KEY);\n"
+        "CREATE TABLE child (parent_id INTEGER REFERENCES parent(id));\n"
+        "INSERT INTO child (parent_id) VALUES (999);\n",
+    )
+    admin = SqliteMigrationAdmin(
+        paths,
+        config.storage,
+        registry=StaticMigrationRegistry(invalid),
     )
 
     with pytest.raises(MigrationApplyError, match="changes rolled back"):
@@ -263,6 +290,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         tool_policy_budget,
         tool_approvals,
         tool_invocations,
+        stdio_environment_references,
     ) = packaged
     asyncio.run(
         SqliteMigrationAdmin(
@@ -274,7 +302,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
 
     result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
 
-    assert result.current_version == 12
+    assert result.current_version == 13
     assert [migration.name for migration in result.applied] == [
         run_core.descriptor.name,
         audit.descriptor.name,
@@ -286,12 +314,13 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         tool_policy_budget.descriptor.name,
         tool_approvals.descriptor.name,
         tool_invocations.descriptor.name,
+        stdio_environment_references.descriptor.name,
     ]
     assert result.backup_file is not None
     manifest_file = result.backup_file.with_name(f"{result.backup_file.name}.manifest.json")
     verification = asyncio.run(SqliteSnapshotStore(paths).verify(manifest_file))
     assert verification.package_compatible
-    assert verification.artifact.manifest.migration_target_version == 12
+    assert verification.artifact.manifest.migration_target_version == 13
     with sqlite3.connect(paths.database_file) as connection:
         tables = {
             row[0]
@@ -299,7 +328,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-        assert connection.execute("PRAGMA user_version").fetchone() == (12,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (13,)
     assert {
         "runs",
         "run_steps",
@@ -477,7 +506,13 @@ def test_packaged_tool_invocation_migration_upgrades_v11_with_verified_backup(
         ).apply()
     )
 
-    result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+    result = asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=StaticMigrationRegistry(*packaged[:12]),
+        ).apply()
+    )
 
     assert result.current_version == 12
     assert [migration.name for migration in result.applied] == ["tool_invocations"]
@@ -502,6 +537,83 @@ def test_packaged_tool_invocation_migration_upgrades_v11_with_verified_backup(
             ).fetchone()
             is None
         )
+
+
+def test_stdio_environment_reference_migration_upgrades_v12_with_verified_backup(
+    tmp_path: Path,
+) -> None:
+    paths, config = _initialized_runtime(tmp_path)
+    packaged = PackageMigrationRegistry().load()
+    previous = StaticMigrationRegistry(*packaged[:12])
+    asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=previous,
+        ).apply()
+    )
+    timestamp = datetime(2026, 8, 15, 0, 0, tzinfo=UTC).isoformat()
+    config_v1 = (
+        '{"args":["--stdio"],"command":"/opt/pangi/mcp",'
+        '"endpoint":null,"schema_version":1}'
+    )
+    with sqlite3.connect(paths.database_file) as connection:
+        connection.execute(
+            "INSERT INTO connections "
+            "(id, kind, display_name, scope, transport, auth_type, state, config_json, "
+            "revision, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            (
+                "connection-instance-migrate",
+                "filesystem",
+                "Filesystem",
+                "instance",
+                "stdio",
+                "none",
+                "disconnected",
+                config_v1,
+                timestamp,
+                timestamp,
+            ),
+        )
+        connection.commit()
+
+    result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+
+    assert result.current_version == 13
+    assert [migration.name for migration in result.applied] == [
+        "stdio_environment_references"
+    ]
+    assert result.backup_file is not None
+    manifest_file = result.backup_file.with_name(f"{result.backup_file.name}.manifest.json")
+    verification = asyncio.run(SqliteSnapshotStore(paths).verify(manifest_file))
+    assert verification.package_compatible
+    assert verification.artifact.manifest.migration_target_version == 13
+    with sqlite3.connect(paths.database_file) as connection:
+        config_v2 = connection.execute(
+            "SELECT config_json FROM connections WHERE id = ?",
+            ("connection-instance-migrate",),
+        ).fetchone()
+        assert config_v2 == (
+            '{"args":["--stdio"],"command":"/opt/pangi/mcp",'
+            '"endpoint":null,"env_secret_refs":{},"schema_version":2}',
+        )
+        assert connection.execute("PRAGMA user_version").fetchone() == (13,)
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        connection_tool_targets = {
+            row[2] for row in connection.execute("PRAGMA foreign_key_list(connection_tools)")
+        }
+        invocation_targets = {
+            row[2] for row in connection.execute("PRAGMA foreign_key_list(tool_invocations)")
+        }
+    assert "connections" in connection_tool_targets
+    assert "connections" in invocation_targets
+    with sqlite3.connect(result.backup_file) as backup:
+        assert backup.execute("PRAGMA user_version").fetchone() == (12,)
+        assert backup.execute(
+            "SELECT config_json FROM connections WHERE id = ?",
+            ("connection-instance-migrate",),
+        ).fetchone() == (config_v1,)
 
 
 def test_auth_schema_enforces_roles_identity_shape_and_single_open_grant(
