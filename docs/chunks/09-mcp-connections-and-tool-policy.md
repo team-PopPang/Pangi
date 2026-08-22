@@ -45,16 +45,20 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 4. **Approval Grant 발급·원자적 소비(WBS-09.2.2.2.1)**: `tool_approvals` Migration과 Hash Reference 발급, 만료·Claim·현재 권한 재검증과 일회성 소비 Adapter를 구현해 WBS-06 Guardrail에 주입한다.
 5. **Tool Invocation Lifecycle(WBS-09.2.2.2.2)**: `tool_invocations` Migration과 실행 전후 상태·Metric 영속 Adapter를 구현하고 모든 Tool 실행이 이 기록 경계를 통과하게 한다.
 6. **SecretStore 기반(WBS-09.3.1)**: 불투명한 Versioned Secret Reference, Keyring 우선 Backend 선택과 AES-256-GCM File Vault를 구현한다.
-7. **stdio 실행 정책과 MCP Transport(WBS-09.3.2)**: stdio Command·Argument·Environment 정책, Process Lifecycle과 Fake Server Fixture를 구현한다.
-8. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
-9. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
-10. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
+7. **stdio 실행 정책과 Environment Secret Reference(WBS-09.3.2.1)**: 등록 Executable·Alias, Argument Array, Environment Allowlist·Secret Reference와 격리 Working Directory를 실패 폐쇄 정책으로 해석한다.
+8. **MCP SDK stdio Transport(WBS-09.3.2.2)**: 실제 Process Lifecycle, MCP 초기화·Ping·종료와 Fake Server Fixture를 구현한다.
+9. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
+10. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
+11. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
 
 위 하위 번호는 현재 확인된 책임 경계다. 구현 중 독립적인 결과나 별도 보안·검증 Gate가 확인되면 루트 WBS 운영 규칙에 따라 단계를 더 나눈다.
 
 ## 기술 설계
 
 - HTTP는 기본 HTTPS, stdio는 절대 경로/등록 Alias와 Argument Array만 허용한다.
+- `[mcp.stdio]`의 허용 Executable·Alias와 Environment Allowlist 기본값은 비어 있으며, 등록 전 Launch 해석은 실패 폐쇄한다.
+- stdio는 PATH 검색과 Shell Parsing을 사용하지 않는다. 예약 Environment와 `LD_*`, `DYLD_*` 덮어쓰기를 거부하고 Secret 원문 대신 환경변수별 Versioned Reference만 저장한다.
+- 격리 Working Directory는 `<data_dir>/connectors/<connection_id>`의 소유자 전용 `0700` 디렉터리다. Executable과 Directory의 Device·Inode를 보존해 실제 Process 생성 직전에 다시 확인한다.
 - OAuth는 Authorization Code+PKCE S256, State/Nonce/Redirect/Resource Audience를 검증한다.
 - SQLite에는 `secret_ref`만 저장하고 실제 값은 Keyring/Secret Manager/암호화 Vault에 둔다.
 - Secret 생성 Backend는 작업 전에 한 번 선택하고 조회·교체·삭제는 Versioned `secret_ref`의 Backend로만 Routing한다. 개별 작업 실패를 이유로 다른 Backend에 재시도하지 않는다.
@@ -67,6 +71,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 ## 구현 체크리스트
 
 - [x] Connection/Tool/Policy Domain Model과 Lifecycle을 구현한다.
+- [x] stdio Executable·Argument·Environment Secret·Working Directory 실행 정책을 구현한다.
 - [ ] stdio와 Streamable HTTP Adapter 및 Fake Server Fixture를 만든다.
 - [ ] OAuth Discovery, PKCE, Callback와 Token Refresh/Revoke를 구현한다.
 - [x] Keyring 우선 SecretStore와 암호화 File Vault Fallback을 구현한다.
@@ -85,7 +90,8 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - [ ] 다른 사용자의 OAuth Token 선택이 불가능한지 확인한다.
 - [ ] 새 Tool과 변경된 Schema가 기본 Deny/Review 상태인지 확인한다.
 - [ ] PKCE, State, Resource Audience와 Scope 부족 경로를 테스트한다.
-- [ ] Redirect/DNS/stdio Command/Environment 정책 위반을 차단한다.
+- [x] stdio Command·Argument·Environment·Working Directory 정책 위반을 차단한다.
+- [ ] Streamable HTTP Redirect와 DNS 정책 위반을 차단한다.
 - [ ] Token이 DB/API/Log/Card와 Backup에 평문으로 없는지 검사한다.
 - [x] SecretStore의 평문이 SQLite·설정·Vault Envelope·오류·객체 표현에 없고 File Vault 변조와 안전하지 않은 경로·권한이 차단되는지 검사한다.
 - [ ] 연결/재연결/끊기/진단과 Region/Workspace Qualifier를 E2E로 확인한다.
@@ -143,7 +149,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - `(run_id, stable_tool_id, calls_used)`를 유일한 Budget Attempt로 제한한다. 시작 기록 실패는 Executor 호출을 막고 종료 기록 실패는 외부 Tool 자동 재실행으로 이어지지 않으며 Approval과 Budget을 환불하지 않는다.
 - 같은 Terminal 기록의 정확한 Replay는 Event를 중복 생성하지 않고 허용한다. 다른 Terminal 상태·시간·오류로 덮어쓰는 충돌은 거부한다.
 - 상태 전이, 중복 Budget Attempt, Event 원자성, 실패·취소, Context 불일치, Secret 비노출과 v11→v12 Backup Migration을 Unit·Integration Test로 검증했다.
-- 실제 MCP Transport·Discovery·Executor, Timeout·Result Byte 실행 강제와 `ToolResult` Summary·Fingerprint는 WBS-09.3.2~09.5에 남겼다. 비정상 종료 뒤 `running` Invocation 복구, 외부 Side Effect Exactly-once와 Retention도 이번 범위에 포함하지 않는다.
+- 실제 MCP Transport·Discovery·Executor, Timeout·Result Byte 실행 강제와 `ToolResult` Summary·Fingerprint는 WBS-09.3.2.1~09.5에 남겼다. 비정상 종료 뒤 `running` Invocation 복구, 외부 Side Effect Exactly-once와 Retention도 이번 범위에 포함하지 않는다.
 
 ## 6차 구현 결과
 
@@ -156,7 +162,20 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - `auto`, `keyring`, `file-vault` 설정과 결정적 Router를 추가했다. `auto`는 사용 가능한 Keyring을 먼저 선택하고 명시된 Master Key가 있을 때만 File Vault를 후보로 사용한다. 작업이 시작된 뒤에는 다른 Backend로 Fallback하지 않는다.
 - `cryptography`와 `keyring`은 `mcp` Extra에서만 설치하고 Adapter가 선택될 때 지연 로딩한다. 기본 Package Import는 선택 의존성을 요구하지 않는다.
 - Keyring·Router Contract, 실제 AES-GCM Round Trip·Nonce 재생성·변조·잘못된 Key, 파일 권한·심볼릭 링크·원자적 실패·동시 교체와 Secret 비노출을 Unit·Integration Test로 검증했다.
-- stdio Command·Argument·Environment 정책, MCP SDK Client와 Fake Server는 WBS-09.3.2로 남겼다. Secret·Master Key Rotation, 배포용 Secret Manager Plugin과 Connection API·UI도 후속 범위다.
+- stdio Command·Argument·Environment 정책은 WBS-09.3.2.1로, MCP SDK Client와 Fake Server는 WBS-09.3.2.2로 분리했다. Secret·Master Key Rotation, 배포용 Secret Manager Plugin과 Connection API·UI도 후속 범위다.
+
+## 7차 구현 결과
+
+- WBS-09.3.2를 실행 입력 정책과 실제 MCP SDK Process Lifecycle로 나눴다. 이번 단계는 WBS-09.3.2.1만 구현하고 외부 Process를 생성하지 않는다.
+- 선택 설정 `[mcp.stdio]`에 허용 Executable 절대 경로, 등록 Alias와 Environment Allowlist를 추가했다. 세 목록은 기본으로 비어 있어 기존 초기화·서버 시작에는 영향을 주지 않지만 stdio Launch 해석은 등록 전 실패 폐쇄한다.
+- Connection에 환경변수 이름별 불투명 `SecretReference`를 최대 32개까지 보관하는 `env_secret_refs`를 추가했다. Mapping은 불변으로 정규화하며 stdio 이외 Transport에서는 거부한다.
+- stdio Argument는 불변 Tuple로 유지하고 최대 64개, 항목당 4,096자, 전체 65,536 UTF-8 Byte를 제한한다. NUL과 잘못된 UTF-8을 거부하되 Shell Metacharacter는 해석하지 않고 Literal 값으로 보존한다.
+- `StdioLaunchResolver`는 등록된 절대 경로나 Alias만 Canonical Path로 해석한다. PATH 검색을 하지 않으며 일반 실행 파일, 현재 사용자 또는 Root 소유자, 실행 권한과 Group·Other 쓰기 금지를 검사한다.
+- Environment는 Allowlist Key만 해석하고 `PATH`, Python·Node·Shell 초기화 변수와 `LD_*`, `DYLD_*`를 거부한다. 모든 Secret Reference가 성공한 뒤에만 평문 환경 Mapping을 포함한 Launch 결과를 만들며 값과 Reference는 객체 표현과 오류에서 숨긴다.
+- `<data_dir>/connectors/<connection_id>`를 소유자 전용 `0700` 격리 Working Directory로 만들고 심볼릭 링크, 파일 종류, 소유자와 권한을 검사한다. Executable과 Working Directory의 Device·Inode를 결과에 보존하고 실행 직전 재검증 API로 교체를 탐지한다.
+- Migration 13은 기존 Connection `config_json` v1을 빈 `env_secret_refs`를 가진 Canonical v2로 변환한다. 사전 Backup과 Transaction Rollback을 유지하고 Table 재구성 뒤 모든 Foreign Key를 검사한다.
+- 설정·Domain·Resolver·Secret 실패·권한·심볼릭 링크·Identity 교체·v12→v13 Backup Migration과 Secret 비노출을 Unit·Integration Test로 검증했다.
+- 실제 MCP SDK, Process 생성, stdio Stream, 초기화 협상, Ping, 정상 종료·강제 종료와 Fake MCP Server는 WBS-09.3.2.2로 남겼다.
 
 ## 완료 조건
 

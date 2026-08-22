@@ -55,6 +55,7 @@ from pangi.domain.connections import (
     ConnectionTransport,
     transition_connection,
 )
+from pangi.domain.secrets import SecretBackend, SecretReference
 from pangi.domain.tool_guardrails import ToolGuardrailErrorCode, ToolPermission
 
 NOW = datetime(2030, 1, 1, tzinfo=UTC)
@@ -118,6 +119,12 @@ def _instance_connection() -> Connection:
         transport=ConnectionTransport.STDIO,
         command="/opt/pangi/bin/filesystem-mcp",
         args=("--readonly", "/srv/shared"),
+        env_secret_refs={
+            "FILESYSTEM_TOKEN": SecretReference(
+                SecretBackend.FILE_VAULT,
+                "connectiontoken0001",
+            )
+        },
         auth_type=ConnectionAuthType.ENVIRONMENT,
         secret_ref="secret://connection-instance-0001/environment",
         state=ConnectionState.DISCONNECTED,
@@ -177,7 +184,8 @@ def test_connections_round_trip_without_secret_body_columns(tmp_path: Path) -> N
                 "args": [],
                 "command": None,
                 "endpoint": "https://mcp.example.test",
-                "schema_version": 1,
+                "env_secret_refs": {},
+                "schema_version": 2,
             }
             assert str(row[1]) == user_connection.secret_ref
             assert "secret://" not in str(row[0])
@@ -423,7 +431,37 @@ def test_migration_rejects_invalid_connection_and_tool_rows(tmp_path: Path) -> N
     asyncio.run(migrate())
     timestamp = NOW.isoformat()
     valid_config = json.dumps(
-        {"args": [], "command": "/opt/mcp", "endpoint": None, "schema_version": 1},
+        {
+            "args": [],
+            "command": "/opt/mcp",
+            "endpoint": None,
+            "env_secret_refs": {},
+            "schema_version": 2,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    plaintext_environment_config = json.dumps(
+        {
+            "args": [],
+            "command": "/opt/mcp",
+            "endpoint": None,
+            "env_secret_refs": {"TOKEN": "plaintext-secret"},
+            "schema_version": 2,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    reserved_environment_config = json.dumps(
+        {
+            "args": [],
+            "command": "/opt/mcp",
+            "endpoint": None,
+            "env_secret_refs": {
+                "PATH": "secret:v1:file-vault:environmenttoken01"
+            },
+            "schema_version": 2,
+        },
         separators=(",", ":"),
         sort_keys=True,
     )
@@ -509,6 +547,36 @@ def test_migration_rejects_invalid_connection_and_tool_rows(tmp_path: Path) -> N
                 "none",
                 "disconnected",
                 valid_config[:-1] + ',"token":"plaintext"}',
+                None,
+                None,
+                None,
+                None,
+                timestamp,
+                timestamp,
+            ),
+            (
+                "connection-env-plaintext",
+                "instance",
+                None,
+                "stdio",
+                "none",
+                "disconnected",
+                plaintext_environment_config,
+                None,
+                None,
+                None,
+                None,
+                timestamp,
+                timestamp,
+            ),
+            (
+                "connection-env-reserved",
+                "instance",
+                None,
+                "stdio",
+                "none",
+                "disconnected",
+                reserved_environment_config,
                 None,
                 None,
                 None,

@@ -26,6 +26,9 @@ def test_default_config_round_trips_through_toml(tmp_path: Path) -> None:
     assert loaded.secrets.master_key_source == "environment"
     assert loaded.secrets.master_key_environment_variable == "PANGI_SECRET_MASTER_KEY"
     assert loaded.secrets.master_key_file is None
+    assert loaded.mcp.stdio.allowed_executables == ()
+    assert loaded.mcp.stdio.executable_aliases == {}
+    assert loaded.mcp.stdio.environment_allowlist == ()
     assert loaded.auth.bootstrap_grant_ttl_minutes == 30
     assert loaded.auth.session_ttl_minutes == 720
     assert loaded.auth.session_rotation_minutes == 30
@@ -78,6 +81,72 @@ def test_secret_store_config_renders_only_external_key_location(tmp_path: Path) 
 
     assert f'master_key_file = "{master_key_file}"' in rendered
     assert "master_key =" not in rendered
+
+
+def test_mcp_section_is_optional_and_defaults_to_fail_closed(tmp_path: Path) -> None:
+    config_path = tmp_path / "legacy.toml"
+    mcp_block = "\n".join(
+        (
+            "",
+            "[mcp.stdio]",
+            "allowed_executables = []",
+            "environment_allowlist = []",
+            "",
+            "[mcp.stdio.executable_aliases]",
+            "",
+        )
+    )
+    config_path.write_text(PangiConfig().to_toml().replace(mcp_block, "\n"), "utf-8")
+
+    loaded = PangiConfig.load(config_path)
+
+    assert loaded.mcp.stdio.allowed_executables == ()
+    assert loaded.mcp.stdio.executable_aliases == {}
+    assert loaded.mcp.stdio.environment_allowlist == ()
+
+
+def test_stdio_mcp_policy_round_trips_registered_paths_and_aliases(tmp_path: Path) -> None:
+    server = tmp_path / "filesystem-mcp"
+    config = PangiConfig.model_validate(
+        {
+            "mcp": {
+                "stdio": {
+                    "allowed_executables": [str(server)],
+                    "executable_aliases": {"filesystem": str(server)},
+                    "environment_allowlist": ["FILESYSTEM_TOKEN"],
+                }
+            }
+        }
+    )
+    config_path = tmp_path / "pangi.toml"
+    config_path.write_text(config.to_toml(), "utf-8")
+
+    loaded = PangiConfig.load(config_path)
+
+    assert loaded == config
+    rendered = config_path.read_text("utf-8")
+    assert f'allowed_executables = ["{server}"]' in rendered
+    assert f'"filesystem" = "{server}"' in rendered
+    assert 'environment_allowlist = ["FILESYSTEM_TOKEN"]' in rendered
+
+
+@pytest.mark.parametrize(
+    "stdio",
+    [
+        {"allowed_executables": ["relative/server"]},
+        {"allowed_executables": ["/opt/mcp", "/opt/mcp"]},
+        {"executable_aliases": {"bad/alias": "/opt/mcp"}},
+        {"executable_aliases": {"server": "relative/server"}},
+        {"environment_allowlist": ["lowercase"]},
+        {"environment_allowlist": ["PATH"]},
+        {"environment_allowlist": ["LD_PRELOAD"]},
+        {"environment_allowlist": ["DYLD_INSERT_LIBRARIES"]},
+        {"environment_allowlist": ["TOKEN", "TOKEN"]},
+    ],
+)
+def test_invalid_stdio_mcp_policy_is_rejected(stdio: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        PangiConfig.model_validate({"mcp": {"stdio": stdio}})
 
 
 @pytest.mark.parametrize(

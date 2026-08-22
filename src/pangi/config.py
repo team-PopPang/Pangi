@@ -6,8 +6,10 @@ import json
 import math
 import re
 import tomllib
+from collections.abc import Mapping
 from ipaddress import ip_address
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -18,6 +20,12 @@ from pydantic import (
     ValidationError,
     field_validator,
     model_validator,
+)
+
+from pangi.application.contracts.stdio import (
+    ENVIRONMENT_NAME_PATTERN,
+    EXECUTABLE_ALIAS_PATTERN,
+    is_reserved_environment_name,
 )
 
 
@@ -167,6 +175,63 @@ class SecretStoreConfig(_StrictModel):
         return self
 
 
+class StdioMcpConfig(_StrictModel):
+    """Fail-closed registration policy for local stdio MCP executables."""
+
+    allowed_executables: tuple[str, ...] = ()
+    executable_aliases: Mapping[str, str] = Field(default_factory=dict)
+    environment_allowlist: tuple[str, ...] = ()
+
+    @field_validator("allowed_executables", "environment_allowlist", mode="before")
+    @classmethod
+    def normalize_sequences(cls, value: object) -> object:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> StdioMcpConfig:
+        if len(self.allowed_executables) != len(set(self.allowed_executables)):
+            raise ValueError("allowed_executables cannot contain duplicates")
+        for value in self.allowed_executables:
+            if not _valid_absolute_stdio_path(value):
+                raise ValueError("allowed_executables must contain absolute paths")
+        for alias, value in self.executable_aliases.items():
+            if EXECUTABLE_ALIAS_PATTERN.fullmatch(alias) is None:
+                raise ValueError("executable alias is invalid")
+            if not _valid_absolute_stdio_path(value):
+                raise ValueError("executable aliases must resolve to absolute paths")
+        if len(self.environment_allowlist) != len(set(self.environment_allowlist)):
+            raise ValueError("environment_allowlist cannot contain duplicates")
+        for name in self.environment_allowlist:
+            if ENVIRONMENT_NAME_PATTERN.fullmatch(name) is None:
+                raise ValueError("environment_allowlist contains an invalid name")
+            if is_reserved_environment_name(name):
+                raise ValueError("environment_allowlist contains a reserved name")
+        object.__setattr__(
+            self,
+            "executable_aliases",
+            MappingProxyType(dict(sorted(self.executable_aliases.items()))),
+        )
+        return self
+
+
+class McpConfig(_StrictModel):
+    """MCP Transport policy that remains inert until a Connection is launched."""
+
+    stdio: StdioMcpConfig = Field(default_factory=StdioMcpConfig)
+
+
+def _valid_absolute_stdio_path(value: str) -> bool:
+    if not value or len(value) > 4_096 or "\x00" in value:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return Path(value).is_absolute()
+
+
 class AuthConfig(_StrictModel):
     """Local first-run authentication settings."""
 
@@ -187,6 +252,7 @@ class PangiConfig(_StrictModel):
     model: ModelRuntimeConfig = Field(default_factory=ModelRuntimeConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     secrets: SecretStoreConfig = Field(default_factory=SecretStoreConfig)
+    mcp: McpConfig = Field(default_factory=McpConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
 
     @classmethod
@@ -260,6 +326,20 @@ class PangiConfig(_StrictModel):
                     (f"master_key_file = {quote(self.secrets.master_key_file)}",)
                     if self.secrets.master_key_file is not None
                     else ()
+                ),
+                "",
+                "[mcp.stdio]",
+                "allowed_executables = ["
+                + ", ".join(quote(value) for value in self.mcp.stdio.allowed_executables)
+                + "]",
+                "environment_allowlist = ["
+                + ", ".join(quote(value) for value in self.mcp.stdio.environment_allowlist)
+                + "]",
+                "",
+                "[mcp.stdio.executable_aliases]",
+                *(
+                    f"{quote(alias)} = {quote(value)}"
+                    for alias, value in sorted(self.mcp.stdio.executable_aliases.items())
                 ),
                 "",
                 "[auth]",
