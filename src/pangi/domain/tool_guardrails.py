@@ -42,7 +42,16 @@ class ToolApprovalConsumptionStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class ToolInvocationState(StrEnum):
+    DENIED = "denied"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class ToolGuardrailStage(StrEnum):
+    CONTEXT = "context"
     PRINCIPAL = "principal"
     RESOLUTION = "resolution"
     SCOPE = "scope"
@@ -61,6 +70,7 @@ class ToolGuardrailOutcome(StrEnum):
 class ToolGuardrailErrorCode(StrEnum):
     """Secret-safe, stable reasons for rejecting a proposed Tool call."""
 
+    RUN_CONTEXT_MISMATCH = "tool_run_context_mismatch"
     PRINCIPAL_INACTIVE = "tool_principal_inactive"
     PRINCIPAL_ID_MISMATCH = "tool_principal_id_mismatch"
     UNKNOWN_TOOL = "tool_unknown"
@@ -78,3 +88,8 @@ class ToolGuardrailErrorCode(StrEnum):
     APPROVAL_INVALID = "tool_approval_invalid"
     APPROVAL_EXPIRED = "tool_approval_expired"
     CALL_BUDGET_EXCEEDED = "tool_call_budget_exceeded"
+
+
+class ToolExecutionErrorCode(StrEnum):
+    FAILED = "tool_execution_failed"
+    CANCELLED = "tool_execution_cancelled"

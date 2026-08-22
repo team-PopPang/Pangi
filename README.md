@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06·09를 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요. MCP 연결 구현은 Connection·Tool Registry, 불변 Tool Policy, 안전한 JSON Schema 검증과 영속 Call Budget에 이어 일회성 Approval Grant 기반까지 마련했어요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06·09를 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요. MCP 연결 구현은 Connection·Tool Registry, 불변 Tool Policy, 안전한 JSON Schema 검증, 영속 Call Budget, 일회성 Approval Grant와 Tool Invocation Lifecycle까지 마련했어요.
 
 ## 현재 구현 상태
 
@@ -16,7 +16,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
 | 07. Model Routing과 Egress Policy | 완료 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation 영속화·계측, 관리자 조회·영향 분석·실패 폐쇄 Eval 활성화 Gate API와 읽기 전용 Dashboard |
 | 08. Root Orchestrator와 실행 Engine | 완료 | 보호된 Run 생성 API, Data Class 기반 단일 Root 호출, Plan 검증·영속화, Queue Runtime·ASGI 생명주기, Dependency 실행·복구, 결정적 Reducer와 `SafeOutput` 완료 |
-| 09. MCP 연결과 Tool Policy | 진행 중 | Connection·Tool Registry, User/Instance Scope, 불변 Tool Policy·CAS 활성화, 안전한 JSON Schema 검증, 원자적 Call Budget, Hash 기반 일회성 Approval Grant |
+| 09. MCP 연결과 Tool Policy | 진행 중 | Connection·Tool Registry, User/Instance Scope, 불변 Tool Policy·CAS 활성화, 안전한 JSON Schema 검증, 원자적 Call Budget, Hash 기반 일회성 Approval Grant, Tool Invocation Lifecycle |
 | 10~20 | 예정 | Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
@@ -101,7 +101,7 @@ Run 조회·생성·취소·Event·Metric Service와 실제 실행 Handler는 AS
 
 이 기반은 Log·Run Event에 연결됐어요. MCP, Web Fetch와 Model Provider의 실제 입출력 경계는 후속 WBS에서 중앙 Service와 Envelope를 사용해요.
 
-### Tool Permission·Approval·Budget 기반
+### Tool Permission·Approval·Budget·Invocation 기반
 
 - Stable Tool ID를 현재 Connection과 Schema Snapshot으로 해석하는 Port를 제공해요. Connection과 Tool Snapshot은 SQLite에 저장하고 Stable Tool ID는 Registry 전체에서 유일하게 관리해요. 실제 MCP Tool Discovery와 원격 이름 Mapping은 아직 연결하지 않았어요.
 - 먼저 활성 Principal과 Run 요청자의 사용자 ID를 비교하고 User Connection Owner를 다시 검사해요. 다른 사용자의 Run이나 Connection을 실행하지 않으며 Instance Connection에는 사용자 Owner를 허용하지 않아요.
@@ -112,9 +112,13 @@ Run 조회·생성·취소·Event·Metric Service와 실제 실행 Handler는 AS
 - User Approval은 동일 사용자만, Admin Approval은 현재 활성 Admin만 발급할 수 있어요. 소비할 때 사용자·Admin 상태, Run Owner와 활성 Policy를 다시 확인하며 병렬 요청도 하나만 성공해요.
 - Run·Tool별 호출 횟수는 SQLite에서 원자적으로 예약해요. 예약 직전에 Tool 상태와 활성 Policy Fingerprint를 다시 확인하고, 정책 Version이 바뀌어도 누적 횟수를 초기화하지 않아요. 실행에 실패해도 예약된 호출 횟수를 소비해요.
 - 모든 검사를 통과한 `GuardedToolCall`만 Executor에 전달해요. 차단된 호출은 Executor로 보내지 않으며, Timeout과 Result Byte Limit은 허용된 호출에 반드시 전달해요.
+- 실행 Context의 Run과 요청 Run이 다르면 Approval과 Call Budget 전에 차단해요. 거부된 시도는 `denied` 상태와 내부 Run Event로 기록해요.
+- 허용된 시도는 `running` 상태를 먼저 Commit한 뒤 SQLite Transaction 밖에서 Executor를 호출해요. 완료·실패·취소는 각각 `completed`, `failed`, `cancelled`로 한 번만 전이해요.
+- 같은 Run·Tool·Call Budget 예약 번호는 한 번만 시작할 수 있어요. 시작 기록에 실패하면 Executor를 호출하지 않고, 종료 기록 실패 때문에 외부 Tool을 자동으로 다시 실행하지 않아요.
+- Executor 예외와 취소는 `tool_execution_failed`, `tool_execution_cancelled`로 정규화해요. Argument·Result·Approval Reference·예외 원문은 Invocation과 Run Event에 저장하지 않아요.
 - 판정과 오류에는 정책 Fingerprint와 안전한 수치만 남겨요. Argument, Approval Reference, Connection ID·Owner와 실제 Tool Name은 표현하지 않아요.
 
-Connection·Tool Registry는 WBS-09.2.1에서, Tool Policy·JSON Schema·Call Budget은 WBS-09.2.2.1에서, Approval Grant 발급·원자적 소비는 WBS-09.2.2.2.1에서 연결했어요. Tool이 `active`이고 Connection이 `connected`일 때만 Resolver가 실행 가능 상태로 반환해요. Tool Invocation Lifecycle은 WBS-09.2.2.2.2에, 실제 MCP Transport·Discovery와 Result 정규화는 후속 단계에 남아 있어요. 현재 구현은 아직 Tool 호출 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안 경계예요.
+Connection·Tool Registry는 WBS-09.2.1에서, Tool Policy·JSON Schema·Call Budget은 WBS-09.2.2.1에서, Approval Grant 발급·원자적 소비는 WBS-09.2.2.2.1에서, Tool Invocation Lifecycle은 WBS-09.2.2.2.2에서 연결했어요. Tool이 `active`이고 Connection이 `connected`일 때만 Resolver가 실행 가능 상태로 반환해요. 실제 MCP Transport·Discovery, `ToolResult` 정규화와 Result Summary·Fingerprint는 후속 단계에 남아 있어요. 현재 구현은 아직 실제 MCP 호출 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안·기록 경계예요.
 
 ### 최종 Output Guardrail 기반
 
@@ -220,7 +224,7 @@ Model Policy 생성·Eval 실행과 활성화 운영 경로, 사용처 Registry�
 ## 아직 구현되지 않은 기능
 
 - Attachment Upload와 Run Timeline·Workflow Admin UI
-- 실제 MCP Transport·Discovery·실행 Adapter와 Tool Invocation 영속화
+- 실제 MCP Transport·Discovery·실행 Adapter와 `ToolResult` 정규화
 - Model Policy 생성·초기 활성화 운영 경로, 사용처 Registry와 WBS-15 Eval 실행기 연결
 - Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
@@ -455,6 +459,18 @@ WBS-09.2.2.2.1에서 구현한 Hash Reference 발급, 현재 권한·Policy 재�
 uv run --extra mcp pytest \
   tests/integration/test_tool_approval_persistence.py \
   tests/unit/test_tool_guardrails.py \
+  tests/integration/test_sqlite_migrations.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### Tool Invocation Lifecycle만 검증
+
+WBS-09.2.2.2.2에서 구현한 실행 전 `running` Commit, 거부·성공·실패·취소 상태, 안전한 내부 Run Event, 중복 Budget Attempt 차단과 Migration 12를 확인하세요.
+
+```bash
+uv run --extra mcp pytest \
+  tests/unit/test_tool_guardrails.py \
+  tests/integration/test_tool_invocation_persistence.py \
   tests/integration/test_sqlite_migrations.py \
   tests/architecture/test_dependency_rules.py
 ```

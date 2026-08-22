@@ -22,6 +22,12 @@ from pangi.application.contracts.tool_guardrails import (
     ToolGuardrailBlockedError,
     ToolPolicy,
 )
+from pangi.application.contracts.tool_invocation_persistence import (
+    ToolInvocationContext,
+    ToolInvocationDenial,
+    ToolInvocationFinish,
+    ToolInvocationStart,
+)
 from pangi.application.services.external_data import ExternalDataService
 from pangi.application.services.redaction import (
     RedactionService,
@@ -112,6 +118,17 @@ class RecordingExecutor:
         return "unexpected"
 
 
+class NoopInvocationRecorder:
+    async def start(self, invocation: ToolInvocationStart) -> None:
+        del invocation
+
+    async def deny(self, invocation: ToolInvocationDenial) -> None:
+        del invocation
+
+    async def finish(self, invocation: ToolInvocationFinish) -> None:
+        del invocation
+
+
 def _external_data_service() -> ExternalDataService:
     return ExternalDataService(
         ExternalDataPolicy(
@@ -168,7 +185,13 @@ def test_external_document_cannot_create_system_or_tool_policy(
         budget_ledger=NeverBudgetLedger(),
         clock=lambda: NOW,
     )
-    execution = GuardedToolExecutionService(guardrail, executor=executor)
+    execution = GuardedToolExecutionService(
+        guardrail,
+        executor=executor,
+        invocations=NoopInvocationRecorder(),
+        clock=lambda: NOW,
+        id_factory=lambda: "tool-invocation-0001",
+    )
     actor = AuthenticatedPrincipal(
         "member-user-00001",
         "Actor",
@@ -186,6 +209,7 @@ def test_external_document_cannot_create_system_or_tool_policy(
                     tool_id="linear.issue.create",
                     arguments={"external_instruction": envelope.content},
                 ),
+                context=ToolInvocationContext("run-identifier-0001"),
             )
         )
 

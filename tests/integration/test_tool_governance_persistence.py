@@ -18,6 +18,9 @@ from pangi.adapters.outbound.persistence.sqlite.tool_governance import (
     SqliteToolBudgetLedger,
     SqliteToolPolicyRepository,
 )
+from pangi.adapters.outbound.persistence.sqlite.tool_invocations import (
+    SqliteToolInvocationRecorder,
+)
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.adapters.outbound.tool_arguments import JsonSchemaToolArgumentValidator
 from pangi.application.contracts.auth import AuthenticatedPrincipal
@@ -32,6 +35,7 @@ from pangi.application.contracts.tool_guardrails import (
     ToolGuardrailBlockedError,
     ToolPolicy,
 )
+from pangi.application.contracts.tool_invocation_persistence import ToolInvocationContext
 from pangi.application.contracts.tool_policy_persistence import (
     ToolPolicyActivationCommand,
 )
@@ -476,6 +480,8 @@ def test_persistent_adapters_complete_guardrail_before_execution(tmp_path: Path)
                     clock=lambda: NOW,
                 ),
                 executor=executor,
+                invocations=SqliteToolInvocationRecorder(database),
+                clock=lambda: NOW,
             )
             actor = AuthenticatedPrincipal(
                 USER_ID,
@@ -492,6 +498,7 @@ def test_persistent_adapters_complete_guardrail_before_execution(tmp_path: Path)
                         tool_id=TOOL_ID,
                         arguments={"unexpected": True},
                     ),
+                    context=ToolInvocationContext(RUN_ID),
                 )
             assert captured.value.code is ToolGuardrailErrorCode.ARGUMENT_SCHEMA_INVALID
             assert executor.calls == []
@@ -504,6 +511,7 @@ def test_persistent_adapters_complete_guardrail_before_execution(tmp_path: Path)
                     tool_id=TOOL_ID,
                     arguments={"title": "새 이슈"},
                 ),
+                context=ToolInvocationContext(RUN_ID),
             )
             assert allowed.decision.outcome is ToolGuardrailOutcome.ALLOWED
             assert len(executor.calls) == 1

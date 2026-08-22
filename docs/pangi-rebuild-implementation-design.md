@@ -2128,7 +2128,7 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 | `run_events` | run_id, event_index, type, visibility, step_id, message, attributes_json, created_at | run+index Unique | 05 |
 | `model_policies` | id, name, version, rules_json, fingerprint, state, eval_run_id | Active Version 불변 | 07 |
 | `model_invocations` | run_id, step_id, role, provider, model, region, policy_id, data_classes_json, source_kinds_json, redaction_count, input_fingerprint, logical_calls, provider_requests, token, duration, state | 원문 Prompt 미저장 | 07 |
-| `tool_invocations` | run_id, step_id, connection_id, stable_tool_id, redacted_arguments, result_summary, duration, state | Secret 미저장 | 09 |
+| `tool_invocations` | id, run_id, step_id, connection_id, stable_tool_id, policy_version, policy_fingerprint, approval_grant_id, arguments_fingerprint, argument_bytes, permission, calls_used, timeout_seconds, max_result_bytes, duration_ms, state, error_code, timestamps | 원문 Argument·Result·Approval Reference·예외 미저장, Run+Tool+Budget Attempt Unique, `running → terminal` 단방향 전이 | 09 |
 | `external_mutations` | id, idempotency_key, run_id, step_id, connection_id, stable_tool_id, remote_resource_id, remote_url, state, timestamps | idempotency_key Unique | 20 |
 | `eval_suites` | id, name, state, config_json | name Unique | 15 |
 | `eval_cases` | id, suite_id, case_key, definition_json, fingerprint, critical | suite+key Unique | 15 |

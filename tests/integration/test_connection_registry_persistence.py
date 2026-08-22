@@ -30,6 +30,12 @@ from pangi.application.contracts.tool_guardrails import (
     ToolGuardrailBlockedError,
     ToolPolicy,
 )
+from pangi.application.contracts.tool_invocation_persistence import (
+    ToolInvocationContext,
+    ToolInvocationDenial,
+    ToolInvocationFinish,
+    ToolInvocationStart,
+)
 from pangi.application.ports.connections import (
     ConnectionRegistryConflictError,
     ConnectionRegistryNotFoundError,
@@ -344,6 +350,17 @@ class RecordingExecutor:
         return "unexpected"
 
 
+class NoopInvocationRecorder:
+    async def start(self, invocation: ToolInvocationStart) -> None:
+        del invocation
+
+    async def deny(self, invocation: ToolInvocationDenial) -> None:
+        del invocation
+
+    async def finish(self, invocation: ToolInvocationFinish) -> None:
+        del invocation
+
+
 def test_sqlite_resolver_still_defaults_to_deny_without_policy(tmp_path: Path) -> None:
     async def scenario() -> None:
         database = _database(tmp_path)
@@ -366,6 +383,9 @@ def test_sqlite_resolver_still_defaults_to_deny_without_policy(tmp_path: Path) -
                     clock=lambda: NOW,
                 ),
                 executor=executor,
+                invocations=NoopInvocationRecorder(),
+                clock=lambda: NOW,
+                id_factory=lambda: "tool-invocation-0001",
             )
             actor = AuthenticatedPrincipal(
                 USER_ID,
@@ -383,6 +403,7 @@ def test_sqlite_resolver_still_defaults_to_deny_without_policy(tmp_path: Path) -
                         tool_id=snapshot.stable_tool_id,
                         arguments={"title": "새 이슈"},
                     ),
+                    context=ToolInvocationContext("run-identifier-0001"),
                 )
             assert captured.value.code is ToolGuardrailErrorCode.POLICY_MISSING
             assert executor.calls == []

@@ -19,6 +19,12 @@ from pangi.application.contracts.tool_guardrails import (
     ToolGuardrailBlockedError,
     ToolPolicy,
 )
+from pangi.application.contracts.tool_invocation_persistence import (
+    ToolInvocationContext,
+    ToolInvocationDenial,
+    ToolInvocationFinish,
+    ToolInvocationStart,
+)
 from pangi.application.services.connections import ToolRegistrySnapshotFactory
 from pangi.application.services.tool_guardrails import (
     GuardedToolExecutionService,
@@ -93,6 +99,17 @@ class RecordingExecutor:
         return "unexpected"
 
 
+class NoopInvocationRecorder:
+    async def start(self, invocation: ToolInvocationStart) -> None:
+        del invocation
+
+    async def deny(self, invocation: ToolInvocationDenial) -> None:
+        del invocation
+
+    async def finish(self, invocation: ToolInvocationFinish) -> None:
+        del invocation
+
+
 def _snapshot(state: ConnectionToolState) -> ToolRegistrySnapshot:
     connection = Connection(
         id="connection-user-0001",
@@ -146,6 +163,9 @@ def test_registry_state_and_missing_policy_fail_closed_before_execution(
             clock=lambda: NOW,
         ),
         executor=executor,
+        invocations=NoopInvocationRecorder(),
+        clock=lambda: NOW,
+        id_factory=lambda: "tool-invocation-0001",
     )
     actor = AuthenticatedPrincipal(
         "member-user-00001",
@@ -164,6 +184,7 @@ def test_registry_state_and_missing_policy_fail_closed_before_execution(
                     tool_id=snapshot.stable_tool_id,
                     arguments={"title": "새 이슈"},
                 ),
+                context=ToolInvocationContext("run-identifier-0001"),
             )
         )
 

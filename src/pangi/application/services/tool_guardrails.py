@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import time
+import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from math import isfinite
@@ -19,10 +22,17 @@ from pangi.application.contracts.tool_guardrails import (
     GuardedToolExecution,
     ResolvedTool,
     ToolCallRequest,
+    ToolExecutionFailedError,
     ToolExecutionLimits,
     ToolGuardrailBlockedError,
     ToolGuardrailDecision,
     ToolPolicy,
+)
+from pangi.application.contracts.tool_invocation_persistence import (
+    ToolInvocationContext,
+    ToolInvocationDenial,
+    ToolInvocationFinish,
+    ToolInvocationStart,
 )
 from pangi.application.ports.tool_guardrails import (
     StableToolResolver,
@@ -32,6 +42,7 @@ from pangi.application.ports.tool_guardrails import (
     ToolExecutor,
     ToolPolicyProvider,
 )
+from pangi.application.ports.tool_invocation_persistence import ToolInvocationRecorder
 from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.tool_guardrails import (
     ToolApprovalConsumptionStatus,
@@ -43,6 +54,18 @@ from pangi.domain.tool_guardrails import (
     ToolPermission,
     ToolPolicyEffect,
 )
+
+Clock = Callable[[], datetime]
+IdFactory = Callable[[], str]
+MonotonicClock = Callable[[], float]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _identifier() -> str:
+    return uuid.uuid4().hex
 
 
 def _normalize_json(value: object, active: set[int]) -> object:
@@ -464,16 +487,108 @@ class GuardedToolExecutionService:
         guardrail: ToolGuardrailService,
         *,
         executor: ToolExecutor,
+        invocations: ToolInvocationRecorder,
+        clock: Clock = _utc_now,
+        monotonic_clock: MonotonicClock = time.monotonic,
+        id_factory: IdFactory = _identifier,
     ) -> None:
         self._guardrail = guardrail
         self._executor = executor
+        self._invocations = invocations
+        self._clock = clock
+        self._monotonic_clock = monotonic_clock
+        self._id_factory = id_factory
 
     async def execute(
         self,
         *,
         actor: AuthenticatedPrincipal,
         request: ToolCallRequest,
+        context: ToolInvocationContext,
     ) -> GuardedToolExecution:
-        guarded = await self._guardrail.guard(actor=actor, request=request)
-        result = await self._executor.execute(guarded)
+        invocation_id = self._id_factory()
+        if context.run_id != request.run_id:
+            blocked = ToolGuardrailBlockedError(
+                ToolGuardrailDecision(
+                    tool_id=request.tool_id,
+                    stage=ToolGuardrailStage.CONTEXT,
+                    outcome=ToolGuardrailOutcome.BLOCKED,
+                    error_code=ToolGuardrailErrorCode.RUN_CONTEXT_MISMATCH,
+                )
+            )
+            await self._deny(invocation_id, context, blocked)
+            raise blocked
+        try:
+            guarded = await self._guardrail.guard(actor=actor, request=request)
+        except ToolGuardrailBlockedError as blocked:
+            await self._deny(invocation_id, context, blocked)
+            raise
+        await self._invocations.start(
+            ToolInvocationStart.from_guarded_call(
+                invocation_id,
+                context,
+                guarded,
+                started_at=self._clock(),
+            )
+        )
+        started = self._monotonic_clock()
+        try:
+            result = await self._executor.execute(guarded)
+        except asyncio.CancelledError as cancelled:
+            finish = ToolInvocationFinish.cancelled(
+                invocation_id,
+                duration_ms=self._duration_ms(started),
+                finished_at=self._clock(),
+            )
+            try:
+                await self._finish_under_cancellation(finish)
+            except Exception:
+                cancelled.add_note("Tool cancellation metadata could not be persisted")
+            raise
+        except Exception:
+            await self._invocations.finish(
+                ToolInvocationFinish.failed(
+                    invocation_id,
+                    duration_ms=self._duration_ms(started),
+                    finished_at=self._clock(),
+                )
+            )
+            raise ToolExecutionFailedError() from None
+        await self._invocations.finish(
+            ToolInvocationFinish.completed(
+                invocation_id,
+                duration_ms=self._duration_ms(started),
+                finished_at=self._clock(),
+            )
+        )
         return GuardedToolExecution(result=result, decision=guarded.decision)
+
+    async def _deny(
+        self,
+        invocation_id: str,
+        context: ToolInvocationContext,
+        blocked: ToolGuardrailBlockedError,
+    ) -> None:
+        await self._invocations.deny(
+            ToolInvocationDenial(
+                invocation_id=invocation_id,
+                context=context,
+                decision=blocked.decision,
+                denied_at=self._clock(),
+            )
+        )
+
+    def _duration_ms(self, started: float) -> int:
+        elapsed = self._monotonic_clock() - started
+        if elapsed < 0:
+            raise ValueError("Tool execution monotonic clock moved backwards")
+        return int(elapsed * 1_000)
+
+    async def _finish_under_cancellation(self, finish: ToolInvocationFinish) -> None:
+        task = asyncio.create_task(self._invocations.finish(finish))
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+        await task

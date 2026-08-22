@@ -23,6 +23,9 @@ from pangi.adapters.outbound.persistence.sqlite.tool_governance import (
     SqliteToolBudgetLedger,
     SqliteToolPolicyRepository,
 )
+from pangi.adapters.outbound.persistence.sqlite.tool_invocations import (
+    SqliteToolInvocationRecorder,
+)
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.adapters.outbound.tool_arguments import JsonSchemaToolArgumentValidator
 from pangi.application.contracts.auth import AuthenticatedPrincipal
@@ -38,6 +41,7 @@ from pangi.application.contracts.tool_guardrails import (
     ToolGuardrailBlockedError,
     ToolPolicy,
 )
+from pangi.application.contracts.tool_invocation_persistence import ToolInvocationContext
 from pangi.application.contracts.tool_policy_persistence import (
     ToolPolicyActivationCommand,
 )
@@ -311,6 +315,8 @@ def test_user_grant_is_hashed_consumed_once_and_propagated_to_guarded_call(
                     clock=lambda: NOW + timedelta(seconds=3),
                 ),
                 executor=executor,
+                invocations=SqliteToolInvocationRecorder(database),
+                clock=lambda: NOW + timedelta(seconds=3),
             )
             actor = AuthenticatedPrincipal(
                 USER_ID,
@@ -327,6 +333,7 @@ def test_user_grant_is_hashed_consumed_once_and_propagated_to_guarded_call(
                     arguments=ARGUMENTS,
                     approval_reference=issued.reference,
                 ),
+                context=ToolInvocationContext(RUN_ID),
             )
             assert result.result == {"ok": True}
             assert executor.calls[0].approval_grant_id == issued.grant.grant_id
@@ -341,6 +348,7 @@ def test_user_grant_is_hashed_consumed_once_and_propagated_to_guarded_call(
                         arguments=ARGUMENTS,
                         approval_reference=issued.reference,
                     ),
+                    context=ToolInvocationContext(RUN_ID),
                 )
             assert captured.value.code is ToolGuardrailErrorCode.APPROVAL_INVALID
             assert len(executor.calls) == 1
@@ -482,6 +490,8 @@ def test_consumed_grant_is_not_refunded_when_budget_blocks(tmp_path: Path) -> No
                     clock=lambda: NOW + timedelta(seconds=3),
                 ),
                 executor=executor,
+                invocations=SqliteToolInvocationRecorder(database),
+                clock=lambda: NOW + timedelta(seconds=3),
             )
             actor = AuthenticatedPrincipal(
                 USER_ID,
@@ -500,6 +510,7 @@ def test_consumed_grant_is_not_refunded_when_budget_blocks(tmp_path: Path) -> No
                         arguments=ARGUMENTS,
                         approval_reference=issued.reference,
                     ),
+                    context=ToolInvocationContext(RUN_ID),
                 )
             assert captured.value.code is ToolGuardrailErrorCode.CALL_BUDGET_EXCEEDED
             assert executor.calls == []
