@@ -31,6 +31,9 @@ from pangi.adapters.outbound.persistence.sqlite.tool_governance import (
     SqliteToolBudgetLedger,
     SqliteToolPolicyRepository,
 )
+from pangi.adapters.outbound.persistence.sqlite.tool_invocations import (
+    SqliteToolInvocationRecorder,
+)
 from pangi.adapters.outbound.tool_arguments import JsonSchemaToolArgumentValidator
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.run_queue import RunQueuePolicy
@@ -236,6 +239,14 @@ def build_tool_approval_store(database: SqliteDatabase) -> SqliteToolApprovalSto
         ToolApprovalIssuancePolicy(max_ttl_seconds=600),
         _build_audit_writer(),
     )
+
+
+def build_tool_invocation_recorder(
+    database: SqliteDatabase,
+) -> SqliteToolInvocationRecorder:
+    """Build mandatory Tool Invocation and internal Event persistence."""
+
+    return SqliteToolInvocationRecorder(database, _build_run_event_writer())
 
 
 def build_bootstrap_admin_for_cli(

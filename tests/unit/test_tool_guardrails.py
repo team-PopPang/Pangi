@@ -19,8 +19,18 @@ from pangi.application.contracts.tool_guardrails import (
     ResolvedTool,
     ToolBudgetReservation,
     ToolCallRequest,
+    ToolExecutionFailedError,
     ToolGuardrailBlockedError,
     ToolPolicy,
+)
+from pangi.application.contracts.tool_invocation_persistence import (
+    ToolInvocationContext,
+    ToolInvocationDenial,
+    ToolInvocationFinish,
+    ToolInvocationStart,
+)
+from pangi.application.ports.tool_invocation_persistence import (
+    ToolInvocationPersistenceError,
 )
 from pangi.application.services.tool_guardrails import (
     GuardedToolExecutionService,
@@ -30,9 +40,11 @@ from pangi.domain.auth import UserRole, UserStatus
 from pangi.domain.tool_guardrails import (
     ToolApprovalRequirement,
     ToolConnectionScope,
+    ToolExecutionErrorCode,
     ToolGuardrailErrorCode,
     ToolGuardrailOutcome,
     ToolGuardrailStage,
+    ToolInvocationState,
     ToolPermission,
     ToolPolicyEffect,
 )
@@ -171,6 +183,52 @@ class RecordingExecutor:
         return self.result
 
 
+class NoopInvocationRecorder:
+    async def start(self, invocation: ToolInvocationStart) -> None:
+        del invocation
+
+    async def deny(self, invocation: ToolInvocationDenial) -> None:
+        del invocation
+
+    async def finish(self, invocation: ToolInvocationFinish) -> None:
+        del invocation
+
+
+class RecordingInvocationRecorder:
+    def __init__(
+        self,
+        *,
+        events: list[str] | None = None,
+        start_error: Exception | None = None,
+        finish_error: Exception | None = None,
+    ) -> None:
+        self.events = events
+        self.start_error = start_error
+        self.finish_error = finish_error
+        self.starts: list[ToolInvocationStart] = []
+        self.denials: list[ToolInvocationDenial] = []
+        self.finishes: list[ToolInvocationFinish] = []
+
+    async def start(self, invocation: ToolInvocationStart) -> None:
+        self.starts.append(invocation)
+        if self.events is not None:
+            self.events.append("start")
+        if self.start_error is not None:
+            raise self.start_error
+
+    async def deny(self, invocation: ToolInvocationDenial) -> None:
+        self.denials.append(invocation)
+        if self.events is not None:
+            self.events.append("deny")
+
+    async def finish(self, invocation: ToolInvocationFinish) -> None:
+        self.finishes.append(invocation)
+        if self.events is not None:
+            self.events.append("finish")
+        if self.finish_error is not None:
+            raise self.finish_error
+
+
 def _actor(
     *,
     user_id: str = "member-user-00001",
@@ -226,6 +284,10 @@ def _request(
         arguments=arguments if arguments is not None else {"title": "새 이슈"},  # type: ignore[arg-type]
         approval_reference=approval_reference,
     )
+
+
+def _context(*, run_id: str = "run-identifier-0001") -> ToolInvocationContext:
+    return ToolInvocationContext(run_id)
 
 
 def _arguments_fingerprint(arguments: dict[str, object]) -> str:
@@ -301,7 +363,14 @@ def _services(
         budget_ledger=budget,
         clock=lambda: NOW,
     )
-    execution = GuardedToolExecutionService(guardrail, executor=tool_executor)
+    execution = GuardedToolExecutionService(
+        guardrail,
+        executor=tool_executor,
+        invocations=NoopInvocationRecorder(),
+        clock=lambda: NOW,
+        monotonic_clock=lambda: 1.0,
+        id_factory=lambda: "tool-invocation-0001",
+    )
     return (
         actor or _actor(),
         guardrail,
@@ -355,6 +424,7 @@ def test_allowed_call_uses_fixed_order_canonical_arguments_and_execution_limits(
         execution.execute(
             actor=actor,
             request=_request(arguments=arguments, approval_reference="approval-secret-ref"),
+            context=_context(),
         )
     )
 
@@ -428,6 +498,7 @@ def test_user_connection_requires_exact_owner_but_instance_connection_is_shared(
         execution.execute(
             actor=actor,
             request=_request(principal_user_id="another-user-0001"),
+            context=_context(),
         )
     )
     assert result.decision.outcome is ToolGuardrailOutcome.ALLOWED
@@ -540,6 +611,7 @@ def test_admin_approval_requires_an_admin_approver() -> None:
         execution.execute(
             actor=actor,
             request=_request(approval_reference="admin-approval-ref"),
+            context=_context(),
         )
     )
     assert result.decision.outcome is ToolGuardrailOutcome.ALLOWED
@@ -548,7 +620,7 @@ def test_admin_approval_requires_an_admin_approver() -> None:
 def test_call_budget_blocks_later_attempts_and_zero_budget_skips_the_ledger() -> None:
     policy = _policy(max_calls_per_run=1)
     actor, guardrail, execution, _, _, _, _, ledger, executor = _services(policy=policy)
-    asyncio.run(execution.execute(actor=actor, request=_request()))
+    asyncio.run(execution.execute(actor=actor, request=_request(), context=_context()))
     exceeded = _blocked(guardrail, _request(), actor=actor)
 
     assert exceeded.code is ToolGuardrailErrorCode.CALL_BUDGET_EXCEEDED
@@ -585,7 +657,7 @@ def test_budget_policy_race_is_reported_before_execution() -> None:
 def test_policy_version_change_does_not_reset_the_run_tool_call_budget() -> None:
     policy = _policy(max_calls_per_run=1)
     actor, guardrail, execution, _, provider, _, _, ledger, executor = _services(policy=policy)
-    asyncio.run(execution.execute(actor=actor, request=_request()))
+    asyncio.run(execution.execute(actor=actor, request=_request(), context=_context()))
 
     provider.policy = replace(policy, policy_version="tool-policy-v2")
     exceeded = _blocked(guardrail, _request(), actor=actor)
@@ -604,8 +676,9 @@ def test_failed_execution_keeps_the_reserved_call_consumed() -> None:
         executor=executor,
     )
 
-    with pytest.raises(RuntimeError, match="transport unavailable"):
-        asyncio.run(execution.execute(actor=actor, request=_request()))
+    with pytest.raises(ToolExecutionFailedError, match="Tool execution failed") as captured:
+        asyncio.run(execution.execute(actor=actor, request=_request(), context=_context()))
+    assert "transport unavailable" not in repr(captured.value)
     retry = _blocked(guardrail, _request(), actor=actor)
 
     assert retry.code is ToolGuardrailErrorCode.CALL_BUDGET_EXCEEDED
@@ -670,3 +743,168 @@ def test_repr_and_errors_do_not_disclose_arguments_approval_or_connection_data()
     for raw_value in (secret, approval_reference, connection_id, owner_id, tool_name):
         assert raw_value not in rendered
     assert error.decision.as_dict()["error_code"] == "tool_policy_denied"
+
+
+def test_execution_context_mismatch_is_denied_before_guardrail_and_budget() -> None:
+    actor, guardrail, _, resolver, _, _, verifier, ledger, executor = _services()
+    recorder = RecordingInvocationRecorder()
+    execution = GuardedToolExecutionService(
+        guardrail,
+        executor=executor,
+        invocations=recorder,
+        clock=lambda: NOW,
+        id_factory=lambda: "tool-invocation-context-0001",
+    )
+
+    with pytest.raises(ToolGuardrailBlockedError) as captured:
+        asyncio.run(
+            execution.execute(
+                actor=actor,
+                request=_request(),
+                context=_context(run_id="another-run-0001"),
+            )
+        )
+
+    assert captured.value.code is ToolGuardrailErrorCode.RUN_CONTEXT_MISMATCH
+    assert captured.value.decision.stage is ToolGuardrailStage.CONTEXT
+    assert len(recorder.denials) == 1
+    assert resolver.calls == []
+    assert verifier.calls == []
+    assert ledger.calls == []
+    assert executor.calls == []
+
+
+def test_execution_lifecycle_records_start_then_success_with_monotonic_duration() -> None:
+    events: list[str] = []
+    actor, guardrail, _, *_, executor = _services(events=events)
+    recorder = RecordingInvocationRecorder(events=events)
+    ticks = iter((10.0, 10.125))
+    execution = GuardedToolExecutionService(
+        guardrail,
+        executor=executor,
+        invocations=recorder,
+        clock=lambda: NOW,
+        monotonic_clock=lambda: next(ticks),
+        id_factory=lambda: "tool-invocation-success-001",
+    )
+
+    result = asyncio.run(
+        execution.execute(actor=actor, request=_request(), context=_context())
+    )
+
+    assert result.result == "ok"
+    assert events == ["resolve", "policy", "schema", "budget", "start", "execute", "finish"]
+    assert recorder.starts[0].calls_used == 1
+    assert recorder.starts[0].arguments_fingerprint == _arguments_fingerprint(
+        {"title": "새 이슈"}
+    )
+    assert recorder.finishes == [
+        ToolInvocationFinish.completed(
+            "tool-invocation-success-001",
+            duration_ms=125,
+            finished_at=NOW,
+        )
+    ]
+
+
+def test_execution_failure_is_normalized_and_records_safe_terminal_metadata() -> None:
+    secret = "transport-secret-detail"
+    executor = RecordingExecutor(error=RuntimeError(secret))
+    actor, guardrail, _, *_ = _services(executor=executor)
+    recorder = RecordingInvocationRecorder()
+    ticks = iter((3.0, 3.125))
+    execution = GuardedToolExecutionService(
+        guardrail,
+        executor=executor,
+        invocations=recorder,
+        clock=lambda: NOW,
+        monotonic_clock=lambda: next(ticks),
+        id_factory=lambda: "tool-invocation-failure-001",
+    )
+
+    with pytest.raises(ToolExecutionFailedError) as captured:
+        asyncio.run(
+            execution.execute(actor=actor, request=_request(), context=_context())
+        )
+
+    assert secret not in str(captured.value)
+    assert recorder.finishes[0].state is ToolInvocationState.FAILED
+    assert recorder.finishes[0].error_code is ToolExecutionErrorCode.FAILED
+    assert recorder.finishes[0].duration_ms == 125
+
+
+def test_execution_cancellation_is_recorded_and_re_raised() -> None:
+    class BlockingExecutor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+
+        async def execute(self, call: GuardedToolCall) -> object:
+            del call
+            self.started.set()
+            await asyncio.Future()
+            raise AssertionError("unreachable")
+
+    executor = BlockingExecutor()
+    actor, guardrail, _, *_ = _services()
+    recorder = RecordingInvocationRecorder()
+    ticks = iter((5.0, 5.25))
+    execution = GuardedToolExecutionService(
+        guardrail,
+        executor=executor,
+        invocations=recorder,
+        clock=lambda: NOW,
+        monotonic_clock=lambda: next(ticks),
+        id_factory=lambda: "tool-invocation-cancel-0001",
+    )
+
+    async def scenario() -> None:
+        task = asyncio.create_task(
+            execution.execute(actor=actor, request=_request(), context=_context())
+        )
+        await executor.started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+    assert recorder.finishes[0].state is ToolInvocationState.CANCELLED
+    assert recorder.finishes[0].error_code is ToolExecutionErrorCode.CANCELLED
+    assert recorder.finishes[0].duration_ms == 250
+
+
+def test_start_persistence_failure_prevents_executor_and_finish_failure_does_not_retry() -> None:
+    actor, guardrail, _, *_, executor = _services()
+    start_failure = RecordingInvocationRecorder(
+        start_error=ToolInvocationPersistenceError("safe start failure")
+    )
+    execution = GuardedToolExecutionService(
+        guardrail,
+        executor=executor,
+        invocations=start_failure,
+        clock=lambda: NOW,
+        id_factory=lambda: "tool-invocation-start-fail",
+    )
+
+    with pytest.raises(ToolInvocationPersistenceError, match="safe start failure"):
+        asyncio.run(
+            execution.execute(actor=actor, request=_request(), context=_context())
+        )
+    assert executor.calls == []
+
+    finish_failure = RecordingInvocationRecorder(
+        finish_error=ToolInvocationPersistenceError("safe finish failure")
+    )
+    execution = GuardedToolExecutionService(
+        guardrail,
+        executor=executor,
+        invocations=finish_failure,
+        clock=lambda: NOW,
+        monotonic_clock=lambda: 1.0,
+        id_factory=lambda: "tool-invocation-finish-fail",
+    )
+    with pytest.raises(ToolInvocationPersistenceError, match="safe finish failure"):
+        asyncio.run(
+            execution.execute(actor=actor, request=_request(), context=_context())
+        )
+    assert len(executor.calls) == 1

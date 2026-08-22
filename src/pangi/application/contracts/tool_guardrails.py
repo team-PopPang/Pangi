@@ -14,6 +14,7 @@ from pangi.domain.guardrails import TrustLevel
 from pangi.domain.tool_guardrails import (
     ToolApprovalRequirement,
     ToolConnectionScope,
+    ToolExecutionErrorCode,
     ToolGuardrailErrorCode,
     ToolGuardrailOutcome,
     ToolGuardrailStage,
@@ -394,3 +395,12 @@ class ToolGuardrailBlockedError(RuntimeError):
     def code(self) -> ToolGuardrailErrorCode:
         assert self.decision.error_code is not None
         return self.decision.error_code
+
+
+class ToolExecutionFailedError(RuntimeError):
+    """A secret-safe external Tool failure exposed by the execution boundary."""
+
+    code = ToolExecutionErrorCode.FAILED
+
+    def __init__(self) -> None:
+        super().__init__("Tool execution failed")

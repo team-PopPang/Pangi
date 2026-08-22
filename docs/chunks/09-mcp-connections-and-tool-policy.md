@@ -72,7 +72,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - [x] Connection Registry, Tool Snapshot과 전역 Stable Tool Resolver를 SQLite에 영속화한다.
 - [x] 불변 Tool Policy Version, 기본 Deny, 안전한 Argument Schema와 영속 Call Budget Adapter를 구현한다.
 - [x] Approval Grant 발급·만료·원자적 일회성 소비 Adapter를 구현하고 WBS-06 공통 Enforcer에 조립한다.
-- [ ] Tool Invocation Lifecycle Adapter를 구현하고 모든 Tool 실행 전후 상태를 영속화한다.
+- [x] Tool Invocation Lifecycle Adapter를 구현하고 모든 Tool 실행 전후 상태를 영속화한다.
 - [ ] Result Normalizer, Redaction, Timeout/Byte Limit과 Invocation Metric을 구현한다.
 - [ ] Connection/Tool API와 Catalog/Card/진단 UI를 구현한다.
 - [ ] Schema Drift가 Skill에 미치는 영향 분석을 연결한다.
@@ -128,6 +128,19 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - WBS-06 Guardrail은 조회형 Approval Port 대신 원자적 소비 Port를 사용한다. 소비된 Grant ID를 `GuardedToolCall`에 고정하며 이후 Budget이 차단돼도 Approval을 환불하지 않는다.
 - 역할·Run Owner·Policy 변경, 만료·중복·병렬 소비, Secret 비노출, DB 불변 제약과 Guardrail 실행 순서를 Unit·Integration Test로 검증했다.
 - Tool Invocation 상태·Metric, Approval 요청 API·UI·Slack Action과 실제 MCP 실행은 후속 WBS 범위다.
+
+## 5차 구현 결과
+
+- Migration 12에서 `tool_invocations`를 추가하고 `denied`, `running`, `completed`, `failed`, `cancelled` 상태와 `running → terminal` 단방향 전이를 DB 제약과 Trigger로 고정했다.
+- 실행 Context의 Run과 Tool 요청 Run을 Approval·Budget 전에 비교한다. 불일치는 `tool_run_context_mismatch`로 차단하고 Executor를 호출하지 않는다.
+- Guardrail 거부는 `denied` Invocation과 `tool.invocation_denied` 내부 Run Event를 하나의 Transaction으로 저장한 뒤 기존 차단 오류를 다시 발생시킨다.
+- 허용된 호출은 `running` Invocation과 `tool.invocation_started` Event를 먼저 Commit한다. 이후 SQLite Transaction을 닫고 Executor를 호출하므로 외부 I/O 중에는 DB Lock을 유지하지 않는다.
+- Executor 성공·일반 실패·취소를 `completed`, `failed`, `cancelled`로 기록하고 `tool.invocation_finished` Event와 같은 Transaction에서 저장한다. 실행 시간은 Wall Clock이 아닌 주입 가능한 Monotonic Clock으로 측정한다.
+- 일반 예외와 취소는 각각 `tool_execution_failed`, `tool_execution_cancelled`로 정규화한다. Argument·Result·Approval Reference·Secret과 예외 원문은 Invocation, Run Event와 공개 오류에 저장하지 않는다.
+- `(run_id, stable_tool_id, calls_used)`를 유일한 Budget Attempt로 제한한다. 시작 기록 실패는 Executor 호출을 막고 종료 기록 실패는 외부 Tool 자동 재실행으로 이어지지 않으며 Approval과 Budget을 환불하지 않는다.
+- 같은 Terminal 기록의 정확한 Replay는 Event를 중복 생성하지 않고 허용한다. 다른 Terminal 상태·시간·오류로 덮어쓰는 충돌은 거부한다.
+- 상태 전이, 중복 Budget Attempt, Event 원자성, 실패·취소, Context 불일치, Secret 비노출과 v11→v12 Backup Migration을 Unit·Integration Test로 검증했다.
+- 실제 MCP Transport·Discovery·Executor, Timeout·Result Byte 실행 강제와 `ToolResult` Summary·Fingerprint는 WBS-09.3~09.5에 남겼다. 비정상 종료 뒤 `running` Invocation 복구, 외부 Side Effect Exactly-once와 Retention도 이번 범위에 포함하지 않는다.
 
 ## 완료 조건
 
