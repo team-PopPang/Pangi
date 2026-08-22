@@ -41,11 +41,12 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 
 1. **Connection·Tool Registry 계약과 Lifecycle 상태기계(WBS-09.1)**: User/Instance Scope, Transport·Auth·상태 불변식, 허용 Lifecycle 전이와 제한된 Canonical Tool Schema Fingerprint를 구현하고 WBS-06 `ResolvedTool` 계약에 연결한다.
 2. **Connection·Tool Registry SQLite 기반(WBS-09.2.1)**: `connections`, `connection_tools` Migration과 Repository를 구현하고 전역 Stable Tool Resolver를 WBS-06 Guardrail에 주입한다.
-3. **Tool Policy·Approval·Budget·Invocation 영속화(WBS-09.2.2)**: `tool_policies`, `tool_invocations` Migration과 Policy·Schema·Approval·Budget Adapter를 구현해 WBS-06 Guardrail의 나머지 Port에 주입한다.
-4. **SecretStore와 stdio Transport(WBS-09.3)**: Keyring 우선 SecretStore와 암호화 File Vault Fallback, stdio Command·Argument·Environment 정책과 Fake Server Fixture를 구현한다.
-5. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
-6. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
-7. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
+3. **Tool Policy·Schema Validator·Call Budget SQLite 기반(WBS-09.2.2.1)**: `tool_policies`, `tool_call_budgets` Migration과 불변 Policy Version·CAS 활성화, 안전한 JSON Schema Adapter와 원자적 Budget 예약을 구현한다.
+4. **Approval Grant·Tool Invocation Lifecycle(WBS-09.2.2.2)**: `tool_approvals`, `tool_invocations` Migration과 Approval 발급·소비·만료, Invocation 상태·Metric 영속 Adapter를 구현해 WBS-06 Guardrail의 나머지 Port에 주입한다.
+5. **SecretStore와 stdio Transport(WBS-09.3)**: Keyring 우선 SecretStore와 암호화 File Vault Fallback, stdio Command·Argument·Environment 정책과 Fake Server Fixture를 구현한다.
+6. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
+7. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
+8. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
 
 위 하위 번호는 현재 확인된 책임 경계다. 구현 중 독립적인 결과나 별도 보안·검증 Gate가 확인되면 루트 WBS 운영 규칙에 따라 단계를 더 나눈다.
 
@@ -54,7 +55,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - HTTP는 기본 HTTPS, stdio는 절대 경로/등록 Alias와 Argument Array만 허용한다.
 - OAuth는 Authorization Code+PKCE S256, State/Nonce/Redirect/Resource Audience를 검증한다.
 - SQLite에는 `secret_ref`만 저장하고 실제 값은 Keyring/Secret Manager/암호화 Vault에 둔다.
-- WBS-03 Unit of Work 위에서 WBS-09.2.1은 `connections`, `connection_tools`를, WBS-09.2.2는 `tool_policies`, `tool_invocations`의 Migration, 제약과 Repository를 소유한다.
+- WBS-03 Unit of Work 위에서 WBS-09.2.1은 `connections`, `connection_tools`를, WBS-09.2.2.1은 `tool_policies`, `tool_call_budgets`를, WBS-09.2.2.2는 `tool_approvals`, `tool_invocations`의 Migration, 제약과 Repository를 소유한다.
 - Discovery 결과는 Canonical JSON SHA-256 Fingerprint로 식별하고 변경 시 참조 Skill을 `needs_review`로 바꾼다.
 - 새 Tool은 `deny`로 등록하고 Registry·Policy·Schema·Approval·Budget Adapter를 WBS-06의 공통 Tool Guardrail에 주입한다. 공통 Engine을 우회하지 않고 모든 검사를 통과한 `GuardedToolCall`만 MCP Client로 보낸다.
 - Result는 Byte/Timeout Limit 뒤 표준 `ToolResult`와 비신뢰 Data Envelope로 정규화한다.
@@ -68,7 +69,8 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - [ ] Keyring 우선 SecretStore와 암호화 File Vault Fallback을 구현한다.
 - [ ] Discovery Cache, Fingerprint, Refresh와 `list_changed` 처리를 구현한다.
 - [x] Connection Registry, Tool Snapshot과 전역 Stable Tool Resolver를 SQLite에 영속화한다.
-- [ ] Stable Tool Registry, 기본 Deny Policy와 Argument/Scope/Approval/Budget Adapter를 구현하고 WBS-06 공통 Enforcer에 조립한다.
+- [x] 불변 Tool Policy Version, 기본 Deny, 안전한 Argument Schema와 영속 Call Budget Adapter를 구현한다.
+- [ ] Approval Grant와 Tool Invocation Lifecycle Adapter를 구현하고 WBS-06 공통 Enforcer에 조립한다.
 - [ ] Result Normalizer, Redaction, Timeout/Byte Limit과 Invocation Metric을 구현한다.
 - [ ] Connection/Tool API와 Catalog/Card/진단 UI를 구현한다.
 - [ ] Schema Drift가 Skill에 미치는 영향 분석을 연결한다.
@@ -100,7 +102,18 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - HTTP Endpoint나 stdio Command·Argument는 형태가 고정된 Canonical `config_json`으로 저장한다. 인증 값은 저장하지 않고 불투명한 `secret_ref`만 보존한다.
 - `stable_tool_id`를 전체 Registry에서 유일하게 고정하고 Tool Snapshot의 동일 시각 충돌과 오래된 Discovery 덮어쓰기를 거부한다.
 - SQLite Registry를 WBS-06 `StableToolResolver`로 연결했다. Tool이 `active`이고 Connection이 `connected`일 때만 실행 가능한 대상으로 해석하며 Policy가 없으면 기존 Guardrail에서 실행 전에 차단한다.
-- WBS-09.2.2의 Tool Policy·Approval·Budget·Invocation 저장소, 실제 MCP Transport·Discovery 실행과 SecretStore는 아직 구현하지 않았다.
+- 2차 구현 시점에는 Tool Policy·Schema Validator·Call Budget, Approval·Invocation 저장소, 실제 MCP Transport·Discovery 실행과 SecretStore를 후속 범위로 남겨두었다.
+
+## 3차 구현 결과
+
+- WBS-09.2.2를 독립적인 영속·검증 경계에 따라 WBS-09.2.2.1과 WBS-09.2.2.2로 나눴다. 이번 단계는 Policy·Schema·Budget만 구현하고 Approval·Invocation은 다음 단계로 남겼다.
+- Migration 10에서 `tool_policies`, `tool_call_budgets`를 추가했다. Policy Version은 초안으로만 생성하고 `draft → active → retired` 전이만 허용하며, Tool별 Active Version을 하나로 제한한다.
+- Policy 활성화는 Candidate와 Baseline, 현재 Connection·Tool 상태, Permission과 Schema Fingerprint를 다시 확인한다. 기존 Active 폐기, Candidate 활성화와 `tool_policy.version_activated` Audit 기록을 하나의 Transaction에서 처리한다.
+- 정확한 Active Policy가 없으면 기본 Deny한다. 오래된 Baseline, Registry 변경, 중복 Version과 불일치 Fingerprint는 외부 실행 전에 안전하게 거부한다.
+- JSON Schema Adapter는 현재 Registry의 정확한 Schema Snapshot을 다시 확인하고 로컬 `$ref`만 허용한다. 제한된 Cache와 Worker Thread를 사용하며 Schema나 선택 의존성이 잘못되면 실패 폐쇄한다.
+- Call Budget 예약은 Run·Stable Tool 단위로 SQLite에 영속화하고 Transaction 안에서 정확히 1씩 증가시킨다. 예약 직전에 Tool 가용성과 Active Policy Fingerprint를 다시 확인하고 Policy Version 변경으로 누적 횟수를 초기화하지 않는다.
+- Policy 교체 경쟁, 병렬 Budget 예약, Process 재생성 뒤 누적 유지, 원격 `$ref` 거부, Fingerprint 불일치와 Secret 비노출을 Unit·Integration Test로 검증했다.
+- Approval Grant 발급·소비·만료, Tool Invocation 상태·Metric, 실제 MCP 호출과 Result 정규화는 WBS-09.2.2.2 이후 범위다.
 
 ## 완료 조건
 

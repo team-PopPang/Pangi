@@ -27,6 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = [
+  "jsonschema>=4.23,<5",
+]
 openai = [
   "jsonschema>=4.23,<5",
   "openai>=2,<3",

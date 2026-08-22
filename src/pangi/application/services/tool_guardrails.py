@@ -249,17 +249,28 @@ class ToolGuardrailService:
                 argument_bytes=argument_bytes,
                 calls_used=0,
             )
-        reservation = self._budget_ledger.reserve_call(
+        reservation = await self._budget_ledger.reserve_call(
             run_id=request.run_id,
             tool_id=tool.tool_id,
             policy_fingerprint=policy.fingerprint,
             max_calls_per_run=policy.max_calls_per_run,
         )
         if not reservation.allowed or reservation.calls_used > policy.max_calls_per_run:
+            rejection_code = (
+                reservation.rejection_code
+                or ToolGuardrailErrorCode.CALL_BUDGET_EXCEEDED
+            )
+            rejection_stage = (
+                ToolGuardrailStage.POLICY
+                if rejection_code is ToolGuardrailErrorCode.POLICY_CHANGED
+                else ToolGuardrailStage.RESOLUTION
+                if rejection_code is ToolGuardrailErrorCode.TOOL_UNAVAILABLE
+                else ToolGuardrailStage.BUDGET
+            )
             self._block(
                 request,
-                ToolGuardrailStage.BUDGET,
-                ToolGuardrailErrorCode.CALL_BUDGET_EXCEEDED,
+                rejection_stage,
+                rejection_code,
                 tool=tool,
                 policy=policy,
                 argument_bytes=argument_bytes,

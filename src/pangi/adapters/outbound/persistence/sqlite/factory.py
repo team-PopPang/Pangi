@@ -24,6 +24,11 @@ from pangi.adapters.outbound.persistence.sqlite.runs import (
     SqliteRunStore,
 )
 from pangi.adapters.outbound.persistence.sqlite.sessions import SqliteAuthSessionStore
+from pangi.adapters.outbound.persistence.sqlite.tool_governance import (
+    SqliteToolBudgetLedger,
+    SqliteToolPolicyRepository,
+)
+from pangi.adapters.outbound.tool_arguments import JsonSchemaToolArgumentValidator
 from pangi.application.contracts.paths import RuntimePaths
 from pangi.application.contracts.run_queue import RunQueuePolicy
 from pangi.application.ports.run_queue import RunQueueRuntimeNotifier
@@ -193,6 +198,28 @@ def build_connection_registry(database: SqliteDatabase) -> SqliteConnectionRegis
     """Build persistent Connection metadata and Stable Tool resolution."""
 
     return SqliteConnectionRegistry(database)
+
+
+def build_tool_policy_repository(
+    database: SqliteDatabase,
+) -> SqliteToolPolicyRepository:
+    """Build immutable Tool Policy persistence and active resolution."""
+
+    return SqliteToolPolicyRepository(database, _build_audit_writer())
+
+
+def build_tool_budget_ledger(database: SqliteDatabase) -> SqliteToolBudgetLedger:
+    """Build the persistent atomic Run·Tool Call Budget."""
+
+    return SqliteToolBudgetLedger(database)
+
+
+def build_tool_argument_validator(
+    database: SqliteDatabase,
+) -> JsonSchemaToolArgumentValidator:
+    """Build network-free validation against persisted Tool Schema snapshots."""
+
+    return JsonSchemaToolArgumentValidator(build_connection_registry(database))
 
 
 def build_bootstrap_admin_for_cli(
