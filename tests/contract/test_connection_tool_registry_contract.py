@@ -7,8 +7,11 @@ import pytest
 
 from pangi.application.contracts.auth import AuthenticatedPrincipal
 from pangi.application.contracts.connections import ToolRegistrySnapshot
+from pangi.application.contracts.tool_approval_persistence import (
+    ToolApprovalConsumption,
+    ToolApprovalExpectation,
+)
 from pangi.application.contracts.tool_guardrails import (
-    ApprovalGrant,
     GuardedToolCall,
     ResolvedTool,
     ToolBudgetReservation,
@@ -60,7 +63,12 @@ class NeverArgumentValidator:
 
 
 class NeverApprovalVerifier:
-    async def resolve_approval(self, approval_reference: str) -> ApprovalGrant | None:
+    async def consume_approval(
+        self,
+        approval_reference: str,
+        *,
+        expectation: ToolApprovalExpectation,
+    ) -> ToolApprovalConsumption:
         raise AssertionError("an unavailable or ungoverned Tool cannot reach approval")
 
 
@@ -133,7 +141,7 @@ def test_registry_state_and_missing_policy_fail_closed_before_execution(
             resolver=SnapshotResolver(snapshot),
             policy_provider=MissingPolicyProvider(),
             argument_validator=NeverArgumentValidator(),
-            approval_verifier=NeverApprovalVerifier(),
+            approval_consumer=NeverApprovalVerifier(),
             budget_ledger=NeverBudgetLedger(),
             clock=lambda: NOW,
         ),

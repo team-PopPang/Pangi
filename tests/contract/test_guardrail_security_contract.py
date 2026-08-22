@@ -10,8 +10,11 @@ from pangi.application.contracts.external_data import (
     ExternalDataMediaType,
     ExternalDataPolicy,
 )
+from pangi.application.contracts.tool_approval_persistence import (
+    ToolApprovalConsumption,
+    ToolApprovalExpectation,
+)
 from pangi.application.contracts.tool_guardrails import (
-    ApprovalGrant,
     GuardedToolCall,
     ResolvedTool,
     ToolBudgetReservation,
@@ -79,7 +82,12 @@ class NeverArgumentValidator:
 
 
 class NeverApprovalVerifier:
-    async def resolve_approval(self, approval_reference: str) -> ApprovalGrant | None:
+    async def consume_approval(
+        self,
+        approval_reference: str,
+        *,
+        expectation: ToolApprovalExpectation,
+    ) -> ToolApprovalConsumption:
         raise AssertionError("a missing or denied policy must fail before approval")
 
 
@@ -156,7 +164,7 @@ def test_external_document_cannot_create_system_or_tool_policy(
         resolver=StaticResolver(),
         policy_provider=StaticPolicyProvider(policy),
         argument_validator=NeverArgumentValidator(),
-        approval_verifier=NeverApprovalVerifier(),
+        approval_consumer=NeverApprovalVerifier(),
         budget_ledger=NeverBudgetLedger(),
         clock=lambda: NOW,
     )

@@ -22,8 +22,11 @@ from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.adapters.outbound.tool_arguments import JsonSchemaToolArgumentValidator
 from pangi.application.contracts.auth import AuthenticatedPrincipal
 from pangi.application.contracts.connections import ToolRegistrySnapshot
+from pangi.application.contracts.tool_approval_persistence import (
+    ToolApprovalConsumption,
+    ToolApprovalExpectation,
+)
 from pangi.application.contracts.tool_guardrails import (
-    ApprovalGrant,
     GuardedToolCall,
     ToolCallRequest,
     ToolGuardrailBlockedError,
@@ -430,8 +433,13 @@ def test_budget_is_atomic_persistent_and_rechecks_active_policy(tmp_path: Path) 
 
 
 class NoApprovalVerifier:
-    async def resolve_approval(self, approval_reference: str) -> ApprovalGrant | None:
-        return None
+    async def consume_approval(
+        self,
+        approval_reference: str,
+        *,
+        expectation: ToolApprovalExpectation,
+    ) -> ToolApprovalConsumption:
+        return ToolApprovalConsumption.invalid()
 
 
 class RecordingExecutor:
@@ -463,7 +471,7 @@ def test_persistent_adapters_complete_guardrail_before_execution(tmp_path: Path)
                     resolver=registry,
                     policy_provider=policies,
                     argument_validator=JsonSchemaToolArgumentValidator(registry),
-                    approval_verifier=NoApprovalVerifier(),
+                    approval_consumer=NoApprovalVerifier(),
                     budget_ledger=SqliteToolBudgetLedger(database, clock=lambda: NOW),
                     clock=lambda: NOW,
                 ),

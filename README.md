@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06·09를 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요. MCP 연결 구현은 Connection·Tool Registry에 이어 불변 Tool Policy, 안전한 JSON Schema 검증과 영속 Call Budget 기반까지 마련했어요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06·09를 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요. MCP 연결 구현은 Connection·Tool Registry, 불변 Tool Policy, 안전한 JSON Schema 검증과 영속 Call Budget에 이어 일회성 Approval Grant 기반까지 마련했어요.
 
 ## 현재 구현 상태
 
@@ -16,7 +16,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
 | 07. Model Routing과 Egress Policy | 완료 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation 영속화·계측, 관리자 조회·영향 분석·실패 폐쇄 Eval 활성화 Gate API와 읽기 전용 Dashboard |
 | 08. Root Orchestrator와 실행 Engine | 완료 | 보호된 Run 생성 API, Data Class 기반 단일 Root 호출, Plan 검증·영속화, Queue Runtime·ASGI 생명주기, Dependency 실행·복구, 결정적 Reducer와 `SafeOutput` 완료 |
-| 09. MCP 연결과 Tool Policy | 진행 중 | Connection·Tool Registry, User/Instance Scope, Lifecycle 상태기계, 불변 Tool Policy·CAS 활성화, 안전한 JSON Schema 검증, 원자적 Call Budget |
+| 09. MCP 연결과 Tool Policy | 진행 중 | Connection·Tool Registry, User/Instance Scope, 불변 Tool Policy·CAS 활성화, 안전한 JSON Schema 검증, 원자적 Call Budget, Hash 기반 일회성 Approval Grant |
 | 10~20 | 예정 | Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
@@ -108,12 +108,13 @@ Run 조회·생성·취소·Event·Metric Service와 실제 실행 Handler는 AS
 - 명시적인 Tool Policy가 없으면 기본으로 Deny해요. Policy는 Connection, Schema Fingerprint, `read`·`write`·`destructive` Permission과 `none`·`user`·`admin` Approval에 정확히 묶여요.
 - Tool Policy 초안은 Version별로 불변 저장해요. 현재 Registry·Permission·Schema와 일치하는 후보만 Baseline Compare-and-Swap으로 활성화하고, 기존 Active Version 폐기와 Audit 기록을 같은 Transaction에서 처리해요.
 - Argument를 Canonical JSON으로 고정하고 UTF-8 Byte Limit을 적용해요. JSON Schema Adapter는 현재 Registry의 정확한 Schema Fingerprint를 다시 확인하고 로컬 `$ref`만 허용해요. 호출 뒤 원본 Mapping이 바뀌어도 실행 Argument는 변하지 않아요.
-- Approval은 Actor, Run, Tool, Argument와 Policy Fingerprint에 묶고 만료와 승인 주체를 검증해요.
+- Approval Reference는 발급할 때 한 번만 반환하고 SQLite에는 SHA-256 Hash만 저장해요. Grant는 Actor, Run, Tool, Argument와 Policy Fingerprint에 묶고 만료와 승인 주체를 검증해요.
+- User Approval은 동일 사용자만, Admin Approval은 현재 활성 Admin만 발급할 수 있어요. 소비할 때 사용자·Admin 상태, Run Owner와 활성 Policy를 다시 확인하며 병렬 요청도 하나만 성공해요.
 - Run·Tool별 호출 횟수는 SQLite에서 원자적으로 예약해요. 예약 직전에 Tool 상태와 활성 Policy Fingerprint를 다시 확인하고, 정책 Version이 바뀌어도 누적 횟수를 초기화하지 않아요. 실행에 실패해도 예약된 호출 횟수를 소비해요.
 - 모든 검사를 통과한 `GuardedToolCall`만 Executor에 전달해요. 차단된 호출은 Executor로 보내지 않으며, Timeout과 Result Byte Limit은 허용된 호출에 반드시 전달해요.
 - 판정과 오류에는 정책 Fingerprint와 안전한 수치만 남겨요. Argument, Approval Reference, Connection ID·Owner와 실제 Tool Name은 표현하지 않아요.
 
-Connection·Tool Registry는 WBS-09.2.1에서, Tool Policy·JSON Schema·Call Budget SQLite 기반은 WBS-09.2.2.1에서 연결했어요. Tool이 `active`이고 Connection이 `connected`일 때만 Resolver가 실행 가능 상태로 반환해요. Approval Grant·Tool Invocation Lifecycle은 WBS-09.2.2.2에, 실제 MCP Transport·Discovery와 Result 정규화는 후속 단계에 남아 있어요. 현재 구현은 아직 Tool 호출 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안 경계예요.
+Connection·Tool Registry는 WBS-09.2.1에서, Tool Policy·JSON Schema·Call Budget은 WBS-09.2.2.1에서, Approval Grant 발급·원자적 소비는 WBS-09.2.2.2.1에서 연결했어요. Tool이 `active`이고 Connection이 `connected`일 때만 Resolver가 실행 가능 상태로 반환해요. Tool Invocation Lifecycle은 WBS-09.2.2.2.2에, 실제 MCP Transport·Discovery와 Result 정규화는 후속 단계에 남아 있어요. 현재 구현은 아직 Tool 호출 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안 경계예요.
 
 ### 최종 Output Guardrail 기반
 
@@ -145,7 +146,7 @@ JSON Log Formatter, Metric, Trace와 선택형 OpenTelemetry는 WBS-17에서 구
 - `GET /api/v1/audit-events`는 활성 Admin만 호출할 수 있어요. Actor·Action·Resource·Outcome·기간 Filter와 Keyset Cursor를 지원해요.
 - Audit Actor는 `users` Foreign Key에 묶지 않아요. 사용자 상태가 바뀌거나 System Actor가 기록해도 기존 Event를 보존해요.
 
-Tool Policy 활성화는 같은 Audit 경계에 연결했어요. 아직 구현하지 않은 Approval·Skill·Memory·Schedule·API Key·IP Policy 같은 관리 Action도 각 기능 WBS에서 이 경계를 사용해야 해요. React Audit Log 화면과 Retention Job은 후속 WBS에서 구현해요.
+Tool Policy 활성화와 Approval Grant 발급·소비는 같은 Audit 경계에 연결했어요. 아직 구현하지 않은 Skill·Memory·Schedule·API Key·IP Policy 같은 관리 Action도 각 기능 WBS에서 이 경계를 사용해야 해요. React Audit Log 화면과 Retention Job은 후속 WBS에서 구현해요.
 
 ### 보안 정책 영향 Fingerprint와 신뢰 경계
 
@@ -219,7 +220,7 @@ Model Policy 생성·Eval 실행과 활성화 운영 경로, 사용처 Registry�
 ## 아직 구현되지 않은 기능
 
 - Attachment Upload와 Run Timeline·Workflow Admin UI
-- 실제 MCP Transport·Discovery·실행 Adapter와 Approval·Invocation 영속화
+- 실제 MCP Transport·Discovery·실행 Adapter와 Tool Invocation 영속화
 - Model Policy 생성·초기 활성화 운영 경로, 사용처 Registry와 WBS-15 Eval 실행기 연결
 - Subagent와 Web Search
 - Skill, Workflow UI, Memory, Scheduler와 Eval
@@ -443,6 +444,18 @@ uv run --extra mcp pytest \
   tests/integration/test_tool_governance_persistence.py \
   tests/integration/test_sqlite_migrations.py \
   tests/unit/test_tool_guardrails.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### Tool Approval Grant 기반만 검증
+
+WBS-09.2.2.2.1에서 구현한 Hash Reference 발급, 현재 권한·Policy 재검증, 만료와 원자적 일회성 소비를 확인하세요.
+
+```bash
+uv run --extra mcp pytest \
+  tests/integration/test_tool_approval_persistence.py \
+  tests/unit/test_tool_guardrails.py \
+  tests/integration/test_sqlite_migrations.py \
   tests/architecture/test_dependency_rules.py
 ```
 

@@ -64,9 +64,10 @@ def test_plan_is_read_only_and_apply_is_idempotent(tmp_path: Path) -> None:
         8,
         9,
         10,
+        11,
     ]
     assert paths.database_file.exists()
-    assert first.current_version == 10
+    assert first.current_version == 11
     assert [migration.version for migration in first.applied] == [
         1,
         2,
@@ -78,8 +79,9 @@ def test_plan_is_read_only_and_apply_is_idempotent(tmp_path: Path) -> None:
         8,
         9,
         10,
+        11,
     ]
-    assert second.current_version == 10
+    assert second.current_version == 11
     assert second.applied == ()
     assert second.backup_file is None
 
@@ -108,7 +110,7 @@ def test_sqlite_connection_profile_is_enforced(tmp_path: Path) -> None:
         finally:
             await connection.close()
 
-    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 10)
+    assert asyncio.run(inspect_profile()) == ("delete", 1, 5000, 11)
 
 
 def test_applied_migration_checksum_change_is_rejected(tmp_path: Path) -> None:
@@ -257,6 +259,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         orchestration_lifecycle,
         connection_registry,
         tool_policy_budget,
+        tool_approvals,
     ) = packaged
     asyncio.run(
         SqliteMigrationAdmin(
@@ -268,7 +271,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
 
     result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
 
-    assert result.current_version == 10
+    assert result.current_version == 11
     assert [migration.name for migration in result.applied] == [
         run_core.descriptor.name,
         audit.descriptor.name,
@@ -278,12 +281,13 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         orchestration_lifecycle.descriptor.name,
         connection_registry.descriptor.name,
         tool_policy_budget.descriptor.name,
+        tool_approvals.descriptor.name,
     ]
     assert result.backup_file is not None
     manifest_file = result.backup_file.with_name(f"{result.backup_file.name}.manifest.json")
     verification = asyncio.run(SqliteSnapshotStore(paths).verify(manifest_file))
     assert verification.package_compatible
-    assert verification.artifact.manifest.migration_target_version == 10
+    assert verification.artifact.manifest.migration_target_version == 11
     with sqlite3.connect(paths.database_file) as connection:
         tables = {
             row[0]
@@ -291,7 +295,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-        assert connection.execute("PRAGMA user_version").fetchone() == (10,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (11,)
     assert {
         "runs",
         "run_steps",
@@ -306,6 +310,7 @@ def test_packaged_run_core_migration_upgrades_v2_with_verified_backup(tmp_path: 
         "connection_tools",
         "tool_policies",
         "tool_call_budgets",
+        "tool_approvals",
     } <= tables
     with sqlite3.connect(result.backup_file) as backup:
         assert backup.execute("PRAGMA user_version").fetchone() == (2,)
@@ -372,7 +377,13 @@ def test_packaged_tool_policy_budget_migration_upgrades_v9_with_verified_backup(
         ).apply()
     )
 
-    result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+    result = asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=StaticMigrationRegistry(*packaged[:10]),
+        ).apply()
+    )
 
     assert result.current_version == 10
     assert [migration.name for migration in result.applied] == ["tool_policy_budget"]
@@ -395,6 +406,47 @@ def test_packaged_tool_policy_budget_migration_upgrades_v9_with_verified_backup(
         assert (
             backup.execute(
                 "SELECT name FROM sqlite_master WHERE name = 'tool_policies'"
+            ).fetchone()
+            is None
+        )
+
+
+def test_packaged_tool_approval_migration_upgrades_v10_with_verified_backup(
+    tmp_path: Path,
+) -> None:
+    paths, config = _initialized_runtime(tmp_path)
+    packaged = PackageMigrationRegistry().load()
+    previous = StaticMigrationRegistry(*packaged[:10])
+    asyncio.run(
+        SqliteMigrationAdmin(
+            paths,
+            config.storage,
+            registry=previous,
+        ).apply()
+    )
+
+    result = asyncio.run(SqliteMigrationAdmin(paths, config.storage).apply())
+
+    assert result.current_version == 11
+    assert [migration.name for migration in result.applied] == ["tool_approvals"]
+    assert result.backup_file is not None
+    manifest_file = result.backup_file.with_name(f"{result.backup_file.name}.manifest.json")
+    verification = asyncio.run(SqliteSnapshotStore(paths).verify(manifest_file))
+    assert verification.package_compatible
+    assert verification.artifact.manifest.migration_target_version == 11
+    with sqlite3.connect(paths.database_file) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (11,)
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'tool_approvals'"
+            ).fetchone()
+            is not None
+        )
+    with sqlite3.connect(result.backup_file) as backup:
+        assert backup.execute("PRAGMA user_version").fetchone() == (10,)
+        assert (
+            backup.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'tool_approvals'"
             ).fetchone()
             is None
         )

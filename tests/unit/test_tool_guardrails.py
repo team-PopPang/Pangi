@@ -9,6 +9,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from pangi.application.contracts.auth import AuthenticatedPrincipal
+from pangi.application.contracts.tool_approval_persistence import (
+    ToolApprovalConsumption,
+    ToolApprovalExpectation,
+)
 from pangi.application.contracts.tool_guardrails import (
     ApprovalGrant,
     GuardedToolCall,
@@ -87,11 +91,20 @@ class StubApprovalVerifier:
         self.calls: list[str] = []
         self.events = events
 
-    async def resolve_approval(self, approval_reference: str) -> ApprovalGrant | None:
+    async def consume_approval(
+        self,
+        approval_reference: str,
+        *,
+        expectation: ToolApprovalExpectation,
+    ) -> ToolApprovalConsumption:
         self.calls.append(approval_reference)
         if self.events is not None:
             self.events.append("approval")
-        return self.grant
+        if self.grant is None:
+            return ToolApprovalConsumption.invalid()
+        if self.grant.expires_at <= expectation.consumed_at:
+            return ToolApprovalConsumption.expired()
+        return ToolApprovalConsumption.consumed(self.grant)
 
 
 class InMemoryTestBudgetLedger:
@@ -238,9 +251,11 @@ def _grant(
     expires_at: datetime = NOW + timedelta(minutes=5),
 ) -> ApprovalGrant:
     return ApprovalGrant(
+        grant_id="approval-grant-00001",
         subject_user_id=subject_user_id,
         approver_user_id=approver_user_id,
         approver_role=approver_role,
+        approval_requirement=policy.approval,
         run_id=run_id,
         tool_id=tool_id,
         arguments_fingerprint=_arguments_fingerprint(arguments or {"title": "새 이슈"}),
@@ -282,7 +297,7 @@ def _services(
         resolver=resolver,
         policy_provider=provider,
         argument_validator=argument_validator,
-        approval_verifier=approval_verifier,
+        approval_consumer=approval_verifier,
         budget_ledger=budget,
         clock=lambda: NOW,
     )
@@ -346,6 +361,7 @@ def test_allowed_call_uses_fixed_order_canonical_arguments_and_execution_limits(
     assert result.result == "ok"
     assert result.decision.outcome is ToolGuardrailOutcome.ALLOWED
     assert result.decision.stage is ToolGuardrailStage.COMPLETE
+    assert executor.calls[0].approval_grant_id == "approval-grant-00001"
     assert validator.calls[0][1] == '{"a":"한","z":1}'
     assert executor.calls[0].limits.timeout_seconds == 30
     assert executor.calls[0].limits.max_result_bytes == 4_096
@@ -617,11 +633,13 @@ def test_argument_instructions_cannot_change_an_explicit_deny_policy() -> None:
 
 def test_mutating_input_after_guarding_cannot_change_executor_arguments() -> None:
     arguments: dict[object, object] = {"title": "before"}
-    actor, guardrail, _, *_ = _services()
+    actor, guardrail, _, _, _, _, approval_consumer, _, _ = _services()
     guarded = asyncio.run(guardrail.guard(actor=actor, request=_request(arguments=arguments)))
 
     arguments["title"] = "after"
     assert guarded.canonical_arguments_json == '{"title":"before"}'
+    assert guarded.approval_grant_id is None
+    assert approval_consumer.calls == []
 
 
 def test_repr_and_errors_do_not_disclose_arguments_approval_or_connection_data() -> None:

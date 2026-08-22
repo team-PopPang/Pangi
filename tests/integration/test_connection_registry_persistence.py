@@ -18,8 +18,11 @@ from pangi.adapters.outbound.persistence.sqlite.factory import build_connection_
 from pangi.adapters.outbound.runtime_paths import resolve_runtime_paths
 from pangi.application.contracts.auth import AuthenticatedPrincipal
 from pangi.application.contracts.connections import ToolRegistrySnapshot
+from pangi.application.contracts.tool_approval_persistence import (
+    ToolApprovalConsumption,
+    ToolApprovalExpectation,
+)
 from pangi.application.contracts.tool_guardrails import (
-    ApprovalGrant,
     GuardedToolCall,
     ResolvedTool,
     ToolBudgetReservation,
@@ -311,7 +314,12 @@ class NeverArgumentValidator:
 
 
 class NeverApprovalVerifier:
-    async def resolve_approval(self, approval_reference: str) -> ApprovalGrant | None:
+    async def consume_approval(
+        self,
+        approval_reference: str,
+        *,
+        expectation: ToolApprovalExpectation,
+    ) -> ToolApprovalConsumption:
         raise AssertionError("a Tool without Policy cannot reach approval")
 
 
@@ -353,7 +361,7 @@ def test_sqlite_resolver_still_defaults_to_deny_without_policy(tmp_path: Path) -
                     resolver=registry,
                     policy_provider=MissingPolicyProvider(),
                     argument_validator=NeverArgumentValidator(),
-                    approval_verifier=NeverApprovalVerifier(),
+                    approval_consumer=NeverApprovalVerifier(),
                     budget_ledger=NeverBudgetLedger(),
                     clock=lambda: NOW,
                 ),

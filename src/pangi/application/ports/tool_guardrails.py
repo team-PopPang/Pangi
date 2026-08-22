@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from pangi.application.contracts.tool_approval_persistence import (
+    ToolApprovalConsumption,
+    ToolApprovalExpectation,
+)
 from pangi.application.contracts.tool_guardrails import (
-    ApprovalGrant,
     GuardedToolCall,
     ResolvedTool,
     ToolBudgetReservation,
@@ -39,9 +42,14 @@ class ToolArgumentValidator(Protocol):
         ...
 
 
-class ToolApprovalVerifier(Protocol):
-    async def resolve_approval(self, approval_reference: str) -> ApprovalGrant | None:
-        """Resolve an opaque approval reference without returning its source secret."""
+class ToolApprovalConsumer(Protocol):
+    async def consume_approval(
+        self,
+        approval_reference: str,
+        *,
+        expectation: ToolApprovalExpectation,
+    ) -> ToolApprovalConsumption:
+        """Atomically consume an exact approval without persisting its raw reference."""
 
         ...
 

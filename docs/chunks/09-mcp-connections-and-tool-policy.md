@@ -42,11 +42,12 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 1. **Connection·Tool Registry 계약과 Lifecycle 상태기계(WBS-09.1)**: User/Instance Scope, Transport·Auth·상태 불변식, 허용 Lifecycle 전이와 제한된 Canonical Tool Schema Fingerprint를 구현하고 WBS-06 `ResolvedTool` 계약에 연결한다.
 2. **Connection·Tool Registry SQLite 기반(WBS-09.2.1)**: `connections`, `connection_tools` Migration과 Repository를 구현하고 전역 Stable Tool Resolver를 WBS-06 Guardrail에 주입한다.
 3. **Tool Policy·Schema Validator·Call Budget SQLite 기반(WBS-09.2.2.1)**: `tool_policies`, `tool_call_budgets` Migration과 불변 Policy Version·CAS 활성화, 안전한 JSON Schema Adapter와 원자적 Budget 예약을 구현한다.
-4. **Approval Grant·Tool Invocation Lifecycle(WBS-09.2.2.2)**: `tool_approvals`, `tool_invocations` Migration과 Approval 발급·소비·만료, Invocation 상태·Metric 영속 Adapter를 구현해 WBS-06 Guardrail의 나머지 Port에 주입한다.
-5. **SecretStore와 stdio Transport(WBS-09.3)**: Keyring 우선 SecretStore와 암호화 File Vault Fallback, stdio Command·Argument·Environment 정책과 Fake Server Fixture를 구현한다.
-6. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
-7. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
-8. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
+4. **Approval Grant 발급·원자적 소비(WBS-09.2.2.2.1)**: `tool_approvals` Migration과 Hash Reference 발급, 만료·Claim·현재 권한 재검증과 일회성 소비 Adapter를 구현해 WBS-06 Guardrail에 주입한다.
+5. **Tool Invocation Lifecycle(WBS-09.2.2.2.2)**: `tool_invocations` Migration과 실행 전후 상태·Metric 영속 Adapter를 구현하고 모든 Tool 실행이 이 기록 경계를 통과하게 한다.
+6. **SecretStore와 stdio Transport(WBS-09.3)**: Keyring 우선 SecretStore와 암호화 File Vault Fallback, stdio Command·Argument·Environment 정책과 Fake Server Fixture를 구현한다.
+7. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
+8. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
+9. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
 
 위 하위 번호는 현재 확인된 책임 경계다. 구현 중 독립적인 결과나 별도 보안·검증 Gate가 확인되면 루트 WBS 운영 규칙에 따라 단계를 더 나눈다.
 
@@ -55,7 +56,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - HTTP는 기본 HTTPS, stdio는 절대 경로/등록 Alias와 Argument Array만 허용한다.
 - OAuth는 Authorization Code+PKCE S256, State/Nonce/Redirect/Resource Audience를 검증한다.
 - SQLite에는 `secret_ref`만 저장하고 실제 값은 Keyring/Secret Manager/암호화 Vault에 둔다.
-- WBS-03 Unit of Work 위에서 WBS-09.2.1은 `connections`, `connection_tools`를, WBS-09.2.2.1은 `tool_policies`, `tool_call_budgets`를, WBS-09.2.2.2는 `tool_approvals`, `tool_invocations`의 Migration, 제약과 Repository를 소유한다.
+- WBS-03 Unit of Work 위에서 WBS-09.2.1은 `connections`, `connection_tools`를, WBS-09.2.2.1은 `tool_policies`, `tool_call_budgets`를, WBS-09.2.2.2.1은 `tool_approvals`를, WBS-09.2.2.2.2는 `tool_invocations`의 Migration, 제약과 Repository를 소유한다.
 - Discovery 결과는 Canonical JSON SHA-256 Fingerprint로 식별하고 변경 시 참조 Skill을 `needs_review`로 바꾼다.
 - 새 Tool은 `deny`로 등록하고 Registry·Policy·Schema·Approval·Budget Adapter를 WBS-06의 공통 Tool Guardrail에 주입한다. 공통 Engine을 우회하지 않고 모든 검사를 통과한 `GuardedToolCall`만 MCP Client로 보낸다.
 - Result는 Byte/Timeout Limit 뒤 표준 `ToolResult`와 비신뢰 Data Envelope로 정규화한다.
@@ -70,7 +71,8 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - [ ] Discovery Cache, Fingerprint, Refresh와 `list_changed` 처리를 구현한다.
 - [x] Connection Registry, Tool Snapshot과 전역 Stable Tool Resolver를 SQLite에 영속화한다.
 - [x] 불변 Tool Policy Version, 기본 Deny, 안전한 Argument Schema와 영속 Call Budget Adapter를 구현한다.
-- [ ] Approval Grant와 Tool Invocation Lifecycle Adapter를 구현하고 WBS-06 공통 Enforcer에 조립한다.
+- [x] Approval Grant 발급·만료·원자적 일회성 소비 Adapter를 구현하고 WBS-06 공통 Enforcer에 조립한다.
+- [ ] Tool Invocation Lifecycle Adapter를 구현하고 모든 Tool 실행 전후 상태를 영속화한다.
 - [ ] Result Normalizer, Redaction, Timeout/Byte Limit과 Invocation Metric을 구현한다.
 - [ ] Connection/Tool API와 Catalog/Card/진단 UI를 구현한다.
 - [ ] Schema Drift가 Skill에 미치는 영향 분석을 연결한다.
@@ -113,7 +115,19 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - JSON Schema Adapter는 현재 Registry의 정확한 Schema Snapshot을 다시 확인하고 로컬 `$ref`만 허용한다. 제한된 Cache와 Worker Thread를 사용하며 Schema나 선택 의존성이 잘못되면 실패 폐쇄한다.
 - Call Budget 예약은 Run·Stable Tool 단위로 SQLite에 영속화하고 Transaction 안에서 정확히 1씩 증가시킨다. 예약 직전에 Tool 가용성과 Active Policy Fingerprint를 다시 확인하고 Policy Version 변경으로 누적 횟수를 초기화하지 않는다.
 - Policy 교체 경쟁, 병렬 Budget 예약, Process 재생성 뒤 누적 유지, 원격 `$ref` 거부, Fingerprint 불일치와 Secret 비노출을 Unit·Integration Test로 검증했다.
-- Approval Grant 발급·소비·만료, Tool Invocation 상태·Metric, 실제 MCP 호출과 Result 정규화는 WBS-09.2.2.2 이후 범위다.
+- 3차 구현 시점에는 Approval Grant 발급·소비·만료, Tool Invocation 상태·Metric, 실제 MCP 호출과 Result 정규화를 후속 범위로 남겼다.
+
+## 4차 구현 결과
+
+- WBS-09.2.2.2를 독립적인 상태 전이와 검증 Gate에 따라 Approval Grant와 Tool Invocation Lifecycle로 다시 나눴다. 이번 단계는 Approval만 구현하고 Invocation은 WBS-09.2.2.2.2로 남겼다.
+- Migration 11에서 `tool_approvals`를 추가했다. Grant Claim은 불변이며 `active → consumed` 전이만 허용하고, 만료 전 정확히 한 번만 소비할 수 있다.
+- 암호학적으로 안전한 Approval Reference는 발급 결과에서 한 번만 반환한다. SQLite에는 SHA-256 Hash만 저장하고 DB·Audit·오류·객체 표현에는 원문을 남기지 않는다.
+- 발급 시 Subject·Approver 상태, Run Owner, Tool·Connection 상태, 활성 Policy Fingerprint와 Approval Requirement를 같은 Transaction에서 다시 검증한다. User Approval은 본인만, Admin Approval은 활성 Admin만 발급할 수 있다.
+- 소비 시 Reference Hash와 Run·Tool·Argument·Policy Claim, 현재 사용자·Admin 권한과 활성 Policy를 다시 확인한다. Claim 불일치는 Grant를 소비하지 않고, 병렬 소비는 정확히 하나만 성공한다.
+- 성공한 발급·소비와 `tool_approval.grant_issued`·`tool_approval.grant_consumed` Audit을 각각 하나의 Transaction으로 저장한다. Audit 실패 시 Grant 생성이나 소비도 함께 Rollback한다.
+- WBS-06 Guardrail은 조회형 Approval Port 대신 원자적 소비 Port를 사용한다. 소비된 Grant ID를 `GuardedToolCall`에 고정하며 이후 Budget이 차단돼도 Approval을 환불하지 않는다.
+- 역할·Run Owner·Policy 변경, 만료·중복·병렬 소비, Secret 비노출, DB 불변 제약과 Guardrail 실행 순서를 Unit·Integration Test로 검증했다.
+- Tool Invocation 상태·Metric, Approval 요청 API·UI·Slack Action과 실제 MCP 실행은 후속 WBS 범위다.
 
 ## 완료 조건
 
