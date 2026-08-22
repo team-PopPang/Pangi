@@ -146,6 +146,27 @@ class StorageConfig(_StrictModel):
     busy_timeout_ms: int = Field(default=5000, ge=100, le=60000)
 
 
+class SecretStoreConfig(_StrictModel):
+    """Secret-free backend selection and external File Vault key location."""
+
+    backend: Literal["auto", "keyring", "file-vault"] = "auto"
+    master_key_source: Literal["environment", "file"] = "environment"
+    master_key_environment_variable: str = Field(
+        default="PANGI_SECRET_MASTER_KEY",
+        pattern=r"^[A-Z][A-Z0-9_]{0,127}$",
+    )
+    master_key_file: str | None = Field(default=None, max_length=4096)
+
+    @model_validator(mode="after")
+    def validate_master_key_source(self) -> SecretStoreConfig:
+        if self.master_key_source == "file":
+            if self.master_key_file is None or not Path(self.master_key_file).is_absolute():
+                raise ValueError("master_key_file must be an absolute path for the file source")
+        elif self.master_key_file is not None:
+            raise ValueError("master_key_file requires the file master key source")
+        return self
+
+
 class AuthConfig(_StrictModel):
     """Local first-run authentication settings."""
 
@@ -165,6 +186,7 @@ class PangiConfig(_StrictModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     model: ModelRuntimeConfig = Field(default_factory=ModelRuntimeConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    secrets: SecretStoreConfig = Field(default_factory=SecretStoreConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
 
     @classmethod
@@ -228,6 +250,17 @@ class PangiConfig(_StrictModel):
                 f"url = {quote(self.storage.url)}",
                 f"journal_mode = {quote(self.storage.journal_mode)}",
                 f"busy_timeout_ms = {self.storage.busy_timeout_ms}",
+                "",
+                "[secrets]",
+                f"backend = {quote(self.secrets.backend)}",
+                f"master_key_source = {quote(self.secrets.master_key_source)}",
+                "master_key_environment_variable = "
+                + quote(self.secrets.master_key_environment_variable),
+                *(
+                    (f"master_key_file = {quote(self.secrets.master_key_file)}",)
+                    if self.secrets.master_key_file is not None
+                    else ()
+                ),
                 "",
                 "[auth]",
                 f"bootstrap_grant_ttl_minutes = {self.auth.bootstrap_grant_ttl_minutes}",
