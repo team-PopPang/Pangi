@@ -316,7 +316,7 @@ class NeverApprovalVerifier:
 
 
 class NeverBudgetLedger:
-    def reserve_call(
+    async def reserve_call(
         self,
         *,
         run_id: str,

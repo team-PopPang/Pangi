@@ -814,9 +814,10 @@ Schema Snapshot 저장은 WBS-09의 Registry가 소유한다. Policy는 Stable T
 Schema Fingerprint에 정확히 묶이며 Wildcard나 암묵적인 Allow를 사용하지 않는다. 모든 제한값은
 조직 기본값을 Core에 숨기지 않고 주입하며 Canonical JSON SHA-256 Fingerprint에 포함한다.
 
-재시도는 별도 권한을 만들지 않는다. 실제 Transport 시도마다 Run·Tool 단위 Call Budget을 하나씩
-소비하고 실패한 시도도 환불하지 않는다. Tool Result Redaction 경로와 실제 Timeout·Result Stream
-Byte 차단은 WBS-09의 실행 Adapter와 WBS-06 Output Redaction 경계에서 적용한다.
+재시도는 별도 권한을 만들지 않는다. 실제 Transport 시도마다 Run·Tool 단위 Call Budget을 SQLite에서
+원자적으로 하나씩 소비하고 실패한 시도도 환불하지 않는다. 예약 직전에 Registry 상태와 활성 Policy
+Fingerprint를 다시 확인하며 Policy Version이 바뀌어도 사용량을 초기화하지 않는다. Tool Result Redaction
+경로와 실제 Timeout·Result Stream Byte 차단은 WBS-09의 실행 Adapter와 WBS-06 Output Redaction 경계에서 적용한다.
 
 ### 8.4 Event
 
@@ -1255,9 +1256,10 @@ File Vault를 사용할 때는 Master Key를 DB 밖의 환경변수 또는 권�
 11. 외부 Text를 `external_data`로 감싼다.
 12. Run Event와 Tool Invocation Metric을 저장한다.
 
-1~7의 Framework-free 계약과 강제 실행 Wrapper는 WBS-06이 소유한다. Registry, JSON Schema
-Validator, Approval·Invocation 저장소와 8~12의 MCP 실행 Adapter는 WBS-09가 구현한다. 검사를
-통과한 `GuardedToolCall`만 Executor Port가 받을 수 있고, 차단된 호출은 외부 Tool에 도달하지 않는다.
+1~7의 Framework-free 계약과 강제 실행 Wrapper는 WBS-06이 소유한다. WBS-09.2.1은 Registry를,
+WBS-09.2.2.1은 Policy·JSON Schema Validator·Call Budget을, WBS-09.2.2.2는 Approval·Invocation
+저장소를 구현한다. 8~12의 실제 MCP 실행 Adapter는 WBS-09의 후속 단계에서 연결한다. 검사를 통과한
+`GuardedToolCall`만 Executor Port가 받을 수 있고, 차단된 호출은 외부 Tool에 도달하지 않는다.
 
 ### 10.8 연결 화면 구현
 
@@ -2105,7 +2107,8 @@ WAL은 1.0 기본값이 아니다. SQLite 공식 문서는 WAL이 같은 Host의
 | `api_idempotency_records` | principal_id, route_key, idempotency_key, request_fingerprint, response_json, state, run_id, expires_at, timestamps | principal+route+key Unique | 05 |
 | `connections` | id, kind, display_name, display_qualifier, scope, owner_user_id, transport, auth_type, state, config_json, secret_ref, revision, timestamps | User Scope면 owner 필수, Instance Scope면 owner 금지, revision 1씩 증가 | 09 |
 | `connection_tools` | stable_tool_id, connection_id, remote_name, permission, schema_json, schema_fingerprint, state, discovered_at | stable_tool_id 전역 Unique, Discovery 시간 단조 증가 | 09 |
-| `tool_policies` | connection_id, stable_tool_id, effect, permission, approval, limits_json | Tool당 Active 1개 | 09 |
+| `tool_policies` | stable_tool_id, connection_id, policy_version, effect, permission, approval, schema_fingerprint, limits_json, policy_fingerprint, state, timestamps | Version 불변, Tool당 Active 1개, 현재 Tool과 정확히 일치 | 09 |
+| `tool_call_budgets` | run_id, stable_tool_id, calls_used, last_policy_fingerprint, timestamps | run+tool PK, 예약마다 정확히 1 증가 | 09 |
 | `skills` | id, namespace, name, active_version_id, state, deleted_at | namespace+name Unique, Soft Delete | 11 |
 | `skill_versions` | id, skill_id, semver, manifest_json, compiled_json, fingerprint, state, eval_run_id | skill+semver Unique | 11 |
 | `holiday_calendars` | id, calendar_key, display_name, region, active_version_id | calendar_key Unique | 14 |
@@ -2937,6 +2940,7 @@ flowchart LR
 Optional Extra:
 
 - `pangi-agent[slack]`: Slack Bolt
+- `pangi-agent[mcp]`: Tool JSON Schema 검증과 후속 MCP Client 경계
 - `pangi-agent[openai]`: OpenAI Provider
 - `pangi-agent[bedrock]`: AWS Bedrock Provider
 - `pangi-agent[keyring]`: OS Keyring

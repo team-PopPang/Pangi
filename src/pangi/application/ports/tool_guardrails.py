@@ -47,7 +47,7 @@ class ToolApprovalVerifier(Protocol):
 
 
 class ToolBudgetLedger(Protocol):
-    def reserve_call(
+    async def reserve_call(
         self,
         *,
         run_id: str,

@@ -25,6 +25,12 @@ class ToolPolicyEffect(StrEnum):
     DENY = "deny"
 
 
+class ToolPolicyState(StrEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    RETIRED = "retired"
+
+
 class ToolGuardrailStage(StrEnum):
     PRINCIPAL = "principal"
     RESOLUTION = "resolution"
@@ -50,6 +56,7 @@ class ToolGuardrailErrorCode(StrEnum):
     TOOL_UNAVAILABLE = "tool_unavailable"
     CONNECTION_SCOPE_DENIED = "tool_connection_scope_denied"
     POLICY_MISSING = "tool_policy_missing"
+    POLICY_CHANGED = "tool_policy_changed"
     POLICY_DENIED = "tool_policy_denied"
     PERMISSION_MISMATCH = "tool_permission_mismatch"
     SCHEMA_FINGERPRINT_MISMATCH = "tool_schema_fingerprint_mismatch"

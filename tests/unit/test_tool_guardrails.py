@@ -100,7 +100,7 @@ class InMemoryTestBudgetLedger:
         self.calls: list[tuple[str, str, str, int]] = []
         self.events = events
 
-    def reserve_call(
+    async def reserve_call(
         self,
         *,
         run_id: str,
@@ -118,6 +118,22 @@ class InMemoryTestBudgetLedger:
         calls_used += 1
         self.used[key] = calls_used
         return ToolBudgetReservation(True, calls_used)
+
+
+class FixedBudgetLedger(InMemoryTestBudgetLedger):
+    def __init__(self, reservation: ToolBudgetReservation) -> None:
+        super().__init__()
+        self.reservation = reservation
+
+    async def reserve_call(
+        self,
+        *,
+        run_id: str,
+        tool_id: str,
+        policy_fingerprint: str,
+        max_calls_per_run: int,
+    ) -> ToolBudgetReservation:
+        return self.reservation
 
 
 class RecordingExecutor:
@@ -529,6 +545,25 @@ def test_call_budget_blocks_later_attempts_and_zero_budget_skips_the_ledger() ->
     zero = _blocked(zero_guardrail, _request())
     assert zero.code is ToolGuardrailErrorCode.CALL_BUDGET_EXCEEDED
     assert zero_ledger.calls == []
+
+
+def test_budget_policy_race_is_reported_before_execution() -> None:
+    ledger = FixedBudgetLedger(
+        ToolBudgetReservation(
+            False,
+            0,
+            ToolGuardrailErrorCode.POLICY_CHANGED,
+        )
+    )
+    actor, guardrail, _, _, _, _, _, _, executor = _services(
+        ledger=ledger,
+    )
+
+    blocked = _blocked(guardrail, _request(), actor=actor)
+
+    assert blocked.code is ToolGuardrailErrorCode.POLICY_CHANGED
+    assert blocked.decision.stage is ToolGuardrailStage.POLICY
+    assert executor.calls == []
 
 
 def test_policy_version_change_does_not_reset_the_run_tool_call_budget() -> None:

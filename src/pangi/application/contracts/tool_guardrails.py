@@ -205,6 +205,7 @@ class ApprovalGrant:
 class ToolBudgetReservation:
     allowed: bool
     calls_used: int
+    rejection_code: ToolGuardrailErrorCode | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.allowed, bool):
@@ -213,6 +214,17 @@ class ToolBudgetReservation:
             raise ValueError("calls_used cannot be negative")
         if self.allowed and self.calls_used < 1:
             raise ValueError("an allowed reservation must consume one call")
+        if self.rejection_code is not None:
+            try:
+                object.__setattr__(
+                    self,
+                    "rejection_code",
+                    ToolGuardrailErrorCode(self.rejection_code),
+                )
+            except ValueError as error:
+                raise ValueError("budget rejection_code is invalid") from error
+        if self.allowed and self.rejection_code is not None:
+            raise ValueError("an allowed reservation cannot contain a rejection code")
 
 
 @dataclass(frozen=True, slots=True)
