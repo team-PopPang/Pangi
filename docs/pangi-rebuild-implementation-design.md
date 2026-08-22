@@ -1233,7 +1233,13 @@ SQLite에는 Secret 본문을 저장하지 않는다. `SecretStore` Port를 둔�
 2. 배포 환경 Secret Manager Adapter
 3. 암호화 File Vault
 
-File Vault를 사용할 때는 Master Key를 DB 밖의 환경변수 또는 권한 `0600` 파일에서 읽는다. 각 Secret은 AES-GCM으로 개별 암호화하고 Key Version을 기록한다. Dashboard와 API는 `secret_ref`와 Masked Hint만 반환한다.
+내장 `SecretStore`의 참조 형식은 `secret:v1:<backend>:<opaque-id>`다. Secret을 새로 만들 때 사용할 Backend는 조립 시 한 번 선택하고, 조회·교체·삭제는 참조에 기록된 Backend로만 Routing한다. Keyring이나 File Vault의 작업이 실패해도 다른 Backend로 재시도하지 않는다. 따라서 일부 저장 성공 뒤 다른 Backend에도 같은 Secret이 생성되는 Split-brain을 방지한다.
+
+`auto`는 사용 가능한 OS Keyring을 우선 선택한다. Keyring Backend가 없을 때는 외부 Master Key가 명시된 경우에만 File Vault를 선택하고, 둘 다 사용할 수 없으면 실패 폐쇄한다. Keyring Backend 사용 불가와 존재하지 않는 Secret은 서로 다른 안전한 오류다. 배포 환경 Secret Manager는 같은 Port를 구현하는 후속 Plugin 범위다.
+
+File Vault를 사용할 때는 URL-safe Base64로 인코딩한 32-byte Master Key를 DB 밖의 환경변수 또는 Vault 밖의 권한 `0600` 일반 파일에서 읽는다. Master Key를 자동 생성하거나 SQLite·설정·Vault Envelope에 저장하지 않는다. 각 Secret은 AES-256-GCM과 매 쓰기마다 새로운 12-byte Nonce로 개별 암호화한다. Schema Version, Backend, Secret Reference와 Key Version을 AAD에 묶고 변조나 잘못된 Key는 `secret_integrity_failed`로 거부한다.
+
+Vault 디렉터리는 `0700`, 암호문 Envelope는 `0600`으로 제한한다. 소유자, 일반 파일, 단일 Hard Link를 확인하고 심볼릭 링크와 경로 이탈을 거부한다. 새 암호문은 같은 디렉터리의 임시 파일을 `fsync`한 뒤 원자적으로 게시·교체한다. Dashboard와 API는 후속 단계에서 `secret_ref`와 안전한 Masked Hint만 반환한다.
 
 ### 10.6 Tool Discovery와 Cache
 
@@ -2940,17 +2946,15 @@ flowchart LR
 - `uvicorn`
 - `aiosqlite`
 - `httpx`
-- `cryptography`
 - `croniter`
 - `mcp>=2,<3`
 
 Optional Extra:
 
 - `pangi-agent[slack]`: Slack Bolt
-- `pangi-agent[mcp]`: Tool JSON Schema 검증과 후속 MCP Client 경계
+- `pangi-agent[mcp]`: Tool JSON Schema 검증, Keyring·암호화 File Vault와 후속 MCP Client 경계
 - `pangi-agent[openai]`: OpenAI Provider
 - `pangi-agent[bedrock]`: AWS Bedrock Provider
-- `pangi-agent[keyring]`: OS Keyring
 - `pangi-agent[standard]`: Slack + OpenAI + Keyring
 - `pangi-agent[google-workspace]`: Calendar/Drive/Sheets/Gmail Catalog와 Skill
 - `pangi-agent[engineering]`: GitHub/Jira/Linear/Notion Catalog와 Skill

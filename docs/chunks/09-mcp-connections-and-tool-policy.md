@@ -44,10 +44,11 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 3. **Tool Policy·Schema Validator·Call Budget SQLite 기반(WBS-09.2.2.1)**: `tool_policies`, `tool_call_budgets` Migration과 불변 Policy Version·CAS 활성화, 안전한 JSON Schema Adapter와 원자적 Budget 예약을 구현한다.
 4. **Approval Grant 발급·원자적 소비(WBS-09.2.2.2.1)**: `tool_approvals` Migration과 Hash Reference 발급, 만료·Claim·현재 권한 재검증과 일회성 소비 Adapter를 구현해 WBS-06 Guardrail에 주입한다.
 5. **Tool Invocation Lifecycle(WBS-09.2.2.2.2)**: `tool_invocations` Migration과 실행 전후 상태·Metric 영속 Adapter를 구현하고 모든 Tool 실행이 이 기록 경계를 통과하게 한다.
-6. **SecretStore와 stdio Transport(WBS-09.3)**: Keyring 우선 SecretStore와 암호화 File Vault Fallback, stdio Command·Argument·Environment 정책과 Fake Server Fixture를 구현한다.
-7. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
-8. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
-9. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
+6. **SecretStore 기반(WBS-09.3.1)**: 불투명한 Versioned Secret Reference, Keyring 우선 Backend 선택과 AES-256-GCM File Vault를 구현한다.
+7. **stdio 실행 정책과 MCP Transport(WBS-09.3.2)**: stdio Command·Argument·Environment 정책, Process Lifecycle과 Fake Server Fixture를 구현한다.
+8. **Streamable HTTP와 OAuth Lifecycle(WBS-09.4)**: HTTPS·Redirect·DNS 정책, OAuth Discovery·PKCE·Callback와 Token Refresh·Revoke를 구현한다.
+9. **Discovery·Guarded Tool 실행·Result 정규화(WBS-09.5)**: Tool/Resource/Prompt Discovery, Cache·변경 감지, MCP Executor, Timeout·Byte Limit, External Data Envelope와 Invocation Metric을 연결한다.
+10. **Connection API와 Admin UI(WBS-09.6)**: Catalog, 연결 목록·Card, 연결·재연결·끊기·진단, Tool Policy 관리 API와 화면을 구현한다.
 
 위 하위 번호는 현재 확인된 책임 경계다. 구현 중 독립적인 결과나 별도 보안·검증 Gate가 확인되면 루트 WBS 운영 규칙에 따라 단계를 더 나눈다.
 
@@ -56,6 +57,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - HTTP는 기본 HTTPS, stdio는 절대 경로/등록 Alias와 Argument Array만 허용한다.
 - OAuth는 Authorization Code+PKCE S256, State/Nonce/Redirect/Resource Audience를 검증한다.
 - SQLite에는 `secret_ref`만 저장하고 실제 값은 Keyring/Secret Manager/암호화 Vault에 둔다.
+- Secret 생성 Backend는 작업 전에 한 번 선택하고 조회·교체·삭제는 Versioned `secret_ref`의 Backend로만 Routing한다. 개별 작업 실패를 이유로 다른 Backend에 재시도하지 않는다.
 - WBS-03 Unit of Work 위에서 WBS-09.2.1은 `connections`, `connection_tools`를, WBS-09.2.2.1은 `tool_policies`, `tool_call_budgets`를, WBS-09.2.2.2.1은 `tool_approvals`를, WBS-09.2.2.2.2는 `tool_invocations`의 Migration, 제약과 Repository를 소유한다.
 - Discovery 결과는 Canonical JSON SHA-256 Fingerprint로 식별하고 변경 시 참조 Skill을 `needs_review`로 바꾼다.
 - 새 Tool은 `deny`로 등록하고 Registry·Policy·Schema·Approval·Budget Adapter를 WBS-06의 공통 Tool Guardrail에 주입한다. 공통 Engine을 우회하지 않고 모든 검사를 통과한 `GuardedToolCall`만 MCP Client로 보낸다.
@@ -67,7 +69,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - [x] Connection/Tool/Policy Domain Model과 Lifecycle을 구현한다.
 - [ ] stdio와 Streamable HTTP Adapter 및 Fake Server Fixture를 만든다.
 - [ ] OAuth Discovery, PKCE, Callback와 Token Refresh/Revoke를 구현한다.
-- [ ] Keyring 우선 SecretStore와 암호화 File Vault Fallback을 구현한다.
+- [x] Keyring 우선 SecretStore와 암호화 File Vault Fallback을 구현한다.
 - [ ] Discovery Cache, Fingerprint, Refresh와 `list_changed` 처리를 구현한다.
 - [x] Connection Registry, Tool Snapshot과 전역 Stable Tool Resolver를 SQLite에 영속화한다.
 - [x] 불변 Tool Policy Version, 기본 Deny, 안전한 Argument Schema와 영속 Call Budget Adapter를 구현한다.
@@ -85,6 +87,7 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - [ ] PKCE, State, Resource Audience와 Scope 부족 경로를 테스트한다.
 - [ ] Redirect/DNS/stdio Command/Environment 정책 위반을 차단한다.
 - [ ] Token이 DB/API/Log/Card와 Backup에 평문으로 없는지 검사한다.
+- [x] SecretStore의 평문이 SQLite·설정·Vault Envelope·오류·객체 표현에 없고 File Vault 변조와 안전하지 않은 경로·권한이 차단되는지 검사한다.
 - [ ] 연결/재연결/끊기/진단과 Region/Workspace Qualifier를 E2E로 확인한다.
 
 ## 1차 구현 결과
@@ -140,7 +143,20 @@ stdio/Streamable HTTP MCP를 사용자·인스턴스 Scope로 연결하고, OAut
 - `(run_id, stable_tool_id, calls_used)`를 유일한 Budget Attempt로 제한한다. 시작 기록 실패는 Executor 호출을 막고 종료 기록 실패는 외부 Tool 자동 재실행으로 이어지지 않으며 Approval과 Budget을 환불하지 않는다.
 - 같은 Terminal 기록의 정확한 Replay는 Event를 중복 생성하지 않고 허용한다. 다른 Terminal 상태·시간·오류로 덮어쓰는 충돌은 거부한다.
 - 상태 전이, 중복 Budget Attempt, Event 원자성, 실패·취소, Context 불일치, Secret 비노출과 v11→v12 Backup Migration을 Unit·Integration Test로 검증했다.
-- 실제 MCP Transport·Discovery·Executor, Timeout·Result Byte 실행 강제와 `ToolResult` Summary·Fingerprint는 WBS-09.3~09.5에 남겼다. 비정상 종료 뒤 `running` Invocation 복구, 외부 Side Effect Exactly-once와 Retention도 이번 범위에 포함하지 않는다.
+- 실제 MCP Transport·Discovery·Executor, Timeout·Result Byte 실행 강제와 `ToolResult` Summary·Fingerprint는 WBS-09.3.2~09.5에 남겼다. 비정상 종료 뒤 `running` Invocation 복구, 외부 Side Effect Exactly-once와 Retention도 이번 범위에 포함하지 않는다.
+
+## 6차 구현 결과
+
+- Framework-free `SecretReference`, `SecretMaterial`과 비동기 `SecretStore` Port를 추가했다. Secret Reference는 `secret:v1:<backend>:<opaque-id>` 형식이고 Secret 값과 저장소 내부 경로를 포함하지 않는다.
+- Secret 생성·조회·교체·삭제 계약과 `secret_not_found`, `secret_store_unavailable`, `secret_integrity_failed` 오류를 고정했다. Secret 원문과 Backend 예외 원문은 객체 표현과 공개 오류에 포함하지 않는다.
+- OS Keyring Adapter는 고정된 Pangi Service Namespace를 사용한다. Backend가 없는 상태와 Secret이 없는 상태를 구분하고 동기 Keyring I/O는 Event Loop 밖에서 실행한다.
+- File Vault는 Secret마다 AES-256-GCM으로 암호화한다. 매 쓰기에 새로운 12-byte Nonce를 사용하고 Schema·Backend·Secret Reference·Key Version을 AAD에 묶는다.
+- Master Key는 URL-safe Base64 32-byte 값만 허용하고 환경변수 또는 Vault 밖의 소유자 전용 `0600` 일반 파일에서 읽는다. DB·설정·Vault Envelope에 Master Key를 저장하거나 누락 시 자동 생성하지 않는다.
+- Vault 디렉터리 `0700`, Envelope `0600`, 소유자·일반 파일·단일 Link를 검증하고 심볼릭 링크와 경로 이탈을 거부한다. 암호문은 임시 파일을 `fsync`한 뒤 원자적으로 게시·교체한다.
+- `auto`, `keyring`, `file-vault` 설정과 결정적 Router를 추가했다. `auto`는 사용 가능한 Keyring을 먼저 선택하고 명시된 Master Key가 있을 때만 File Vault를 후보로 사용한다. 작업이 시작된 뒤에는 다른 Backend로 Fallback하지 않는다.
+- `cryptography`와 `keyring`은 `mcp` Extra에서만 설치하고 Adapter가 선택될 때 지연 로딩한다. 기본 Package Import는 선택 의존성을 요구하지 않는다.
+- Keyring·Router Contract, 실제 AES-GCM Round Trip·Nonce 재생성·변조·잘못된 Key, 파일 권한·심볼릭 링크·원자적 실패·동시 교체와 Secret 비노출을 Unit·Integration Test로 검증했다.
+- stdio Command·Argument·Environment 정책, MCP SDK Client와 Fake Server는 WBS-09.3.2로 남겼다. Secret·Master Key Rotation, 배포용 Secret Manager Plugin과 Connection API·UI도 후속 범위다.
 
 ## 완료 조건
 

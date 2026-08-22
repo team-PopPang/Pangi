@@ -2,7 +2,7 @@
 
 Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에요.
 
-현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06·09를 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요. MCP 연결 구현은 Connection·Tool Registry, 불변 Tool Policy, 안전한 JSON Schema 검증, 영속 Call Budget, 일회성 Approval Grant와 Tool Invocation Lifecycle까지 마련했어요.
+현재 개발 단계는 Pre-alpha예요. WBS-01부터 WBS-05까지와 WBS-07·08을 완료했고 WBS-06·09를 진행하고 있어요. Run Core, 영속 Queue·복구와 조회·취소·Event 전달 API를 구현했어요. 보호된 Input Guardrail부터 Append-only Audit까지 공통 보안 기반도 마련했어요. OpenAI·Bedrock 선택 설치 Adapter, Model Retry 계약, 안전한 Policy·Invocation 영속화, 관리자용 Policy 조회·활성화 Gate API와 Dashboard를 추가했어요. 인증된 Run 생성 요청은 이제 Guardrail, Data Class 기반 Root Decision, 영속 Queue와 안전한 Output 완료까지 하나의 실제 Runtime 경로로 처리해요. MCP 연결 구현은 Connection·Tool Registry, 불변 Tool Policy, 안전한 JSON Schema 검증, 영속 Call Budget, 일회성 Approval Grant, Tool Invocation Lifecycle과 Keyring·암호화 File Vault SecretStore까지 마련했어요.
 
 ## 현재 구현 상태
 
@@ -16,7 +16,7 @@ Pangi는 조직이 직접 설치하고 운영하는 경량 Agent Runtime이에�
 | 06. Guardrail·보안·Audit | 진행 중 | Input Guardrail 선행 Run 제출, Versioned 중앙 Redaction, 비신뢰 External Data Envelope, Tool Permission·Approval·Budget, 최종 Output·Log·Run Event Redaction, Append-only Audit, 보안 정책 영향 Fingerprint |
 | 07. Model Routing과 Egress Policy | 완료 | Model 계약, Versioned Profile·Egress Policy, Data Class·Redaction 경계, OpenAI·Bedrock 선택 설치 Adapter, 구조화 출력 검증·Transport Retry, Policy·Invocation 영속화·계측, 관리자 조회·영향 분석·실패 폐쇄 Eval 활성화 Gate API와 읽기 전용 Dashboard |
 | 08. Root Orchestrator와 실행 Engine | 완료 | 보호된 Run 생성 API, Data Class 기반 단일 Root 호출, Plan 검증·영속화, Queue Runtime·ASGI 생명주기, Dependency 실행·복구, 결정적 Reducer와 `SafeOutput` 완료 |
-| 09. MCP 연결과 Tool Policy | 진행 중 | Connection·Tool Registry, User/Instance Scope, 불변 Tool Policy·CAS 활성화, 안전한 JSON Schema 검증, 원자적 Call Budget, Hash 기반 일회성 Approval Grant, Tool Invocation Lifecycle |
+| 09. MCP 연결과 Tool Policy | 진행 중 | Connection·Tool Registry, User/Instance Scope, 불변 Tool Policy·CAS 활성화, 안전한 JSON Schema 검증, 원자적 Call Budget, Hash 기반 일회성 Approval Grant, Tool Invocation Lifecycle, Keyring·암호화 File Vault SecretStore |
 | 10~20 | 예정 | Subagent, Skill, Scheduler, Slack, 관측성, 운영 배포 |
 
 전체 작업 순서와 완료 조건은 [Pangi 1.0 구현 WBS](docs/chunks/README.md)에서 관리해요. 구현 결정과 전체 구조는 [Pangi 1.0 재설계 구현 설계서](docs/pangi-rebuild-implementation-design.md)에서 확인할 수 있어요.
@@ -119,6 +119,15 @@ Run 조회·생성·취소·Event·Metric Service와 실제 실행 Handler는 AS
 - 판정과 오류에는 정책 Fingerprint와 안전한 수치만 남겨요. Argument, Approval Reference, Connection ID·Owner와 실제 Tool Name은 표현하지 않아요.
 
 Connection·Tool Registry는 WBS-09.2.1에서, Tool Policy·JSON Schema·Call Budget은 WBS-09.2.2.1에서, Approval Grant 발급·원자적 소비는 WBS-09.2.2.2.1에서, Tool Invocation Lifecycle은 WBS-09.2.2.2.2에서 연결했어요. Tool이 `active`이고 Connection이 `connected`일 때만 Resolver가 실행 가능 상태로 반환해요. 실제 MCP Transport·Discovery, `ToolResult` 정규화와 Result Summary·Fingerprint는 후속 단계에 남아 있어요. 현재 구현은 아직 실제 MCP 호출 기능이 아니라 후속 실행기가 반드시 거쳐야 하는 공통 보안·기록 경계예요.
+
+### SecretStore 기반
+
+- `SecretStore`는 실제 Secret 대신 Versioned `secret_ref`만 Connection Registry에 전달해요.
+- Secret 생성은 조립 시 선택한 Keyring 또는 File Vault 한 곳에서만 수행해요. 조회·교체·삭제는 `secret_ref`의 Backend로 Routing하며 작업 중 다른 저장소로 자동 전환하지 않아요.
+- File Vault는 AES-256-GCM, 쓰기마다 새로운 Nonce와 인증 Metadata를 사용해요. Vault 경로·파일 권한·소유자·심볼릭 링크를 확인하고 암호문을 원자적으로 교체해요.
+- Master Key는 환경변수 또는 Vault 밖의 소유자 전용 `0600` 파일에서만 읽어요. SQLite, `pangi.toml`과 Vault Envelope에는 저장하지 않아요.
+
+SecretStore 기반은 WBS-09.3.1에서 구현했어요. stdio 실행 정책과 MCP Client는 WBS-09.3.2, Streamable HTTP·OAuth는 WBS-09.4에 남아 있어요.
 
 ### 최종 Output Guardrail 기반
 
@@ -253,10 +262,36 @@ uv sync --extra dev --extra openai --python 3.11
 uv sync --extra dev --extra bedrock --python 3.11
 ```
 
-Tool Argument의 JSON Schema 검증 기반을 개발하거나 검증하려면 MCP Extra를 함께 설치하세요. 현재 단계에서는 JSON Schema 의존성만 포함하며 실제 MCP Client SDK 연결은 후속 WBS에서 추가해요.
+Tool Argument의 JSON Schema 검증과 SecretStore 기반을 개발하거나 검증하려면 MCP Extra를 함께 설치하세요. 현재 Extra에는 JSON Schema, Keyring과 AES-GCM File Vault 의존성이 포함돼요. 실제 MCP Client SDK 연결은 후속 WBS에서 추가해요.
 
 ```bash
 uv sync --extra dev --extra mcp --python 3.11
+```
+
+`[secrets]`에는 Secret 원문이 아니라 Backend 선택과 외부 Master Key 위치만 적어요. `auto`는 사용 가능한 OS Keyring을 우선 선택하고, Keyring을 사용할 수 없을 때 `PANGI_SECRET_MASTER_KEY`가 명시돼 있어야 File Vault를 선택해요.
+
+```toml
+[secrets]
+backend = "auto"
+master_key_source = "environment"
+master_key_environment_variable = "PANGI_SECRET_MASTER_KEY"
+```
+
+File Vault를 명시적으로 사용할 때는 URL-safe Base64로 인코딩한 32-byte Master Key를 설정하세요. 이 값은 잃어버리면 기존 Secret을 복호화할 수 없으므로 별도 Secret Manager에 보관해야 해요.
+
+```bash
+# 새로운 File Vault Master Key를 현재 Terminal의 환경변수로 설정해요.
+export PANGI_SECRET_MASTER_KEY="$(python -c 'import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')"
+```
+
+파일에서 읽으려면 Vault 디렉터리 밖의 절대 경로와 `0600` 권한을 사용하세요. 설정 파일에는 Master Key 자체가 아니라 경로만 적어요.
+
+```toml
+[secrets]
+backend = "file-vault"
+master_key_source = "file"
+master_key_environment_variable = "PANGI_SECRET_MASTER_KEY"
+master_key_file = "/absolute/path/to/pangi-master.key"
 ```
 
 OpenAI는 SDK 표준 환경변수인 `OPENAI_API_KEY`를 사용해요. Bedrock은 AWS Credential Chain과 활성 Model Profile의 Region을 사용해요. Credential은 `.pangi/pangi.toml`, 로그와 Run Event에 저장하지 마세요.
@@ -472,6 +507,18 @@ uv run --extra mcp pytest \
   tests/unit/test_tool_guardrails.py \
   tests/integration/test_tool_invocation_persistence.py \
   tests/integration/test_sqlite_migrations.py \
+  tests/architecture/test_dependency_rules.py
+```
+
+### SecretStore와 암호화 File Vault만 검증
+
+WBS-09.3.1에서 구현한 Secret 계약, Keyring Backend 구분, 결정적 Routing, AES-GCM 변조 탐지와 Vault 파일 보안 경계를 확인하세요.
+
+```bash
+uv run --extra mcp pytest \
+  tests/unit/test_secret_store.py \
+  tests/integration/test_file_vault_secret_store.py \
+  tests/unit/test_config.py \
   tests/architecture/test_dependency_rules.py
 ```
 

@@ -22,6 +22,10 @@ def test_default_config_round_trips_through_toml(tmp_path: Path) -> None:
     assert loaded.storage.url == "sqlite:///{data_dir}/pangi.sqlite3"
     assert loaded.storage.journal_mode == "delete"
     assert loaded.storage.busy_timeout_ms == 5000
+    assert loaded.secrets.backend == "auto"
+    assert loaded.secrets.master_key_source == "environment"
+    assert loaded.secrets.master_key_environment_variable == "PANGI_SECRET_MASTER_KEY"
+    assert loaded.secrets.master_key_file is None
     assert loaded.auth.bootstrap_grant_ttl_minutes == 30
     assert loaded.auth.session_ttl_minutes == 720
     assert loaded.auth.session_rotation_minutes == 30
@@ -32,6 +36,65 @@ def test_default_config_round_trips_through_toml(tmp_path: Path) -> None:
     assert loaded.model.max_attempts == 3
     assert loaded.model.retry_backoff_seconds == (0.5, 1.0)
     assert "api_key" not in config_path.read_text("utf-8")
+    assert "PANGI_SECRET_MASTER_KEY" in config_path.read_text("utf-8")
+
+
+def test_secrets_section_is_optional_for_existing_schema_v1_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "legacy.toml"
+    secrets_block = "\n".join(
+        (
+            "",
+            "[secrets]",
+            'backend = "auto"',
+            'master_key_source = "environment"',
+            'master_key_environment_variable = "PANGI_SECRET_MASTER_KEY"',
+            "",
+        )
+    )
+    config_path.write_text(
+        PangiConfig().to_toml().replace(secrets_block, "\n"),
+        "utf-8",
+    )
+
+    loaded = PangiConfig.load(config_path)
+
+    assert loaded.secrets.backend == "auto"
+    assert loaded.secrets.master_key_source == "environment"
+
+
+def test_secret_store_config_renders_only_external_key_location(tmp_path: Path) -> None:
+    master_key_file = tmp_path / "master.key"
+    config = PangiConfig.model_validate(
+        {
+            "secrets": {
+                "backend": "file-vault",
+                "master_key_source": "file",
+                "master_key_file": str(master_key_file),
+            }
+        }
+    )
+
+    rendered = config.to_toml()
+
+    assert f'master_key_file = "{master_key_file}"' in rendered
+    assert "master_key =" not in rendered
+
+
+@pytest.mark.parametrize(
+    "secrets",
+    [
+        {"backend": "unknown"},
+        {"master_key_environment_variable": "unsafe-name"},
+        {"master_key_source": "file"},
+        {"master_key_source": "file", "master_key_file": "relative.key"},
+        {"master_key_source": "environment", "master_key_file": "/tmp/key"},
+    ],
+)
+def test_invalid_secret_store_configuration_is_rejected(
+    secrets: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        PangiConfig.model_validate({"secrets": secrets})
 
 
 def test_auth_section_is_optional_for_existing_schema_v1_config(tmp_path: Path) -> None:
